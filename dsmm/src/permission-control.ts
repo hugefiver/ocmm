@@ -40,6 +40,12 @@ export interface PermissionRegistration {
 export function permissionOriginal(value: object): object { return Reflect.get(value, symbols.original) ?? value; }
 type Request = Parameters<Context["approval"]["request"]>[0];
 type Outcome = Awaited<ReturnType<Context["approval"]["request"]>>;
+/** Explicitly audited DSMM approval adapters retain identity through the patched dispatcher. */
+export function permissionApprovalAdapter(ctx: Context, listener: (request: Request, next: () => Promise<Outcome>) => Promise<Outcome>): typeof listener {
+  const approval = ctx.get("approval"), factory: unknown = approval && Reflect.get(approval, "createForwarder");
+  if (typeof factory !== "function") return listener;
+  return Reflect.apply(factory, approval, [listener]) as typeof listener;
+}
 interface Binding {
   readonly exec: Readonly<ToolExecution>; readonly registration: PermissionRegistration;
   readonly args: unknown; readonly agent: ToolExecution["agent"]; readonly callId: ToolExecution["callId"]; readonly name: string;

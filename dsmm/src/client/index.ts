@@ -29,6 +29,9 @@ import { PermissionController } from "./permission-controller.js";
 import { PERMISSIONS_NS, permissionEn, permissionZh } from "./permission-locales.js";
 import type { SessionBinding } from "@deepseek-ai/dsh-api-session-controller/client";
 import { registerRoleToolViews } from "./RoleToolView.js";
+import { HISTORY_REMOTE } from "../history-remote.js";
+import { registerHistoryContinuation } from "./history-entry.js";
+import { registerTemporaryPermissionEntry } from "./temporary-permission-entry.js";
 
 export { ProfilesController, NEW_PROFILE_CONTENT } from "./controller.js";
 export type { ProfilesActions, ProfilesViewSnapshot, ProfilesIssue, SessionApplyOptions, ProfileModelSelectorRemote } from "./controller.js";
@@ -48,12 +51,14 @@ export const inject = ["slots", "locale", "remote"] as const;
 
 export async function apply(ctx: Context): Promise<void> {
   registerRoleToolViews(ctx);
-  await ctx.remote.$mount(TYPERT_REMOTE);
+  await ctx.remote.$mount({ ...TYPERT_REMOTE, descriptors: [...TYPERT_REMOTE.descriptors, ...HISTORY_REMOTE.descriptors] });
   await ctx.remote.$mount(ROLE_CONTROL_REMOTE);
   await ctx.remote.$mount(PERMISSION_REMOTE);
+  registerHistoryContinuation(ctx);
   const permissions = new PermissionController();
   ctx.effect(() => () => permissions.dispose(), "dsmm: permission controls");
   ctx.effect(() => ctx.locale.register(PERMISSIONS_NS, { en: permissionEn, zh: permissionZh }), "dsmm: permission locale");
+  const temporaryPermissions = registerTemporaryPermissionEntry(ctx, permissions);
   void ctx.inject(["connection"], connectionCtx => {
     const handle = connectionCtx.connection as unknown as ConnectionHandle, invoke = permissionClient(handle);
     const update = () => { const generation = handle.generation.getSnapshot(); permissions.bindConnection(generation === undefined ? null : invoke, generation); };
@@ -93,7 +98,7 @@ export async function apply(ctx: Context): Promise<void> {
       const style = document.createElement("style"); style.dataset.dsmmSettings = ""; style.textContent = PROFILE_STYLES;
       document.head.append(style); return () => style.remove();
     }, "dsmm: core styles");
-    const inject = () => ({ core, remote: coreCtx.remote.dsmmConfig, workspace });
+    const inject = () => ({ core, remote: coreCtx.remote.dsmmConfig, workspace, temporaryPermissions, permissionsT: coreCtx.locale.bind(PERMISSIONS_NS) });
     coreCtx.slots.inject("plugins.bundle.config", () => coreCtx.slots.register({ name: "plugins.bundle.config", key: "@dsmm/dsmm", locale: DEPLOYMENT_NS, inject }, DeploymentPage));
     // The canonical bundle owner passes only view. Namespace comes from the authenticated snapshot.
     void coreCtx.inject(["configForms"], formCtx => {
@@ -104,6 +109,11 @@ export async function apply(ctx: Context): Promise<void> {
   });
   await ctx.inject(["remote.dsmmProfiles"], (profileCtx) => {
     const controller = new ProfilesController(profileCtx.remote.dsmmProfiles);
+    void profileCtx.inject(["connection"], connectionCtx => {
+      controller.bindConnection((connectionCtx.connection as unknown as ConnectionHandle).generation);
+      void controller.refresh();
+      connectionCtx.effect(() => () => controller.bindConnection(null), "dsmm: profile connection withdrawal");
+    });
     profiles = controller;
     profileCtx.effect(() => controller.store.subscribe(() => { deployment?.setSession(controller.store.getSnapshot().session); }));
     profileCtx.effect(() => () => { profiles = null; deployment?.setSession(null); });
@@ -117,6 +127,10 @@ export async function apply(ctx: Context): Promise<void> {
       return () => style.remove();
     }, "dsmm: profile styles");
     const t = profileCtx.locale.bind(NS);
+    void profileCtx.inject(["conversation"], conversationCtx => {
+      controller.attachComposerBlocks(conversationCtx.conversation.blocks, () => t("sessionSelectionBlock"));
+      conversationCtx.effect(() => () => controller.attachComposerBlocks(null), "dsmm: profile composer block lifetime");
+    });
     profileCtx.slots.inject("settings.section", () => profileCtx.slots.register({
       name: "settings.section", id: "dsmm-profiles", order: 30,
       label: () => t("title"), locale: NS,
@@ -161,6 +175,5 @@ export async function apply(ctx: Context): Promise<void> {
         modelCtx.effect(() => () => controller.attachModelInteractionSource(null, null), "dsmm: native model interaction withdrawal");
       });
     });
-    void controller.refresh();
   });
 }

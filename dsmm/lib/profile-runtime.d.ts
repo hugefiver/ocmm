@@ -6,6 +6,7 @@ import type { DsmmProfileAdmission, DsmmSettings, DsmmSettingsGetter, DsmmDeploy
 import { DeepworkModeController } from "./state.js";
 import type { DsmmMountedPermissionGetter } from "./modules.js";
 export interface DsmmProfileRuntimeStore {
+    readonly profileDir?: string;
     readonly readOnly?: boolean;
     readonly origin?: "central" | "legacy" | "explicit";
     readonly writeRestriction?: string;
@@ -36,6 +37,12 @@ export type DsmmSessionProfileSnapshot = SessionProfileSnapshot;
 interface AdmittedProfile extends ProfileSelectionState, DsmmProfileAdmission {
     baseline: DsmmSettings;
 }
+export interface PreparedHistoryProfile {
+    readonly admission: DsmmProfileAdmission;
+    readonly label?: string;
+    assertCurrent(): undefined;
+    revalidate(signal: AbortSignal): Promise<void>;
+}
 /** Configuration transactions and immutable snapshots; native admission owns Agent binding. */
 export declare class DsmmProfileRuntime {
     private readonly ctx;
@@ -47,6 +54,7 @@ export declare class DsmmProfileRuntime {
     private document;
     private readonly bound;
     private readonly observations;
+    private readonly historyAdmissions;
     private disposed;
     private queue;
     private readonly mode;
@@ -58,10 +66,13 @@ export declare class DsmmProfileRuntime {
     /** Called only by the awaited native creation owner after all Agent-scoped installation. */
     publish(agent: DshAgent, admission: DsmmProfileAdmission): void;
     release(agent: DshAgent): void;
+    /** Prepare an explicit current choice; historical selection files and epochs are not read. */
+    prepareHistory(profileId: string | null, signal: AbortSignal): Promise<PreparedHistoryProfile>;
     prepareRoot(agent: DshAgent, signal: AbortSignal): Promise<AdmittedProfile>;
     getSession(agent: DshAgent): Promise<DsmmSessionProfileSnapshot>;
+    private sessionSnapshot;
     selectMode(request: SessionModeSelectRequest, agent: DshAgent, signal?: AbortSignal, authority?: () => void): Promise<DsmmSessionProfileSnapshot>;
-    selectSession(_request: SessionProfileSelectRequest, agent: DshAgent, _signal?: AbortSignal, _authority?: () => void): Promise<SessionProfileSnapshot>;
+    selectSession(request: SessionProfileSelectRequest, agent: DshAgent, signal?: AbortSignal, authority?: () => void): Promise<SessionProfileSnapshot>;
     private assertRoot;
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;

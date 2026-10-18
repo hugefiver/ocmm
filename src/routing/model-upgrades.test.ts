@@ -116,11 +116,17 @@ test("Astra catalog upgrades use only exact observed provider/model keys", () =>
     const target = { provider: { "github-copilot": { models: { [model]: {} } } } }
     assert.equal(selectCatalogModel(target, "hard-reasoning", requirement), `github-copilot/${model}`)
   }
+  // An Astra-only chain never promotes a generic or Sol catalog entry.
   for (const models of [undefined, {}, { "gpt-7": {}, "gpt-8-sol": {}, "gpt-9-astral": {}, "gpt-5.9-astra": {} }]) {
     const target = { provider: { openai: { models }, other: { models: { "gpt-9-astra": {} } } } }
-    // A declared Sol fallback may be selected, but no generic GPT becomes Astra.
-    assert.equal(selectCatalogModel(target, "hard-reasoning", requirement), models && "gpt-8-sol" in models ? "openai/gpt-8-sol" : undefined)
+    assert.equal(selectCatalogModel(target, "hard-reasoning", requirement), undefined)
   }
+  // A chain that still declares Sol keeps selecting its declared Sol fallback.
+  const solModels = { "gpt-7": {}, "gpt-8-sol": {}, "gpt-9-astral": {}, "gpt-5.9-astra": {} }
+  assert.equal(
+    selectCatalogModel({ provider: { openai: { models: solModels } } }, "frontend", BUILTIN_CATEGORY_INDEX.get("frontend")!.requirement),
+    "openai/gpt-8-sol",
+  )
 })
 
 test("runtime catalog upgrades leave explicit user models authoritative", async () => {
@@ -140,7 +146,7 @@ test("runtime catalog upgrades leave explicit user models authoritative", async 
   for (const [name, model] of [
     ["orchestrator", "openai/gpt-5.5"], ["planner", "openai/gpt-5.6-sol"],
     ["oracle", "openai/gpt-5.4"], ["quick", "openai/gpt-5.4-mini"],
-    ["builder", "openai/gpt-6.2-sol"], ["deep", "openai/gpt-6.2-astra"],
+    ["builder", "openai/gpt-6.2-astra"], ["deep", "openai/gpt-6.2-astra"],
   ] as const) {
     assert.equal((target.agent[name] as { model?: string }).model, model, name)
   }
@@ -198,8 +204,9 @@ test("review catalog lanes ignore logical tier suffixes", () => {
   const second = BUILTIN_AGENT_INDEX.get("oracle-2nd")!.requirement
   assert.equal(selectCatalogModel(target, "oracle-low", oracle), "openai/gpt-6.2-sol")
   assert.equal(selectCatalogModel(target, "oracle-high", oracle), "openai/gpt-6.2-sol")
-  assert.equal(selectCatalogModel(target, "oracle-2nd-max", second), "openai/gpt-6.2-sol")
-  assert.equal(selectCatalogModel(target, "reviewer-high", BUILTIN_AGENT_INDEX.get("reviewer")!.requirement), "openai/gpt-6.2-sol")
+  // Sol-lane review slots keep their declared Astra lane and never fall back to a Sol catalog entry.
+  assert.equal(selectCatalogModel(target, "oracle-2nd-max", second), undefined)
+  assert.equal(selectCatalogModel(target, "reviewer-high", BUILTIN_AGENT_INDEX.get("reviewer")!.requirement), undefined)
 })
 
 test("planning catalog lanes ignore logical tier suffixes", () => {
@@ -362,7 +369,7 @@ test("catalog does not substitute Astra for Sol or Luna defaults", () => {
   )
   assert.equal(
     selectCatalogModel(target, "reviewer", BUILTIN_AGENT_INDEX.get("reviewer")!.requirement),
-    "openai/gpt-6.1-sol",
+    "openai/gpt-6-astra",
   )
   assert.equal(
     selectCatalogModel(target, "deep", { fallbackChain: [{ providers: ["openai"], model: "gpt-5.6-terra" }] }),
@@ -375,11 +382,15 @@ test("catalog preserves each declared lane even when Astra and Sol are both avai
 
   assert.equal(
     selectCatalogModel(target, "reviewer", BUILTIN_AGENT_INDEX.get("reviewer")!.requirement),
-    "openai/gpt-6.1-sol",
+    "openai/gpt-6-astra",
   )
   assert.equal(
     selectCatalogModel(target, "deep", BUILTIN_CATEGORY_INDEX.get("deep")!.requirement),
     "openai/gpt-6-astra",
+  )
+  assert.equal(
+    selectCatalogModel(target, "oracle", BUILTIN_AGENT_INDEX.get("oracle")!.requirement),
+    "openai/gpt-6.1-sol",
   )
 })
 

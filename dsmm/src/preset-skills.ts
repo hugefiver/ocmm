@@ -8,7 +8,7 @@ import type { DeepworkModeController } from "./state.js";
 const bindings = new WeakMap<DshAgent, () => void>();
 
 /** Admission owns installation; mode changes only invalidate this Agent's lazy provider. */
-export function registerAgentSkills(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, agent: DshAgent, lifetime: AbortSignal): void {
+export function registerAgentSkills(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, agent: DshAgent, lifetime: AbortSignal, catalogReady?: () => boolean): void {
   const refresh = bindings.get(agent);
   if (refresh) { refresh(); return; }
   let mounted: { parent: object | undefined; registry: DshSkillRegistry; provider: ReturnType<typeof registerBundledSkills> } | undefined;
@@ -21,7 +21,7 @@ export function registerAgentSkills(ctx: DshContext, controller: DeepworkModeCon
     if (raw === undefined) throw new Error("Active skills require the native skill registry");
     if (mounted?.parent === parent && mounted?.registry === raw) { mounted.provider.invalidate(); return; }
     remove();
-    mounted = { parent, registry: raw, provider: registerBundledSkills(agentCtx, getTraceable(agentCtx, raw), { agent, controller, getSettings }) };
+    mounted = { parent, registry: raw, provider: registerBundledSkills(agentCtx, getTraceable(agentCtx, raw), { agent, controller, getSettings, catalogReady }) };
   };
   const stopMode = controller.watch(changed => { if (changed === agent) reconcile(); });
   bindings.set(agent, reconcile);

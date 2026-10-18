@@ -19,43 +19,34 @@ const LEGACY_KIMI_MODELS = new Map<string, string[]>([
 ])
 
 const SOL_RECIPIENTS = [
-  "agent:orchestrator",
-  "agent:builder",
-  "agent:reviewer",
-  "agent:oracle-2nd",
-  "agent:planner",
-  "agent:clarifier",
-  "agent:plan-critic",
   "agent:media-reader",
-  "category:frontend",
-  "category:creative",
-  "category:hard-reasoning",
-  "category:research",
+  "agent:oracle",
   "category:coding",
-  "category:deep",
-  "category:cross-cutting",
-]
-
-const TERRA_RECIPIENTS = ["agent:oracle", "category:normal-task", "category:complex"]
-const CURRENT_SOL_RECIPIENTS = [
-  ...SOL_RECIPIENTS.filter((label) => !["agent:planner", "category:deep"].includes(label)),
-  ...TERRA_RECIPIENTS,
-]
-
-const GPT55_RECIPIENTS = [
-  ...SOL_RECIPIENTS.filter((label) => label !== "category:cross-cutting"),
-  ...TERRA_RECIPIENTS,
+  "category:complex",
+  "category:creative",
+  "category:frontend",
+  "category:normal-task",
+  "category:research",
 ]
 
 const ASTRA_RECIPIENTS = [
-  "category:hard-reasoning",
-  "category:deep",
-  "category:cross-cutting",
+  "agent:builder",
+  "agent:clarifier",
+  "agent:oracle-2nd",
+  "agent:orchestrator",
   "agent:plan-critic",
-  "category:frontend",
-  "category:creative",
   "agent:planner",
+  "agent:reviewer",
+  "category:creative",
+  "category:cross-cutting",
+  "category:deep",
+  "category:frontend",
+  "category:hard-reasoning",
 ]
+
+const GPT55_RECIPIENTS = [
+  ...new Set([...SOL_RECIPIENTS, ...ASTRA_RECIPIENTS]),
+].filter((label) => label !== "category:cross-cutting").sort()
 
 const OPUS_RECIPIENTS = [
   "agent:orchestrator",
@@ -152,14 +143,14 @@ test("built-in chains retain legacy fallbacks beside their current local replace
   assertAdjacentReplacement(
     chains.filter(({ label }) => label !== "agent:oracle"),
     "gpt-5.5",
-    (label) => ["agent:planner", "category:deep"].includes(label) ? "gpt-6-astra" : "gpt-6.1-sol",
+    (label) => ASTRA_RECIPIENTS.includes(label) && !SOL_RECIPIENTS.includes(label) ? "gpt-6-astra" : "gpt-6.1-sol",
   )
 })
 
 test("GPT-6/6.1 lane assignment, compatibility fallbacks, and Oracle order remain static contracts", () => {
   const chains = builtinChains()
 
-  assert.deepEqual(labelsWithModel(chains, "gpt-6.1-sol"), [...CURRENT_SOL_RECIPIENTS].sort())
+  assert.deepEqual(labelsWithModel(chains, "gpt-6.1-sol"), [...SOL_RECIPIENTS].sort())
   assert.deepEqual(labelsWithModel(chains, "gpt-5.6-sol"), [])
   assert.deepEqual(labelsWithModel(chains, "gpt-5.6-terra"), [])
   assert.deepEqual(labelsWithModel(chains, "gpt-6-luna"), ["agent:code-search", "agent:doc-search", "category:quick"])
@@ -168,7 +159,10 @@ test("GPT-6/6.1 lane assignment, compatibility fallbacks, and Oracle order remai
     const astraIndex = fallbackChain.findIndex((entry) => entry.model === "gpt-6-astra")
     if (astraIndex === -1) continue
     const successor = fallbackChain[astraIndex + 1]
-    assert.equal(successor?.model, ["agent:planner", "category:deep"].includes(label) ? "gpt-5.5" : "gpt-6.1-sol", label)
+    const expectedSuccessor = label === "category:cross-cutting"
+      ? "claude-opus-5"
+      : ["category:frontend", "category:creative"].includes(label) ? "gpt-6.1-sol" : "gpt-5.5"
+    assert.equal(successor?.model, expectedSuccessor, label)
     const solEntry = fallbackChain.find((entry) => entry.model === "gpt-6.1-sol")
     if (solEntry) {
       assert.deepEqual(
@@ -222,6 +216,13 @@ test("GPT-6/6.1 lane assignment, compatibility fallbacks, and Oracle order remai
     const firstGpt = fallbackChain.find((entry) => entry.model.startsWith("gpt-"))
     if (!firstGpt) continue
     assert.match(firstGpt.model, /^gpt-6(?:\.1)?-(?:sol|luna|astra)$/, label)
+  }
+  for (const label of ASTRA_RECIPIENTS.filter((name) => !SOL_RECIPIENTS.includes(name))) {
+    const chain = chains.find((entry) => entry.label === label)!.fallbackChain
+    assert.ok(
+      !chain.some((entry) => entry.model === "gpt-6.1-sol"),
+      `${label} is above the Terra tier and must not retain gpt-6.1-sol`,
+    )
   }
 })
 

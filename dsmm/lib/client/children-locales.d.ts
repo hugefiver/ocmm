@@ -261,9 +261,9 @@ export declare const childrenLocaleZh: {
     no: string;
     activity: string;
     runtime: string;
-    images: string;
-    title: string;
     liveRoute: string;
+    title: string;
+    images: string;
     descendants: string;
     interrupt: string;
     readonly: string;
@@ -271,8 +271,10 @@ export declare const childrenLocaleZh: {
     delivery: string;
     queue: string;
     steer: string;
+    authority: string;
     foreign: string;
     reading: string;
+    restart: string;
     refresh: string;
     noSession: string;
     runs: string;
@@ -319,8 +321,6 @@ export declare const childrenLocaleZh: {
     interruptAvailability: string;
     imageAvailability: string;
     fence: string;
-    restart: string;
-    authority: string;
     evidence: string;
     evidenceMissing: string;
     originalEpoch: string;

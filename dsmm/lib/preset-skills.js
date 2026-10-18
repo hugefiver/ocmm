@@ -3,7 +3,7 @@ import { registerBundledSkills } from "./skills.js";
 import { nativeAgentContext, scopeParentOf } from "./native-scope.js";
 const bindings = new WeakMap();
 /** Admission owns installation; mode changes only invalidate this Agent's lazy provider. */
-export function registerAgentSkills(ctx, controller, getSettings, agent, lifetime) {
+export function registerAgentSkills(ctx, controller, getSettings, agent, lifetime, catalogReady) {
     const refresh = bindings.get(agent);
     if (refresh) {
         refresh();
@@ -26,7 +26,7 @@ export function registerAgentSkills(ctx, controller, getSettings, agent, lifetim
             return;
         }
         remove();
-        mounted = { parent, registry: raw, provider: registerBundledSkills(agentCtx, getTraceable(agentCtx, raw), { agent, controller, getSettings }) };
+        mounted = { parent, registry: raw, provider: registerBundledSkills(agentCtx, getTraceable(agentCtx, raw), { agent, controller, getSettings, catalogReady }) };
     };
     const stopMode = controller.watch(changed => { if (changed === agent)
         reconcile(); });

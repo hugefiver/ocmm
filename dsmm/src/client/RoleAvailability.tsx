@@ -12,8 +12,10 @@ export function RoleAvailability({ value, t }: PropsLocale<"settings.dsmm-profil
   if (state === undefined) return <p className="dsmm-hint">{t("availabilityUnknown")}</p>;
   return <div className="dsmm-availability" data-dsmm-role-availability={state.id}>
     <p>{t(state.required ? "roleRequired" : "roleOptional", { reason: state.requiredReason ?? "—" })}</p>
-    <p>{t("roleCeiling", { startup: t(state.startupAvailable ? "enabled" : "disabled"), deployment: t(state.deploymentEnabled ? "enabled" : "disabled"), admitted: t(state.admitted ? "enabled" : "disabled") })}</p>
-    <p className="dsmm-hint">{t("roleProvenance", { source: state.source, capture: state.capture })}</p>
     {state.reason !== undefined && <p>{t("roleUnavailableReason", { reason: state.reason })}</p>}
+    <details><summary>{t("technicalDetails")}</summary>
+      <p>{t("roleCeiling", { startup: t(state.startupAvailable ? "enabled" : "disabled"), deployment: t(state.deploymentEnabled ? "enabled" : "disabled"), admitted: t(state.admitted ? "enabled" : "disabled") })}</p>
+      <p className="dsmm-hint">{t("roleProvenance", { source: state.source, capture: state.capture })}</p>
+    </details>
   </div>;
 }

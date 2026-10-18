@@ -122,63 +122,63 @@ function validateModelRouteFieldName(key) {
 }
 function copyRouteJson(input) {
   const active = /* @__PURE__ */ new Set();
-  const copy = (value, depth2) => {
+  const copy = (value2, depth2) => {
     if (depth2 > 32) fail();
-    if (value === null || typeof value === "boolean") return value;
-    if (typeof value === "string") {
-      if (new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(value)) !== value) fail();
-      return value;
+    if (value2 === null || typeof value2 === "boolean") return value2;
+    if (typeof value2 === "string") {
+      if (new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(value2)) !== value2) fail();
+      return value2;
     }
-    if (typeof value === "number" && Number.isFinite(value) && !Object.is(value, -0)) return value;
-    if (typeof value !== "object" || value === null || active.has(value)) fail();
-    const prototype = Object.getPrototypeOf(value);
-    if (Array.isArray(value) ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) fail();
-    if (Object.getOwnPropertySymbols(value).length) fail();
-    active.add(value);
-    const result2 = Array.isArray(value) ? [] : {};
-    for (const [key, descriptor4] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-      if (Array.isArray(value) && key === "length") continue;
-      if (new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(key)) !== key || ["__proto__", "prototype", "constructor"].includes(key) || !Object.hasOwn(descriptor4, "value") || !descriptor4.enumerable) fail();
-      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key)) fail();
-      Reflect.set(result2, key, copy(descriptor4.value, depth2 + 1));
+    if (typeof value2 === "number" && Number.isFinite(value2) && !Object.is(value2, -0)) return value2;
+    if (typeof value2 !== "object" || value2 === null || active.has(value2)) fail();
+    const prototype = Object.getPrototypeOf(value2);
+    if (Array.isArray(value2) ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) fail();
+    if (Object.getOwnPropertySymbols(value2).length) fail();
+    active.add(value2);
+    const result2 = Array.isArray(value2) ? [] : {};
+    for (const [key, descriptor6] of Object.entries(Object.getOwnPropertyDescriptors(value2))) {
+      if (Array.isArray(value2) && key === "length") continue;
+      if (new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(key)) !== key || ["__proto__", "prototype", "constructor"].includes(key) || !Object.hasOwn(descriptor6, "value") || !descriptor6.enumerable) fail();
+      if (Array.isArray(value2) && !/^(0|[1-9][0-9]*)$/u.test(key)) fail();
+      Reflect.set(result2, key, copy(descriptor6.value, depth2 + 1));
     }
-    if (Array.isArray(value) && Object.keys(result2).length !== value.length) fail();
-    active.delete(value);
+    if (Array.isArray(value2) && Object.keys(result2).length !== value2.length) fail();
+    active.delete(value2);
     return result2;
   };
   const result = copy(input, 0);
   if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_ROUTE_BYTES) fail();
   return result;
 }
-function boundedText(value, max) {
-  if (typeof value !== "string" || !value.trim() || value.length > max || /[\u0000-\u001f\u007f]/u.test(value)) fail();
+function boundedText(value2, max) {
+  if (typeof value2 !== "string" || !value2.trim() || value2.length > max || /[\u0000-\u001f\u007f]/u.test(value2)) fail();
 }
 function normalizeModelRouteJson(input, sparse = false, allowIdentityWhitespace = false) {
   const route3 = copyRouteJson(input);
   if (route3 === null || typeof route3 !== "object" || Array.isArray(route3)) fail();
-  const row = route3;
-  if (!sparse && (!Object.hasOwn(row, "provider") || !Object.hasOwn(row, "model"))) fail();
-  for (const key of Object.keys(row)) {
+  const row2 = route3;
+  if (!sparse && (!Object.hasOwn(row2, "provider") || !Object.hasOwn(row2, "model"))) fail();
+  for (const key of Object.keys(row2)) {
     validateModelRouteFieldName(key);
-    const value = row[key];
+    const value2 = row2[key];
     if (key === "provider") {
-      boundedText(value, 128);
-      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(allowIdentityWhitespace ? value.trim() : value)) fail();
+      boundedText(value2, 128);
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u.test(allowIdentityWhitespace ? value2.trim() : value2)) fail();
     } else if (key === "model") {
-      boundedText(value, 512);
-      if (value.includes("://")) fail();
+      boundedText(value2, 512);
+      if (value2.includes("://")) fail();
     } else if (key === "reasoningEffort" || key === "reasoning_effort") {
-      boundedText(value, 64);
+      boundedText(value2, 64);
     } else if (key === "temperature") {
-      if (typeof value !== "number") fail();
+      if (typeof value2 !== "number") fail();
     } else if (aliases[1].includes(key)) {
-      if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) fail();
+      if (typeof value2 !== "number" || !Number.isSafeInteger(value2) || value2 <= 0) fail();
     } else if (key === "stop") {
-      if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) fail();
+      if (!Array.isArray(value2) || !value2.every((item) => typeof item === "string")) fail();
     }
   }
-  for (const group of aliases) if (group.filter((key) => Object.hasOwn(row, key)).length > 1) fail();
-  return row;
+  for (const group of aliases) if (group.filter((key) => Object.hasOwn(row2, key)).length > 1) fail();
+  return row2;
 }
 
 // src/routing-policy.ts
@@ -202,16 +202,16 @@ var DSMM_RATE_LIMIT_BOUNDS = Object.freeze({
   switchAfterRateLimits: Object.freeze([1, 10]),
   maxSwitches: Object.freeze([0, 10])
 });
-function normalizeRoutingStrategy(value) {
-  if (value !== "startup-lock" && value !== "rate-limit-fallback") {
+function normalizeRoutingStrategy(value2) {
+  if (value2 !== "startup-lock" && value2 !== "rate-limit-fallback") {
     throw new TypeError("dsmm strategy must be startup-lock or rate-limit-fallback");
   }
-  return value;
+  return value2;
 }
-function normalizeRateLimitOverrides(value) {
-  if (!isRecord(value)) throw new TypeError("dsmm rateLimit must be an object");
+function normalizeRateLimitOverrides(value2) {
+  if (!isRecord(value2)) throw new TypeError("dsmm rateLimit must be an object");
   const result = {};
-  for (const [field, raw] of Object.entries(value)) {
+  for (const [field, raw] of Object.entries(value2)) {
     if (!Object.hasOwn(DSMM_RATE_LIMIT_BOUNDS, field)) throw new TypeError("dsmm rateLimit contains an unknown field");
     const [minimum, maximum] = DSMM_RATE_LIMIT_BOUNDS[field];
     if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < minimum || raw > maximum) {
@@ -221,11 +221,11 @@ function normalizeRateLimitOverrides(value) {
   }
   return result;
 }
-function normalizeRateLimitPolicy(value = void 0, defaults = DEFAULT_DSMM_RATE_LIMIT_POLICY) {
-  return { ...defaults, ...value === void 0 ? {} : normalizeRateLimitOverrides(value) };
+function normalizeRateLimitPolicy(value2 = void 0, defaults = DEFAULT_DSMM_RATE_LIMIT_POLICY) {
+  return { ...defaults, ...value2 === void 0 ? {} : normalizeRateLimitOverrides(value2) };
 }
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function isRecord(value2) {
+  return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
 }
 
 // src/modules.ts
@@ -238,9 +238,9 @@ var DSMM_MODULE_DESCRIPTORS = Object.freeze([
 var passthrough = Object.freeze({ mode: "passthrough" });
 var nativeDefaults = Object.freeze({ mode: "native-defaults" });
 var legacy = Object.freeze({ mode: "legacy-native-v1" });
-function parseModelParameterPolicy(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1 || !("mode" in value)) throw new TypeError("Invalid model parameter policy");
-  switch (value.mode) {
+function parseModelParameterPolicy(value2) {
+  if (value2 === null || typeof value2 !== "object" || Array.isArray(value2) || Object.keys(value2).length !== 1 || !("mode" in value2)) throw new TypeError("Invalid model parameter policy");
+  switch (value2.mode) {
     case "passthrough":
       return passthrough;
     case "native-defaults":
@@ -256,20 +256,20 @@ function parseModelParameterPolicy(value) {
 var DSMM_ROUTE_SOURCES = ["inherited", "primary", "level", "invocation-route"];
 
 // ../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/scanner.js
-function createScanner(text5, ignoreTrivia = false) {
-  const len = text5.length;
-  let pos = 0, value = "", tokenOffset = 0, token = 16, lineNumber = 0, lineStartOffset = 0, tokenLineStartOffset = 0, prevTokenLineStartOffset = 0, scanError = 0;
+function createScanner(text6, ignoreTrivia = false) {
+  const len = text6.length;
+  let pos = 0, value2 = "", tokenOffset = 0, token = 16, lineNumber = 0, lineStartOffset = 0, tokenLineStartOffset = 0, prevTokenLineStartOffset = 0, scanError = 0;
   function scanHexDigits(count, exact) {
     let digits = 0;
-    let value2 = 0;
+    let value3 = 0;
     while (digits < count || !exact) {
-      let ch = text5.charCodeAt(pos);
+      let ch = text6.charCodeAt(pos);
       if (ch >= 48 && ch <= 57) {
-        value2 = value2 * 16 + ch - 48;
+        value3 = value3 * 16 + ch - 48;
       } else if (ch >= 65 && ch <= 70) {
-        value2 = value2 * 16 + ch - 65 + 10;
+        value3 = value3 * 16 + ch - 65 + 10;
       } else if (ch >= 97 && ch <= 102) {
-        value2 = value2 * 16 + ch - 97 + 10;
+        value3 = value3 * 16 + ch - 97 + 10;
       } else {
         break;
       }
@@ -277,48 +277,48 @@ function createScanner(text5, ignoreTrivia = false) {
       digits++;
     }
     if (digits < count) {
-      value2 = -1;
+      value3 = -1;
     }
-    return value2;
+    return value3;
   }
   function setPosition(newPosition) {
     pos = newPosition;
-    value = "";
+    value2 = "";
     tokenOffset = 0;
     token = 16;
     scanError = 0;
   }
   function scanNumber() {
     let start = pos;
-    if (text5.charCodeAt(pos) === 48) {
+    if (text6.charCodeAt(pos) === 48) {
       pos++;
     } else {
       pos++;
-      while (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
+      while (pos < text6.length && isDigit(text6.charCodeAt(pos))) {
         pos++;
       }
     }
-    if (pos < text5.length && text5.charCodeAt(pos) === 46) {
+    if (pos < text6.length && text6.charCodeAt(pos) === 46) {
       pos++;
-      if (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
+      if (pos < text6.length && isDigit(text6.charCodeAt(pos))) {
         pos++;
-        while (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
+        while (pos < text6.length && isDigit(text6.charCodeAt(pos))) {
           pos++;
         }
       } else {
         scanError = 3;
-        return text5.substring(start, pos);
+        return text6.substring(start, pos);
       }
     }
     let end = pos;
-    if (pos < text5.length && (text5.charCodeAt(pos) === 69 || text5.charCodeAt(pos) === 101)) {
+    if (pos < text6.length && (text6.charCodeAt(pos) === 69 || text6.charCodeAt(pos) === 101)) {
       pos++;
-      if (pos < text5.length && text5.charCodeAt(pos) === 43 || text5.charCodeAt(pos) === 45) {
+      if (pos < text6.length && text6.charCodeAt(pos) === 43 || text6.charCodeAt(pos) === 45) {
         pos++;
       }
-      if (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
+      if (pos < text6.length && isDigit(text6.charCodeAt(pos))) {
         pos++;
-        while (pos < text5.length && isDigit(text5.charCodeAt(pos))) {
+        while (pos < text6.length && isDigit(text6.charCodeAt(pos))) {
           pos++;
         }
         end = pos;
@@ -326,30 +326,30 @@ function createScanner(text5, ignoreTrivia = false) {
         scanError = 3;
       }
     }
-    return text5.substring(start, end);
+    return text6.substring(start, end);
   }
   function scanString() {
     let result = "", start = pos;
     while (true) {
       if (pos >= len) {
-        result += text5.substring(start, pos);
+        result += text6.substring(start, pos);
         scanError = 2;
         break;
       }
-      const ch = text5.charCodeAt(pos);
+      const ch = text6.charCodeAt(pos);
       if (ch === 34) {
-        result += text5.substring(start, pos);
+        result += text6.substring(start, pos);
         pos++;
         break;
       }
       if (ch === 92) {
-        result += text5.substring(start, pos);
+        result += text6.substring(start, pos);
         pos++;
         if (pos >= len) {
           scanError = 2;
           break;
         }
-        const ch2 = text5.charCodeAt(pos++);
+        const ch2 = text6.charCodeAt(pos++);
         switch (ch2) {
           case 34:
             result += '"';
@@ -391,7 +391,7 @@ function createScanner(text5, ignoreTrivia = false) {
       }
       if (ch >= 0 && ch <= 31) {
         if (isLineBreak(ch)) {
-          result += text5.substring(start, pos);
+          result += text6.substring(start, pos);
           scanError = 2;
           break;
         } else {
@@ -403,7 +403,7 @@ function createScanner(text5, ignoreTrivia = false) {
     return result;
   }
   function scanNext() {
-    value = "";
+    value2 = "";
     scanError = 0;
     tokenOffset = pos;
     lineStartOffset = lineNumber;
@@ -412,27 +412,27 @@ function createScanner(text5, ignoreTrivia = false) {
       tokenOffset = len;
       return token = 17;
     }
-    let code = text5.charCodeAt(pos);
-    if (isWhiteSpace(code)) {
+    let code2 = text6.charCodeAt(pos);
+    if (isWhiteSpace(code2)) {
       do {
         pos++;
-        value += String.fromCharCode(code);
-        code = text5.charCodeAt(pos);
-      } while (isWhiteSpace(code));
+        value2 += String.fromCharCode(code2);
+        code2 = text6.charCodeAt(pos);
+      } while (isWhiteSpace(code2));
       return token = 15;
     }
-    if (isLineBreak(code)) {
+    if (isLineBreak(code2)) {
       pos++;
-      value += String.fromCharCode(code);
-      if (code === 13 && text5.charCodeAt(pos) === 10) {
+      value2 += String.fromCharCode(code2);
+      if (code2 === 13 && text6.charCodeAt(pos) === 10) {
         pos++;
-        value += "\n";
+        value2 += "\n";
       }
       lineNumber++;
       tokenLineStartOffset = pos;
       return token = 14;
     }
-    switch (code) {
+    switch (code2) {
       // tokens: []{}:,
       case 123:
         pos++;
@@ -455,36 +455,36 @@ function createScanner(text5, ignoreTrivia = false) {
       // strings
       case 34:
         pos++;
-        value = scanString();
+        value2 = scanString();
         return token = 10;
       // comments
       case 47:
         const start = pos - 1;
-        if (text5.charCodeAt(pos + 1) === 47) {
+        if (text6.charCodeAt(pos + 1) === 47) {
           pos += 2;
           while (pos < len) {
-            if (isLineBreak(text5.charCodeAt(pos))) {
+            if (isLineBreak(text6.charCodeAt(pos))) {
               break;
             }
             pos++;
           }
-          value = text5.substring(start, pos);
+          value2 = text6.substring(start, pos);
           return token = 12;
         }
-        if (text5.charCodeAt(pos + 1) === 42) {
+        if (text6.charCodeAt(pos + 1) === 42) {
           pos += 2;
           const safeLength = len - 1;
           let commentClosed = false;
           while (pos < safeLength) {
-            const ch = text5.charCodeAt(pos);
-            if (ch === 42 && text5.charCodeAt(pos + 1) === 47) {
+            const ch = text6.charCodeAt(pos);
+            if (ch === 42 && text6.charCodeAt(pos + 1) === 47) {
               pos += 2;
               commentClosed = true;
               break;
             }
             pos++;
             if (isLineBreak(ch)) {
-              if (ch === 13 && text5.charCodeAt(pos) === 10) {
+              if (ch === 13 && text6.charCodeAt(pos) === 10) {
                 pos++;
               }
               lineNumber++;
@@ -495,17 +495,17 @@ function createScanner(text5, ignoreTrivia = false) {
             pos++;
             scanError = 1;
           }
-          value = text5.substring(start, pos);
+          value2 = text6.substring(start, pos);
           return token = 13;
         }
-        value += String.fromCharCode(code);
+        value2 += String.fromCharCode(code2);
         pos++;
         return token = 16;
       // numbers
       case 45:
-        value += String.fromCharCode(code);
+        value2 += String.fromCharCode(code2);
         pos++;
-        if (pos === len || !isDigit(text5.charCodeAt(pos))) {
+        if (pos === len || !isDigit(text6.charCodeAt(pos))) {
           return token = 16;
         }
       // found a minus, followed by a number so
@@ -521,17 +521,17 @@ function createScanner(text5, ignoreTrivia = false) {
       case 55:
       case 56:
       case 57:
-        value += scanNumber();
+        value2 += scanNumber();
         return token = 11;
       // literals and unknown symbols
       default:
-        while (pos < len && isUnknownContentCharacter(code)) {
+        while (pos < len && isUnknownContentCharacter(code2)) {
           pos++;
-          code = text5.charCodeAt(pos);
+          code2 = text6.charCodeAt(pos);
         }
         if (tokenOffset !== pos) {
-          value = text5.substring(tokenOffset, pos);
-          switch (value) {
+          value2 = text6.substring(tokenOffset, pos);
+          switch (value2) {
             case "true":
               return token = 8;
             case "false":
@@ -541,16 +541,16 @@ function createScanner(text5, ignoreTrivia = false) {
           }
           return token = 16;
         }
-        value += String.fromCharCode(code);
+        value2 += String.fromCharCode(code2);
         pos++;
         return token = 16;
     }
   }
-  function isUnknownContentCharacter(code) {
-    if (isWhiteSpace(code) || isLineBreak(code)) {
+  function isUnknownContentCharacter(code2) {
+    if (isWhiteSpace(code2) || isLineBreak(code2)) {
       return false;
     }
-    switch (code) {
+    switch (code2) {
       case 125:
       case 93:
       case 123:
@@ -575,7 +575,7 @@ function createScanner(text5, ignoreTrivia = false) {
     getPosition: () => pos,
     scan: ignoreTrivia ? scanNextNonTrivia : scanNext,
     getToken: () => token,
-    getTokenValue: () => value,
+    getTokenValue: () => value2,
     getTokenOffset: () => tokenOffset,
     getTokenLength: () => pos - tokenOffset,
     getTokenStartLine: () => lineStartOffset,
@@ -775,9 +775,9 @@ function format(documentText, range, options) {
     return token;
   }
   const editOperations = [];
-  function addEdit(text5, startOffset, endOffset) {
-    if (!hasError && (!range || startOffset < rangeEnd && endOffset > rangeStart) && documentText.substring(startOffset, endOffset) !== text5) {
-      editOperations.push({ offset: startOffset, length: endOffset - startOffset, content: text5 });
+  function addEdit(text6, startOffset, endOffset) {
+    if (!hasError && (!range || startOffset < rangeEnd && endOffset > rangeStart) && documentText.substring(startOffset, endOffset) !== text6) {
+      editOperations.push({ offset: startOffset, length: endOffset - startOffset, content: text6 });
     }
   }
   let firstToken = scanNext();
@@ -925,11 +925,11 @@ function computeIndentLevel(content2, options) {
   }
   return Math.floor(nChars / tabSize);
 }
-function getEOL(options, text5) {
-  for (let i = 0; i < text5.length; i++) {
-    const ch = text5.charAt(i);
+function getEOL(options, text6) {
+  for (let i = 0; i < text6.length; i++) {
+    const ch = text6.charAt(i);
     if (ch === "\r") {
-      if (i + 1 < text5.length && text5.charAt(i + 1) === "\n") {
+      if (i + 1 < text6.length && text6.charAt(i + 1) === "\n") {
         return "\r\n";
       }
       return "\r";
@@ -939,8 +939,8 @@ function getEOL(options, text5) {
   }
   return options && options.eol || "\n";
 }
-function isEOL(text5, offset) {
-  return "\r\n".indexOf(text5.charAt(offset)) !== -1;
+function isEOL(text6, offset) {
+  return "\r\n".indexOf(text6.charAt(offset)) !== -1;
 }
 
 // ../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/parser.js
@@ -950,23 +950,23 @@ var ParseOptions;
     allowTrailingComma: false
   };
 })(ParseOptions || (ParseOptions = {}));
-function parse(text5, errors = [], options = ParseOptions.DEFAULT) {
+function parse(text6, errors2 = [], options = ParseOptions.DEFAULT) {
   let currentProperty = null;
   let currentParent = [];
   const previousParents = [];
-  function onValue(value) {
+  function onValue(value2) {
     if (Array.isArray(currentParent)) {
-      currentParent.push(value);
+      currentParent.push(value2);
     } else if (currentProperty !== null) {
-      currentParent[currentProperty] = value;
+      currentParent[currentProperty] = value2;
     }
   }
   const visitor = {
     onObjectBegin: () => {
-      const object3 = {};
-      onValue(object3);
+      const object4 = {};
+      onValue(object4);
       previousParents.push(currentParent);
-      currentParent = object3;
+      currentParent = object4;
       currentProperty = null;
     },
     onObjectProperty: (name) => {
@@ -987,13 +987,13 @@ function parse(text5, errors = [], options = ParseOptions.DEFAULT) {
     },
     onLiteralValue: onValue,
     onError: (error, offset, length) => {
-      errors.push({ error, offset, length });
+      errors2.push({ error, offset, length });
     }
   };
-  visit(text5, visitor, options);
+  visit(text6, visitor, options);
   return currentParent[0];
 }
-function parseTree(text5, errors = [], options = ParseOptions.DEFAULT) {
+function parseTree(text6, errors2 = [], options = ParseOptions.DEFAULT) {
   let currentParent = { type: "array", offset: -1, length: -1, children: [], parent: void 0 };
   function ensurePropertyComplete(endOffset) {
     if (currentParent.type === "property") {
@@ -1027,8 +1027,8 @@ function parseTree(text5, errors = [], options = ParseOptions.DEFAULT) {
       currentParent = currentParent.parent;
       ensurePropertyComplete(offset + length);
     },
-    onLiteralValue: (value, offset, length) => {
-      onValue({ type: getNodeType(value), offset, length, parent: currentParent, value });
+    onLiteralValue: (value2, offset, length) => {
+      onValue({ type: getNodeType(value2), offset, length, parent: currentParent, value: value2 });
       ensurePropertyComplete(offset + length);
     },
     onSeparator: (sep, offset, length) => {
@@ -1041,10 +1041,10 @@ function parseTree(text5, errors = [], options = ParseOptions.DEFAULT) {
       }
     },
     onError: (error, offset, length) => {
-      errors.push({ error, offset, length });
+      errors2.push({ error, offset, length });
     }
   };
-  visit(text5, visitor, options);
+  visit(text6, visitor, options);
   const result = currentParent.children[0];
   if (result) {
     delete result.parent;
@@ -1082,8 +1082,8 @@ function findNodeAtLocation(root, path) {
   }
   return node;
 }
-function visit(text5, visitor, options = ParseOptions.DEFAULT) {
-  const _scanner = createScanner(text5, false);
+function visit(text6, visitor, options = ParseOptions.DEFAULT) {
+  const _scanner = createScanner(text6, false);
   const _jsonPath = [];
   let suppressedCallbacks = 0;
   function toNoArgVisit(visitFunction) {
@@ -1205,12 +1205,12 @@ function visit(text5, visitor, options = ParseOptions.DEFAULT) {
     }
   }
   function parseString(isValue) {
-    const value = _scanner.getTokenValue();
+    const value2 = _scanner.getTokenValue();
     if (isValue) {
-      onLiteralValue(value);
+      onLiteralValue(value2);
     } else {
-      onObjectProperty(value);
-      _jsonPath.push(value);
+      onObjectProperty(value2);
+      _jsonPath.push(value2);
     }
     scanNext();
     return true;
@@ -1219,15 +1219,15 @@ function visit(text5, visitor, options = ParseOptions.DEFAULT) {
     switch (_scanner.getToken()) {
       case 11:
         const tokenValue = _scanner.getTokenValue();
-        let value = Number(tokenValue);
-        if (isNaN(value)) {
+        let value2 = Number(tokenValue);
+        if (isNaN(value2)) {
           handleError(
             2
             /* ParseErrorCode.InvalidNumberFormat */
           );
-          value = 0;
+          value2 = 0;
         }
-        onLiteralValue(value);
+        onLiteralValue(value2);
         break;
       case 7:
         onLiteralValue(null);
@@ -1387,8 +1387,8 @@ function visit(text5, visitor, options = ParseOptions.DEFAULT) {
   }
   return true;
 }
-function getNodeType(value) {
-  switch (typeof value) {
+function getNodeType(value2) {
+  switch (typeof value2) {
     case "boolean":
       return "boolean";
     case "number":
@@ -1396,9 +1396,9 @@ function getNodeType(value) {
     case "string":
       return "string";
     case "object": {
-      if (!value) {
+      if (!value2) {
         return "null";
-      } else if (Array.isArray(value)) {
+      } else if (Array.isArray(value2)) {
         return "array";
       }
       return "object";
@@ -1409,34 +1409,34 @@ function getNodeType(value) {
 }
 
 // ../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/edit.js
-function setProperty(text5, originalPath, value, options) {
+function setProperty(text6, originalPath, value2, options) {
   const path = originalPath.slice();
-  const errors = [];
-  const root = parseTree(text5, errors);
+  const errors2 = [];
+  const root = parseTree(text6, errors2);
   let parent = void 0;
   let lastSegment = void 0;
   while (path.length > 0) {
     lastSegment = path.pop();
     parent = findNodeAtLocation(root, path);
-    if (parent === void 0 && value !== void 0) {
+    if (parent === void 0 && value2 !== void 0) {
       if (typeof lastSegment === "string") {
-        value = { [lastSegment]: value };
+        value2 = { [lastSegment]: value2 };
       } else {
-        value = [value];
+        value2 = [value2];
       }
     } else {
       break;
     }
   }
   if (!parent) {
-    if (value === void 0) {
+    if (value2 === void 0) {
       throw new Error("Can not delete in empty document");
     }
-    return withFormatting(text5, { offset: root ? root.offset : 0, length: root ? root.length : 0, content: JSON.stringify(value) }, options);
+    return withFormatting(text6, { offset: root ? root.offset : 0, length: root ? root.length : 0, content: JSON.stringify(value2) }, options);
   } else if (parent.type === "object" && typeof lastSegment === "string" && Array.isArray(parent.children)) {
     const existing = findNodeAtLocation(parent, [lastSegment]);
     if (existing !== void 0) {
-      if (value === void 0) {
+      if (value2 === void 0) {
         if (!existing.parent) {
           throw new Error("Malformed AST");
         }
@@ -1453,15 +1453,15 @@ function setProperty(text5, originalPath, value, options) {
             removeEnd = next.offset;
           }
         }
-        return withFormatting(text5, { offset: removeBegin, length: removeEnd - removeBegin, content: "" }, options);
+        return withFormatting(text6, { offset: removeBegin, length: removeEnd - removeBegin, content: "" }, options);
       } else {
-        return withFormatting(text5, { offset: existing.offset, length: existing.length, content: JSON.stringify(value) }, options);
+        return withFormatting(text6, { offset: existing.offset, length: existing.length, content: JSON.stringify(value2) }, options);
       }
     } else {
-      if (value === void 0) {
+      if (value2 === void 0) {
         return [];
       }
-      const newProperty = `${JSON.stringify(lastSegment)}: ${JSON.stringify(value)}`;
+      const newProperty = `${JSON.stringify(lastSegment)}: ${JSON.stringify(value2)}`;
       const index = options.getInsertionIndex ? options.getInsertionIndex(parent.children.map((p) => p.children[0].value)) : parent.children.length;
       let edit;
       if (index > 0) {
@@ -1472,12 +1472,12 @@ function setProperty(text5, originalPath, value, options) {
       } else {
         edit = { offset: parent.offset + 1, length: 0, content: newProperty + "," };
       }
-      return withFormatting(text5, edit, options);
+      return withFormatting(text6, edit, options);
     }
   } else if (parent.type === "array" && typeof lastSegment === "number" && Array.isArray(parent.children)) {
     const insertIndex = lastSegment;
     if (insertIndex === -1) {
-      const newProperty = `${JSON.stringify(value)}`;
+      const newProperty = `${JSON.stringify(value2)}`;
       let edit;
       if (parent.children.length === 0) {
         edit = { offset: parent.offset + 1, length: 0, content: newProperty };
@@ -1485,8 +1485,8 @@ function setProperty(text5, originalPath, value, options) {
         const previous = parent.children[parent.children.length - 1];
         edit = { offset: previous.offset + previous.length, length: 0, content: "," + newProperty };
       }
-      return withFormatting(text5, edit, options);
-    } else if (value === void 0 && parent.children.length >= 0) {
+      return withFormatting(text6, edit, options);
+    } else if (value2 === void 0 && parent.children.length >= 0) {
       const removalIndex = lastSegment;
       const toRemove = parent.children[removalIndex];
       let edit;
@@ -1500,10 +1500,10 @@ function setProperty(text5, originalPath, value, options) {
       } else {
         edit = { offset: toRemove.offset, length: parent.children[removalIndex + 1].offset - toRemove.offset, content: "" };
       }
-      return withFormatting(text5, edit, options);
-    } else if (value !== void 0) {
+      return withFormatting(text6, edit, options);
+    } else if (value2 !== void 0) {
       let edit;
-      const newProperty = `${JSON.stringify(value)}`;
+      const newProperty = `${JSON.stringify(value2)}`;
       if (!options.isArrayInsertion && parent.children.length > lastSegment) {
         const toModify = parent.children[lastSegment];
         edit = { offset: toModify.offset, length: toModify.length, content: newProperty };
@@ -1514,19 +1514,19 @@ function setProperty(text5, originalPath, value, options) {
         const previous = parent.children[index - 1];
         edit = { offset: previous.offset + previous.length, length: 0, content: "," + newProperty };
       }
-      return withFormatting(text5, edit, options);
+      return withFormatting(text6, edit, options);
     } else {
-      throw new Error(`Can not ${value === void 0 ? "remove" : options.isArrayInsertion ? "insert" : "modify"} Array index ${insertIndex} as length is not sufficient`);
+      throw new Error(`Can not ${value2 === void 0 ? "remove" : options.isArrayInsertion ? "insert" : "modify"} Array index ${insertIndex} as length is not sufficient`);
     }
   } else {
     throw new Error(`Can not add ${typeof lastSegment !== "number" ? "index" : "property"} to parent of type ${parent.type}`);
   }
 }
-function withFormatting(text5, edit, options) {
+function withFormatting(text6, edit, options) {
   if (!options.formattingOptions) {
     return [edit];
   }
-  let newText = applyEdit(text5, edit);
+  let newText = applyEdit(text6, edit);
   let begin = edit.offset;
   let end = edit.offset + edit.content.length;
   if (edit.length === 0 || edit.content.length === 0) {
@@ -1545,11 +1545,11 @@ function withFormatting(text5, edit, options) {
     end = Math.max(end, edit2.offset + edit2.length);
     end += edit2.content.length - edit2.length;
   }
-  const editLength = text5.length - (newText.length - end) - begin;
+  const editLength = text6.length - (newText.length - end) - begin;
   return [{ offset: begin, length: editLength, content: newText.substring(begin, end) }];
 }
-function applyEdit(text5, edit) {
-  return text5.substring(0, edit.offset) + edit.content + text5.substring(edit.offset + edit.length);
+function applyEdit(text6, edit) {
+  return text6.substring(0, edit.offset) + edit.content + text6.substring(edit.offset + edit.length);
 }
 
 // ../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/main.js
@@ -1605,10 +1605,10 @@ var ParseErrorCode;
   ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
   ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
 })(ParseErrorCode || (ParseErrorCode = {}));
-function modify(text5, path, value, options) {
-  return setProperty(text5, path, value, options);
+function modify(text6, path, value2, options) {
+  return setProperty(text6, path, value2, options);
 }
-function applyEdits(text5, edits) {
+function applyEdits(text6, edits) {
   let sortedEdits = edits.slice(0).sort((a, b) => {
     const diff = a.offset - b.offset;
     if (diff === 0) {
@@ -1616,31 +1616,31 @@ function applyEdits(text5, edits) {
     }
     return diff;
   });
-  let lastModifiedOffset = text5.length;
+  let lastModifiedOffset = text6.length;
   for (let i = sortedEdits.length - 1; i >= 0; i--) {
     let e = sortedEdits[i];
     if (e.offset + e.length <= lastModifiedOffset) {
-      text5 = applyEdit(text5, e);
+      text6 = applyEdit(text6, e);
     } else {
       throw new Error("Overlapping edit");
     }
     lastModifiedOffset = e.offset;
   }
-  return text5;
+  return text6;
 }
 
 // ../node_modules/.pnpm/@deepseek-ai+cosmokit@1.8.6/node_modules/@deepseek-ai/cosmokit/lib/index.js
-function isNullable(value) {
-  return value === null || value === void 0;
+function isNullable(value2) {
+  return value2 === null || value2 === void 0;
 }
 function isPlainObject(data) {
   return data && typeof data === "object" && !Array.isArray(data);
 }
-function filterKeys(object3, filter) {
-  return Object.fromEntries(Object.entries(object3).filter(([key, value]) => filter(key, value)));
+function filterKeys(object4, filter) {
+  return Object.fromEntries(Object.entries(object4).filter(([key, value2]) => filter(key, value2)));
 }
-function mapValues(object3, transform) {
-  return Object.fromEntries(Object.entries(object3).map(([key, value]) => [key, transform(value, key)]));
+function mapValues(object4, transform) {
+  return Object.fromEntries(Object.entries(object4).map(([key, value2]) => [key, transform(value2, key)]));
 }
 function pick(source, keys, forced) {
   if (!keys) return { ...source };
@@ -1649,40 +1649,40 @@ function pick(source, keys, forced) {
   return result;
 }
 var write = Symbol.for("cosmokit.volatile.write");
-function snapshot(value, ancestors = /* @__PURE__ */ new Set()) {
-  if (typeof value === "function") throw new TypeError("volatile config cannot contain functions");
-  if (value === null || typeof value !== "object") return value;
-  if (ancestors.has(value)) throw new TypeError("volatile config cannot contain cycles");
-  ancestors.add(value);
+function snapshot(value2, ancestors = /* @__PURE__ */ new Set()) {
+  if (typeof value2 === "function") throw new TypeError("volatile config cannot contain functions");
+  if (value2 === null || typeof value2 !== "object") return value2;
+  if (ancestors.has(value2)) throw new TypeError("volatile config cannot contain cycles");
+  ancestors.add(value2);
   try {
-    if (Array.isArray(value)) return Object.freeze(value.map((item) => snapshot(item, ancestors)));
-    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) throw new TypeError("volatile config objects must be plain objects or arrays");
-    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, snapshot(item, ancestors)])));
+    if (Array.isArray(value2)) return Object.freeze(value2.map((item) => snapshot(item, ancestors)));
+    if (Object.getPrototypeOf(value2) !== Object.prototype && Object.getPrototypeOf(value2) !== null) throw new TypeError("volatile config objects must be plain objects or arrays");
+    return Object.freeze(Object.fromEntries(Object.entries(value2).map(([key, item]) => [key, snapshot(item, ancestors)])));
   } finally {
-    ancestors.delete(value);
+    ancestors.delete(value2);
   }
 }
-function createVolatile(value) {
-  let current = snapshot(value);
+function createVolatile(value2) {
+  let current2 = snapshot(value2);
   return Object.freeze({
-    get: () => current,
-    [write]: (value2) => {
-      current = value2;
+    get: () => current2,
+    [write]: (value3) => {
+      current2 = value3;
     }
   });
 }
-function isVolatile(value) {
-  return typeof value === "object" && value !== null && write in value;
+function isVolatile(value2) {
+  return typeof value2 === "object" && value2 !== null && write in value2;
 }
-function is(type, value) {
-  if (arguments.length === 1) return (value2) => is(type, value2);
-  return type in globalThis && value instanceof globalThis[type] || Object.prototype.toString.call(value).slice(8, -1) === type;
+function is(type, value2) {
+  if (arguments.length === 1) return (value3) => is(type, value3);
+  return type in globalThis && value2 instanceof globalThis[type] || Object.prototype.toString.call(value2).slice(8, -1) === type;
 }
-function isArrayBufferLike(value) {
-  return is("ArrayBuffer", value) || is("SharedArrayBuffer", value);
+function isArrayBufferLike(value2) {
+  return is("ArrayBuffer", value2) || is("SharedArrayBuffer", value2);
 }
-function isArrayBufferSource(value) {
-  return isArrayBufferLike(value) || ArrayBuffer.isView(value);
+function isArrayBufferSource(value2) {
+  return isArrayBufferLike(value2) || ArrayBuffer.isView(value2);
 }
 var Binary;
 (function(Binary2) {
@@ -1737,17 +1737,17 @@ function clone(source, refs = /* @__PURE__ */ new Map()) {
   if (Array.isArray(source)) {
     const result2 = [];
     refs.set(source, result2);
-    source.forEach((value, index) => {
-      result2[index] = Reflect.apply(clone, null, [value, refs]);
+    source.forEach((value2, index) => {
+      result2[index] = Reflect.apply(clone, null, [value2, refs]);
     });
     return result2;
   }
   const result = Object.create(Object.getPrototypeOf(source));
   refs.set(source, result);
   for (const key of Reflect.ownKeys(source)) {
-    const descriptor4 = { ...Reflect.getOwnPropertyDescriptor(source, key) };
-    if ("value" in descriptor4) descriptor4.value = Reflect.apply(clone, null, [descriptor4.value, refs]);
-    Reflect.defineProperty(result, key, descriptor4);
+    const descriptor6 = { ...Reflect.getOwnPropertyDescriptor(source, key) };
+    if ("value" in descriptor6) descriptor6.value = Reflect.apply(clone, null, [descriptor6.value, refs]);
+    Reflect.defineProperty(result, key, descriptor6);
   }
   return result;
 }
@@ -1774,7 +1774,7 @@ function deepEqual(a, b, strict) {
         const viewB = new Uint8Array(b3);
         for (let i = 0; i < viewA.length; i++) if (viewA[i] !== viewB[i]) return false;
         return true;
-      }) ?? ((!strict || [a2, b2].every((value) => Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) && Object.keys({
+      }) ?? ((!strict || [a2, b2].every((value2) => Object.getPrototypeOf(value2) === Object.prototype || Object.getPrototypeOf(value2) === null)) && Object.keys({
         ...a2,
         ...b2
       }).every((key) => compare(a2[key], b2[key])));
@@ -1807,8 +1807,8 @@ var Time;
     return Math.floor((date2.valueOf() / Time2.minute - offset) / 1440);
   }
   Time2.getDateNumber = getDateNumber;
-  function fromDateNumber(value, offset) {
-    const date2 = new Date(value * Time2.day);
+  function fromDateNumber(value2, offset) {
+    const date2 = new Date(value2 * Time2.day);
     if (offset === void 0) offset = timezoneOffset;
     return new Date(+date2 + offset * Time2.minute);
   }
@@ -1909,9 +1909,9 @@ Object.defineProperty(Schema.prototype, "~standard", { get() {
   return {
     version: 1,
     vendor: "schemastery",
-    validate: (value) => {
+    validate: (value2) => {
       try {
-        return { value: Schema.resolve(value, this, {})[0] };
+        return { value: Schema.resolve(value2, this, {})[0] };
       } catch (error) {
         if (ValidationError.is(error)) return { issues: [{
           message: error.message,
@@ -1937,25 +1937,25 @@ Schema.prototype.toJSON = function toJSON() {
   globalThis.__schemastery_refs__ = void 0;
   return result;
 };
-Schema.prototype.set = function set(key, value) {
-  this.dict[key] = value;
+Schema.prototype.set = function set(key, value2) {
+  this.dict[key] = value2;
   return this;
 };
-Schema.prototype.push = function push(value) {
-  this.list.push(value);
+Schema.prototype.push = function push(value2) {
+  this.list.push(value2);
   return this;
 };
 function mergeDesc(original, messages) {
   const result = typeof original === "string" ? { "": original } : { ...original };
   for (const locale in messages) {
-    const value = messages[locale];
-    if (value?.$description || value?.$desc) result[locale] = value.$description || value.$desc;
-    else if (typeof value === "string") result[locale] = value;
+    const value2 = messages[locale];
+    if (value2?.$description || value2?.$desc) result[locale] = value2.$description || value2.$desc;
+    else if (typeof value2 === "string") result[locale] = value2;
   }
   return result;
 }
-function getInner(value) {
-  return value?.$value ?? value?.$inner;
+function getInner(value2) {
+  return value2?.$value ?? value2?.$inner;
 }
 function extractKeys(data) {
   return filterKeys(data ?? {}, (key) => !key.startsWith("$"));
@@ -1981,11 +1981,11 @@ Schema.prototype.i18n = function i18n(messages) {
   if (schema.sKey) schema.sKey = schema.sKey.i18n(mapValues(messages, (data) => data?.$key));
   return schema;
 };
-Schema.prototype.extra = function extra(key, value) {
+Schema.prototype.extra = function extra(key, value2) {
   const schema = Schema(this);
   schema.meta = {
     ...schema.meta,
-    [key]: value
+    [key]: value2
   };
   return schema;
 };
@@ -1995,11 +1995,11 @@ for (const key of [
   "collapse",
   "hidden",
   "loose"
-]) Object.assign(Schema.prototype, { [key](value = true) {
+]) Object.assign(Schema.prototype, { [key](value2 = true) {
   const schema = Schema(this);
   schema.meta = {
     ...schema.meta,
-    [key]: value
+    [key]: value2
   };
   return schema;
 } });
@@ -2030,36 +2030,36 @@ Schema.prototype.pattern = function pattern(regexp) {
   };
   return schema;
 };
-Schema.prototype.simplify = function simplify(value) {
-  if (isVolatile(value)) value = value.get();
-  if (deepEqual(value, this.meta.default, this.type === "dict")) return null;
-  if (isNullable(value)) return value;
+Schema.prototype.simplify = function simplify(value2) {
+  if (isVolatile(value2)) value2 = value2.get();
+  if (deepEqual(value2, this.meta.default, this.type === "dict")) return null;
+  if (isNullable(value2)) return value2;
   if (this.type === "object" || this.type === "dict") {
     const result = {};
-    for (const key in value) {
-      const item = (this.type === "object" ? this.dict[key] : this.inner)?.simplify(value[key]);
+    for (const key in value2) {
+      const item = (this.type === "object" ? this.dict[key] : this.inner)?.simplify(value2[key]);
       if (this.type === "dict" || !isNullable(item)) result[key] = item;
     }
     if (deepEqual(result, this.meta.default, this.type === "dict")) return null;
     return result;
   } else if (this.type === "array" || this.type === "tuple") {
     const result = [];
-    value.forEach((value2, index) => {
+    value2.forEach((value3, index) => {
       const schema = this.type === "array" ? this.inner : this.list[index];
-      const item = schema ? schema.simplify(value2) : value2;
+      const item = schema ? schema.simplify(value3) : value3;
       result.push(item);
     });
     return result;
   } else if (this.type === "intersect") {
     const result = {};
-    for (const item of this.list) Object.assign(result, item.simplify(value));
+    for (const item of this.list) Object.assign(result, item.simplify(value2));
     return result;
   } else if (this.type === "union") for (const schema of this.list) try {
-    Schema.resolve(value, schema, {});
-    return schema.simplify(value);
+    Schema.resolve(value2, schema, {});
+    return schema.simplify(value2);
   } catch {
   }
-  return value;
+  return value2;
 };
 Schema.prototype.toString = function toString(inline) {
   return formatters[this.type]?.(this, inline) ?? `Schema<${this.type}>`;
@@ -2081,11 +2081,11 @@ for (const key of [
   "max",
   "min",
   "step"
-]) Object.assign(Schema.prototype, { [key](value) {
+]) Object.assign(Schema.prototype, { [key](value2) {
   const schema = Schema(this);
   schema.meta = {
     ...schema.meta,
-    [key]: value
+    [key]: value2
   };
   return schema;
 } });
@@ -2125,9 +2125,9 @@ Schema.resolve = function resolve(data, schema, options = {}, strict = false) {
       ...schema.meta,
       volatile: false
     };
-    const [value, adapted] = Schema.resolve(data, inner, options, strict);
+    const [value2, adapted] = Schema.resolve(data, inner, options, strict);
     try {
-      return [createVolatile(value), adapted];
+      return [createVolatile(value2), adapted];
     } catch (error) {
       throw new ValidationError(error instanceof Error ? error.message : String(error), options);
     }
@@ -2135,11 +2135,11 @@ Schema.resolve = function resolve(data, schema, options = {}, strict = false) {
   if (options.ignore?.(data, schema)) return [data];
   if (isNullable(data) && schema.type !== "lazy") {
     if (schema.meta.required) throw new ValidationError(`missing required value`, options);
-    let current = schema;
+    let current2 = schema;
     let fallback = schema.meta.default;
-    while (current?.type === "intersect" && isNullable(fallback)) {
-      current = current.list[0];
-      fallback = current?.meta.default;
+    while (current2?.type === "intersect" && isNullable(fallback)) {
+      current2 = current2.list[0];
+      fallback = current2?.meta.default;
     }
     if (isNullable(fallback)) return [data];
     data = clone(fallback);
@@ -2200,16 +2200,16 @@ Schema.percent = function percent() {
   return Schema.number().step(0.01).min(0).max(1).role("slider");
 };
 Schema.date = function date() {
-  return Schema.union([Schema.is(Date), Schema.transform(Schema.string().role("datetime"), (value, options) => {
-    const date2 = new Date(value);
-    if (isNaN(+date2)) throw new ValidationError(`invalid date "${value}"`, options);
+  return Schema.union([Schema.is(Date), Schema.transform(Schema.string().role("datetime"), (value2, options) => {
+    const date2 = new Date(value2);
+    if (isNaN(+date2)) throw new ValidationError(`invalid date "${value2}"`, options);
     return date2;
   }, true)]);
 };
 Schema.regExp = function regExp(flag = "") {
-  return Schema.union([Schema.is(RegExp), Schema.transform(Schema.string().role("regexp", { flag }), (value, options) => {
+  return Schema.union([Schema.is(RegExp), Schema.transform(Schema.string().role("regexp", { flag }), (value2, options) => {
     try {
-      return new RegExp(value, flag);
+      return new RegExp(value2, flag);
     } catch (e) {
       throw new ValidationError(e.message, options);
     }
@@ -2219,13 +2219,13 @@ Schema.arrayBuffer = function arrayBuffer(encoding) {
   return Schema.union([
     Schema.is(ArrayBuffer),
     Schema.is(SharedArrayBuffer),
-    Schema.transform(Schema.any(), (value, options) => {
-      if (Binary.isSource(value)) return Binary.fromSource(value);
-      throw new ValidationError(`expected ArrayBufferSource but got ${value}`, options);
+    Schema.transform(Schema.any(), (value2, options) => {
+      if (Binary.isSource(value2)) return Binary.fromSource(value2);
+      throw new ValidationError(`expected ArrayBufferSource but got ${value2}`, options);
     }, true),
-    ...encoding ? [Schema.transform(Schema.string(), (value, options) => {
+    ...encoding ? [Schema.transform(Schema.string(), (value2, options) => {
       try {
-        return encoding === "base64" ? Binary.fromBase64(value) : Binary.fromHex(value);
+        return encoding === "base64" ? Binary.fromBase64(value2) : Binary.fromHex(value2);
       } catch (e) {
         throw new ValidationError(e.message, options);
       }
@@ -2249,9 +2249,9 @@ Schema.extend("any", (data) => {
 Schema.extend("never", (data, _, options) => {
   throw new ValidationError(`expected nullable but got ${data}`, options);
 });
-Schema.extend("const", (data, { value }, options) => {
-  if (deepEqual(data, value)) return [value];
-  throw new ValidationError(`expected ${value} but got ${data}`, options);
+Schema.extend("const", (data, { value: value2 }, options) => {
+  if (deepEqual(data, value2)) return [value2];
+  throw new ValidationError(`expected ${value2} but got ${data}`, options);
 });
 function checkWithinRange(data, meta, description, options, skipMin = false) {
   const { max = Infinity, min = -Infinity } = meta;
@@ -2296,19 +2296,19 @@ Schema.extend("boolean", (data, _, options) => {
   throw new ValidationError(`expected boolean but got ${data}`, options);
 });
 Schema.extend("bitset", (data, { bits, meta }, options) => {
-  let value = 0, keys = [];
+  let value2 = 0, keys = [];
   if (typeof data === "number") {
-    value = data;
+    value2 = data;
     for (const key in bits) if (data & bits[key]) keys.push(key);
   } else if (Array.isArray(data)) {
     keys = data;
     for (const key of keys) {
       if (typeof key !== "string") throw new ValidationError(`expected string but got ${key}`, options);
-      if (key in bits) value |= bits[key];
+      if (key in bits) value2 |= bits[key];
     }
   } else throw new ValidationError(`expected number or array but got ${data}`, options);
-  if (value === meta.default) return [value];
-  return [value, keys];
+  if (value2 === meta.default) return [value2];
+  return [value2, keys];
 });
 Schema.extend("function", (data, _, options) => {
   if (typeof data === "function") return [data];
@@ -2330,12 +2330,12 @@ Schema.extend("is", (data, { constructor }, options) => {
 });
 function property(data, key, schema, options) {
   try {
-    const [value, adapted] = Schema.resolve(data[key], schema, {
+    const [value2, adapted] = Schema.resolve(data[key], schema, {
       ...options,
       path: [...options.path || [], key]
     });
     if (adapted !== void 0) data[key] = adapted;
-    return value;
+    return value2;
   } catch (e) {
     if (!options?.autofix) throw e;
     delete data[key];
@@ -2364,11 +2364,11 @@ Schema.extend("dict", (data, { inner, sKey }, options, strict) => {
   }
   return [result];
 });
-Schema.extend("tuple", (data, { list }, options, strict) => {
+Schema.extend("tuple", (data, { list: list2 }, options, strict) => {
   if (!Array.isArray(data)) throw new ValidationError(`expected array but got ${data}`, options);
-  const result = list.map((inner, index) => property(data, index, inner, options));
+  const result = list2.map((inner, index) => property(data, index, inner, options));
   if (strict) return [result];
-  result.push(...data.slice(list.length));
+  result.push(...data.slice(list2.length));
   return [result];
 });
 function merge(result, data) {
@@ -2381,31 +2381,31 @@ Schema.extend("object", (data, { dict }, options, strict) => {
   if (!isPlainObject(data)) throw new ValidationError(`expected object but got ${data}`, options);
   const result = {};
   for (const key in dict) {
-    const value = property(data, key, dict[key], options);
-    if (!isNullable(value) || key in data) result[key] = value;
+    const value2 = property(data, key, dict[key], options);
+    if (!isNullable(value2) || key in data) result[key] = value2;
   }
   if (!strict) merge(result, data);
   return [result];
 });
-Schema.extend("union", (data, { list, toString: toString2 }, options, strict) => {
+Schema.extend("union", (data, { list: list2, toString: toString2 }, options, strict) => {
   const messages = [];
-  for (const inner of list) try {
+  for (const inner of list2) try {
     return Schema.resolve(data, inner, options, strict);
   } catch (error) {
     messages.push(error);
   }
   throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data)}`, options);
 });
-Schema.extend("intersect", (data, { list, toString: toString2 }, options, strict) => {
-  if (!list.length) return [data];
+Schema.extend("intersect", (data, { list: list2, toString: toString2 }, options, strict) => {
+  if (!list2.length) return [data];
   let result;
-  for (const inner of list) {
-    const value = Schema.resolve(data, inner, options, true)[0];
-    if (isNullable(value)) continue;
-    if (isNullable(result)) result = value;
-    else if (typeof result !== typeof value) throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data)}`, options);
-    else if (typeof value === "object") merge(result ??= {}, value);
-    else if (result !== value) throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data)}`, options);
+  for (const inner of list2) {
+    const value2 = Schema.resolve(data, inner, options, true)[0];
+    if (isNullable(value2)) continue;
+    if (isNullable(result)) result = value2;
+    else if (typeof result !== typeof value2) throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data)}`, options);
+    else if (typeof value2 === "object") merge(result ??= {}, value2);
+    else if (result !== value2) throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data)}`, options);
   }
   if (!strict && isPlainObject(data)) merge(result, data);
   return [result];
@@ -2467,7 +2467,7 @@ defineMethod("is", ["constructor"], ({ constructor }) => {
 });
 defineMethod("any", [], () => "any");
 defineMethod("never", [], () => "never");
-defineMethod("const", ["value"], ({ value }) => typeof value === "string" ? JSON.stringify(value) : value);
+defineMethod("const", ["value"], ({ value: value2 }) => typeof value2 === "string" ? JSON.stringify(value2) : value2);
 defineMethod("string", [], () => "string");
 defineMethod("number", [], () => "number");
 defineMethod("boolean", [], () => "boolean");
@@ -2475,19 +2475,19 @@ defineMethod("bitset", ["bits"], () => "bitset");
 defineMethod("function", [], () => "function");
 defineMethod("array", ["inner"], ({ inner }) => `${inner.toString(true)}[]`);
 defineMethod("dict", ["inner", "sKey"], ({ inner, sKey }) => `{ [key: ${sKey.toString()}]: ${inner.toString()} }`);
-defineMethod("tuple", ["list"], ({ list }) => `[${list.map((inner) => inner.toString()).join(", ")}]`);
+defineMethod("tuple", ["list"], ({ list: list2 }) => `[${list2.map((inner) => inner.toString()).join(", ")}]`);
 defineMethod("object", ["dict"], ({ dict }) => {
   if (Object.keys(dict).length === 0) return "{}";
   return `{ ${Object.entries(dict).map(([key, inner]) => {
     return `${key}${inner.meta.required ? "" : "?"}: ${inner.toString()}`;
   }).join(", ")} }`;
 });
-defineMethod("union", ["list"], ({ list }, inline) => {
-  const result = list.map(({ toString: format2 }) => format2()).join(" | ");
+defineMethod("union", ["list"], ({ list: list2 }, inline) => {
+  const result = list2.map(({ toString: format2 }) => format2()).join(" | ");
   return inline ? `(${result})` : result;
 });
-defineMethod("intersect", ["list"], ({ list }) => {
-  return `${list.map((inner) => inner.toString(true)).join(" & ")}`;
+defineMethod("intersect", ["list"], ({ list: list2 }) => {
+  return `${list2.map((inner) => inner.toString(true)).join(" & ")}`;
 });
 defineMethod("transform", [
   "inner",
@@ -2497,9 +2497,9 @@ defineMethod("transform", [
 
 // src/permission-errors.ts
 var PermissionRefusal = class extends Error {
-  constructor(code) {
+  constructor(code2) {
     super("The Host refused the permission operation.");
-    this.code = code;
+    this.code = code2;
   }
 };
 
@@ -2507,72 +2507,72 @@ var PermissionRefusal = class extends Error {
 function invalid() {
   throw new PermissionRefusal("validation");
 }
-function permissionRuleRow(value, required, optional2 = []) {
-  if (value === null || typeof value !== "object" || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) invalid();
-  const fields = Object.getOwnPropertyDescriptors(value);
-  if (Reflect.ownKeys(value).some((key) => typeof key !== "string" || !required.includes(key) && !optional2.includes(key)) || required.some((key) => !Object.hasOwn(fields, key)) || Object.values(fields).some((field) => !Object.hasOwn(field, "value") || !field.enumerable)) invalid();
-  return value;
+function permissionRuleRow(value2, required, optional2 = []) {
+  if (value2 === null || typeof value2 !== "object" || Array.isArray(value2) || ![Object.prototype, null].includes(Object.getPrototypeOf(value2))) invalid();
+  const fields = Object.getOwnPropertyDescriptors(value2);
+  if (Reflect.ownKeys(value2).some((key) => typeof key !== "string" || !required.includes(key) && !optional2.includes(key)) || required.some((key) => !Object.hasOwn(fields, key)) || Object.values(fields).some((field) => !Object.hasOwn(field, "value") || !field.enumerable)) invalid();
+  return value2;
 }
-function text(value, max = 32768) {
-  if (typeof value !== "string" || value.length === 0 || value.length > max || value.includes("\0")) invalid();
-  return value;
+function text(value2, max = 32768) {
+  if (typeof value2 !== "string" || value2.length === 0 || value2.length > max || value2.includes("\0")) invalid();
+  return value2;
 }
-function permissionRevision(value) {
-  return text(value, 4096);
+function permissionRevision(value2) {
+  return text(value2, 4096);
 }
-function integer(value) {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) invalid();
-  return value;
+function integer(value2) {
+  if (typeof value2 !== "number" || !Number.isSafeInteger(value2) || value2 < 0) invalid();
+  return value2;
 }
-function ruleAction(value, inherit = false) {
-  if (typeof value !== "string" || !(inherit ? ["inherit", "allow", "ask", "deny"] : ["allow", "ask", "deny"]).includes(value)) invalid();
-  return value;
+function ruleAction(value2, inherit = false) {
+  if (typeof value2 !== "string" || !(inherit ? ["inherit", "allow", "ask", "deny"] : ["allow", "ask", "deny"]).includes(value2)) invalid();
+  return value2;
 }
-function draft(value, persisted = false) {
-  const input = permissionRuleRow(value, ["id", "action", "match", ...persisted ? ["source", "revision", "revoked"] : []]);
+function draft(value2, persisted = false) {
+  const input = permissionRuleRow(value2, ["id", "action", "match", ...persisted ? ["source", "revision", "revoked"] : []]);
   const kind = permissionRuleRow(input.match, ["kind"], ["path", "scope", "executable", "command", "workingDirectory"]).kind;
   let match;
   if (kind === "outside-read") {
-    const row = permissionRuleRow(input.match, ["kind", "path", "scope"]);
-    if (row.scope !== "exact" && row.scope !== "tree") invalid();
-    match = { kind, path: text(row.path), scope: row.scope };
+    const row2 = permissionRuleRow(input.match, ["kind", "path", "scope"]);
+    if (row2.scope !== "exact" && row2.scope !== "tree") invalid();
+    match = { kind, path: text(row2.path), scope: row2.scope };
   } else if (kind === "shell") {
-    const row = permissionRuleRow(input.match, ["kind", "executable", "command", "workingDirectory"]);
-    match = { kind, executable: text(row.executable), command: text(row.command), workingDirectory: text(row.workingDirectory) };
+    const row2 = permissionRuleRow(input.match, ["kind", "executable", "command", "workingDirectory"]);
+    match = { kind, executable: text(row2.executable), command: text(row2.command), workingDirectory: text(row2.workingDirectory) };
   } else if (kind === "webSearch" || kind === "webFetch") {
     permissionRuleRow(input.match, ["kind"]);
     match = { kind };
   } else invalid();
   return Object.freeze({ id: text(input.id, 256), action: ruleAction(input.action), match: Object.freeze(match) });
 }
-function parsePermissionRules(value) {
-  if (!Array.isArray(value) || value.length > 1024) invalid();
+function parsePermissionRules(value2) {
+  if (!Array.isArray(value2) || value2.length > 1024) invalid();
   const ids = /* @__PURE__ */ new Set();
-  return Object.freeze(value.map((item) => {
-    const parsed = draft(item, true), row = item;
-    if (ids.has(parsed.id) || typeof row.revoked !== "boolean") invalid();
+  return Object.freeze(value2.map((item) => {
+    const parsed = draft(item, true), row2 = item;
+    if (ids.has(parsed.id) || typeof row2.revoked !== "boolean") invalid();
     ids.add(parsed.id);
-    const sourceRow = permissionRuleRow(row.source, ["kind"], ["sessionId", "savedAt", "label"]);
+    const sourceRow = permissionRuleRow(row2.source, ["kind"], ["sessionId", "savedAt", "label"]);
     let source;
     if (sourceRow.kind === "operator") {
-      permissionRuleRow(row.source, ["kind", "sessionId", "savedAt"]);
+      permissionRuleRow(row2.source, ["kind", "sessionId", "savedAt"]);
       source = { kind: "operator", sessionId: text(sourceRow.sessionId, 256), savedAt: integer(sourceRow.savedAt) };
     } else if (sourceRow.kind === "user-import") {
-      permissionRuleRow(row.source, ["kind", "label"]);
+      permissionRuleRow(row2.source, ["kind", "label"]);
       source = { kind: "user-import", label: text(sourceRow.label, 512) };
     } else invalid();
-    return Object.freeze({ ...parsed, source: Object.freeze(source), revision: integer(row.revision), revoked: row.revoked });
+    return Object.freeze({ ...parsed, source: Object.freeze(source), revision: integer(row2.revision), revoked: row2.revoked });
   }));
 }
-function parsePermissionRulesSave(value) {
-  const row = permissionRuleRow(value, ["expectedRevision"], ["changes", "upsert", "revoke"]);
+function parsePermissionRulesSave(value2) {
+  const row2 = permissionRuleRow(value2, ["expectedRevision"], ["changes", "upsert", "revoke"]);
   let changes;
-  if (row.changes !== void 0) {
-    const input = permissionRuleRow(row.changes, [], ["outsideReads", "webSearch", "webFetch"]);
-    const web2 = (value2) => {
-      const row2 = permissionRuleRow(value2, ["enabled", "rule"]);
-      if (typeof row2.enabled !== "boolean") invalid();
-      return Object.freeze({ enabled: row2.enabled, rule: ruleAction(row2.rule, true) });
+  if (row2.changes !== void 0) {
+    const input = permissionRuleRow(row2.changes, [], ["outsideReads", "webSearch", "webFetch"]);
+    const web2 = (value3) => {
+      const row3 = permissionRuleRow(value3, ["enabled", "rule"]);
+      if (typeof row3.enabled !== "boolean") invalid();
+      return Object.freeze({ enabled: row3.enabled, rule: ruleAction(row3.rule, true) });
     };
     changes = Object.freeze({
       ...input.outsideReads === void 0 ? {} : { outsideReads: ruleAction(input.outsideReads, true) },
@@ -2580,12 +2580,12 @@ function parsePermissionRulesSave(value) {
       ...input.webFetch === void 0 ? {} : { webFetch: web2(input.webFetch) }
     });
   }
-  if (row.upsert !== void 0 && (!Array.isArray(row.upsert) || row.upsert.length > 1024) || row.revoke !== void 0 && (!Array.isArray(row.revoke) || row.revoke.length > 1024)) invalid();
-  const upsert = row.upsert?.map((item) => draft(item)), revoke = row.revoke?.map((item) => text(item, 256));
+  if (row2.upsert !== void 0 && (!Array.isArray(row2.upsert) || row2.upsert.length > 1024) || row2.revoke !== void 0 && (!Array.isArray(row2.revoke) || row2.revoke.length > 1024)) invalid();
+  const upsert = row2.upsert?.map((item) => draft(item)), revoke = row2.revoke?.map((item) => text(item, 256));
   const ids = [...upsert?.map((item) => item.id) ?? [], ...revoke ?? []];
   if (ids.length !== new Set(ids).size || ids.length === 0 && (changes === void 0 || Object.keys(changes).length === 0)) invalid();
   return Object.freeze({
-    expectedRevision: permissionRevision(row.expectedRevision),
+    expectedRevision: permissionRevision(row2.expectedRevision),
     ...changes === void 0 ? {} : { changes },
     ...upsert === void 0 ? {} : { upsert: Object.freeze(upsert) },
     ...revoke === void 0 ? {} : { revoke: Object.freeze(revoke) }
@@ -2594,27 +2594,27 @@ function parsePermissionRulesSave(value) {
 
 // src/permission-settings.ts
 function parseNativeCommands(input = {}) {
-  const row = permissionRuleRow(input, [], ["enabled", "entries"]);
-  if (row.enabled !== void 0 && typeof row.enabled !== "boolean" || row.entries !== void 0 && (!Array.isArray(row.entries) || row.entries.length > 1024)) throw new PermissionRefusal("validation");
-  const text5 = (value) => {
-    if (typeof value !== "string" || value.trim().length === 0 || value.length > 32768 || value.includes("\0")) throw new PermissionRefusal("validation");
-    return value;
+  const row2 = permissionRuleRow(input, [], ["enabled", "entries"]);
+  if (row2.enabled !== void 0 && typeof row2.enabled !== "boolean" || row2.entries !== void 0 && (!Array.isArray(row2.entries) || row2.entries.length > 1024)) throw new PermissionRefusal("validation");
+  const text6 = (value2) => {
+    if (typeof value2 !== "string" || value2.trim().length === 0 || value2.length > 32768 || value2.includes("\0")) throw new PermissionRefusal("validation");
+    return value2;
   };
   const ids = /* @__PURE__ */ new Set();
-  const entries = (row.entries ?? []).map((value) => {
-    const entry = permissionRuleRow(value, ["id", "mode", "match", "sandboxMode"]), match = permissionRuleRow(entry.match, ["tool", "executable", "args", "workingDirectory"], ["subcommand"]);
-    const id2 = text5(entry.id), cwd = text5(match.workingDirectory);
-    if (ids.has(id2) || !["ask", "allow"].includes(entry.mode) || !["bash", "pwsh"].includes(match.tool) || !["workspace-write", "danger-full-access"].includes(entry.sandboxMode) || !/^(?:\/|[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$))/iu.test(cwd) || !Array.isArray(match.args)) throw new PermissionRefusal("validation");
-    ids.add(id2);
-    return Object.freeze({ id: id2, mode: entry.mode, sandboxMode: entry.sandboxMode, match: Object.freeze({
+  const entries = (row2.entries ?? []).map((value2) => {
+    const entry = permissionRuleRow(value2, ["id", "mode", "match", "sandboxMode"]), match = permissionRuleRow(entry.match, ["tool", "executable", "args", "workingDirectory"], ["subcommand"]);
+    const id3 = text6(entry.id), cwd = text6(match.workingDirectory);
+    if (ids.has(id3) || !["ask", "allow"].includes(entry.mode) || !["bash", "pwsh"].includes(match.tool) || !["workspace-write", "danger-full-access"].includes(entry.sandboxMode) || !/^(?:\/|[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$))/iu.test(cwd) || !Array.isArray(match.args)) throw new PermissionRefusal("validation");
+    ids.add(id3);
+    return Object.freeze({ id: id3, mode: entry.mode, sandboxMode: entry.sandboxMode, match: Object.freeze({
       tool: match.tool,
-      executable: text5(match.executable),
-      ...match.subcommand === void 0 ? {} : { subcommand: text5(match.subcommand) },
-      args: Object.freeze(match.args.map(text5)),
+      executable: text6(match.executable),
+      ...match.subcommand === void 0 ? {} : { subcommand: text6(match.subcommand) },
+      args: Object.freeze(match.args.map(text6)),
       workingDirectory: cwd
     }) });
   });
-  return Object.freeze({ enabled: row.enabled ?? false, entries: Object.freeze(entries) });
+  return Object.freeze({ enabled: row2.enabled ?? false, entries: Object.freeze(entries) });
 }
 var nativeCommands = Schema.object({ enabled: Schema.boolean().default(false), entries: Schema.array(Schema.object({
   id: Schema.string().required(),
@@ -2725,12 +2725,12 @@ function safeDiagnosticField(parts) {
   }
   return result || "document";
 }
-function isSafeDiagnosticField(value) {
-  return typeof value === "string" && value.length <= 256 && /^(?:[a-zA-Z][a-zA-Z0-9_-]{0,63}|\[unknown\])(?:\.(?:[a-zA-Z][a-zA-Z0-9_-]{0,63}|\[unknown\])|\[(?:0|[1-9][0-9]{0,5})\])*$/u.test(value) && safeDiagnosticField(fieldParts(value)) === value;
+function isSafeDiagnosticField(value2) {
+  return typeof value2 === "string" && value2.length <= 256 && /^(?:[a-zA-Z][a-zA-Z0-9_-]{0,63}|\[unknown\])(?:\.(?:[a-zA-Z][a-zA-Z0-9_-]{0,63}|\[unknown\])|\[(?:0|[1-9][0-9]{0,5})\])*$/u.test(value2) && safeDiagnosticField(fieldParts(value2)) === value2;
 }
-function diagnostic(code, field, location) {
-  const reason = code === "unsupported-value" && (field === "locale" || field === "settings.locale") ? "Supported locales: en, zh-Hans, zh-Hant, ja, ko, de, fr, es, pt-BR, ru." : PROFILE_DIAGNOSTIC_REASONS[code];
-  return { severity: code === "blank-label" ? "warning" : "error", code, field: safeDiagnosticField(fieldParts(field)), reason, ...location === void 0 ? {} : { location } };
+function diagnostic(code2, field, location) {
+  const reason = code2 === "unsupported-value" && (field === "locale" || field === "settings.locale") ? "Supported locales: en, zh-Hans, zh-Hant, ja, ko, de, fr, es, pt-BR, ru." : PROFILE_DIAGNOSTIC_REASONS[code2];
+  return { severity: code2 === "blank-label" ? "warning" : "error", code: code2, field: safeDiagnosticField(fieldParts(field)), reason, ...location === void 0 ? {} : { location } };
 }
 function diagnosticLocation(content2, offset, length) {
   const before = content2.slice(0, offset).split(/\r\n|\r|\n/u);
@@ -2748,9 +2748,9 @@ function fieldLocation(content2, tree, field, sourcePath) {
   return diagnosticLocation(content2, selected.offset, selected.length);
 }
 function inspectJsonDocument(content2, jsonc = true) {
-  const errors = [];
-  const tree = parseTree2(content2.replace(/^\uFEFF/u, " "), errors, { allowTrailingComma: jsonc, disallowComments: !jsonc, allowEmptyContent: false });
-  if (tree === void 0 || errors.length) return { tree, diagnostics: [diagnostic("invalid-jsonc", "content", diagnosticLocation(content2, errors[0]?.offset ?? 0, errors[0]?.length ?? 0))] };
+  const errors2 = [];
+  const tree = parseTree2(content2.replace(/^\uFEFF/u, " "), errors2, { allowTrailingComma: jsonc, disallowComments: !jsonc, allowEmptyContent: false });
+  if (tree === void 0 || errors2.length) return { tree, diagnostics: [diagnostic("invalid-jsonc", "content", diagnosticLocation(content2, errors2[0]?.offset ?? 0, errors2[0]?.length ?? 0))] };
   const diagnostics = [];
   const walk = (node, path, depth2) => {
     if (depth2 > 32) {
@@ -2761,8 +2761,8 @@ function inspectJsonDocument(content2, jsonc = true) {
       const found = /* @__PURE__ */ new Set();
       for (const property2 of node.children ?? []) {
         const keyNode = property2.children[0], key = String(keyNode.value), next = [...path, key];
-        const code = ["__proto__", "constructor", "prototype"].includes(key) ? "unsafe-field" : found.has(key) ? "duplicate-field" : void 0;
-        if (code !== void 0) diagnostics.push(diagnostic(code, safeDiagnosticField(next), diagnosticLocation(content2, keyNode.offset, keyNode.length)));
+        const code2 = ["__proto__", "constructor", "prototype"].includes(key) ? "unsafe-field" : found.has(key) ? "duplicate-field" : void 0;
+        if (code2 !== void 0) diagnostics.push(diagnostic(code2, safeDiagnosticField(next), diagnosticLocation(content2, keyNode.offset, keyNode.length)));
         found.add(key);
         walk(property2.children[1], next, depth2 + 1);
       }
@@ -2773,11 +2773,11 @@ function inspectJsonDocument(content2, jsonc = true) {
 }
 
 // src/config-revision.ts
-function isConfigRevision(value) {
-  return typeof value === "string" && (/^[a-f0-9]{64}$/u.test(value) || /^stat-v1--?\d{1,24}--?\d{1,24}$/u.test(value));
+function isConfigRevision(value2) {
+  return typeof value2 === "string" && (/^[a-f0-9]{64}$/u.test(value2) || /^stat-v1--?\d{1,24}--?\d{1,24}$/u.test(value2));
 }
-function isProfileReference(value) {
-  return typeof value === "string" && (/^[a-f0-9]{64}$/u.test(value) || /^snapshot-v1-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(value));
+function isProfileReference(value2) {
+  return typeof value2 === "string" && (/^[a-f0-9]{64}$/u.test(value2) || /^snapshot-v1-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(value2));
 }
 
 // src/profile-remote.ts
@@ -2785,86 +2785,86 @@ var errorCodes = /* @__PURE__ */ new Set(["validation", "conflict", "not-found",
 var idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 var revisionPattern = /^[a-f0-9]{64}$/u;
 var rolePattern = /^dsmm-(?:orchestrator|planner|plan-critic|builder|reviewer|oracle|oracle-2nd|creative|code-search|doc-search|clarifier|media-reader|frontend|hard-reasoning|research|quick|coding|normal-task|complex|deep|documenting|cross-cutting)$/u;
-function isProfileId(value) {
-  return typeof value === "string" && idPattern.test(value) && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(value);
+function isProfileId(value2) {
+  return typeof value2 === "string" && idPattern.test(value2) && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(value2);
 }
 function fail2(field) {
   throw new TypeError(`Invalid Deepwork profile wire field: ${field}`);
 }
-function text2(value, field, maximum = 1024) {
-  if (typeof value !== "string" || value.length > maximum) fail2(field);
-  return value;
+function text2(value2, field, maximum = 1024) {
+  if (typeof value2 !== "string" || value2.length > maximum) fail2(field);
+  return value2;
 }
-function id(value) {
-  const result = text2(value, "id", 64);
+function id(value2) {
+  const result = text2(value2, "id", 64);
   if (!isProfileId(result)) fail2("id");
   return result;
 }
-function revision(value) {
-  const result = text2(value, "revision", 128);
+function revision(value2) {
+  const result = text2(value2, "revision", 128);
   if (!isConfigRevision(result)) fail2("revision");
   return result;
 }
-function epoch(value) {
-  if (typeof value !== "string" || !revisionPattern.test(value)) fail2("epoch");
-  return value;
+function epoch(value2) {
+  if (typeof value2 !== "string" || !revisionPattern.test(value2)) fail2("epoch");
+  return value2;
 }
-function reference(value) {
-  if (!isProfileReference(value)) fail2("reference");
-  return value;
+function reference(value2) {
+  if (!isProfileReference(value2)) fail2("reference");
+  return value2;
 }
-function modeRevision(value) {
-  if (typeof value !== "string" || !/^(?:[a-f0-9]{64}|mode-v1-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/u.test(value)) fail2("mode revision");
-  return value;
+function modeRevision(value2) {
+  if (typeof value2 !== "string" || !/^(?:[a-f0-9]{64}|mode-v1-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/u.test(value2)) fail2("mode revision");
+  return value2;
 }
-function refresh(value) {
-  if (value !== true) fail2("refreshRequired");
+function refresh(value2) {
+  if (value2 !== true) fail2("refreshRequired");
   return true;
 }
-function observedRevision(value, row) {
-  return value === "unavailable" && row.refreshRequired === true ? value : selectionRevision(value);
+function observedRevision(value2, row2) {
+  return value2 === "unavailable" && row2.refreshRequired === true ? value2 : selectionRevision(value2);
 }
-function selectionRevision(value) {
-  return value === "absent" ? value : revision(value);
+function selectionRevision(value2) {
+  return value2 === "absent" ? value2 : revision(value2);
 }
-function isNativeSessionId(value) {
-  return typeof value === "string" && value.length > 0 && value.length <= 256 && !/[\u0000-\u001f\u007f]/u.test(value) && new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(value)) === value;
+function isNativeSessionId(value2) {
+  return typeof value2 === "string" && value2.length > 0 && value2.length <= 256 && !/[\u0000-\u001f\u007f]/u.test(value2) && new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(value2)) === value2;
 }
-function sessionId(value) {
-  if (!isNativeSessionId(value)) fail2("sessionId");
-  return value;
+function sessionId(value2) {
+  if (!isNativeSessionId(value2)) fail2("sessionId");
+  return value2;
 }
-function boolean(value, field) {
-  if (typeof value !== "boolean") fail2(field);
-  return value;
+function boolean(value2, field) {
+  if (typeof value2 !== "boolean") fail2(field);
+  return value2;
 }
-function integer2(value, field, maximum = Number.MAX_SAFE_INTEGER) {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum) fail2(field);
-  return value;
+function integer2(value2, field, maximum = Number.MAX_SAFE_INTEGER) {
+  if (typeof value2 !== "number" || !Number.isSafeInteger(value2) || value2 < 0 || value2 > maximum) fail2(field);
+  return value2;
 }
-function role2(value) {
-  if (typeof value !== "string" || !rolePattern.test(value)) fail2("role");
-  return value;
+function role2(value2) {
+  if (typeof value2 !== "string" || !rolePattern.test(value2)) fail2("role");
+  return value2;
 }
-function object(value, required, optional2 = []) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) fail2("object");
-  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null || Object.getOwnPropertySymbols(value).length || Object.values(Object.getOwnPropertyDescriptors(value)).some((property2) => !Object.hasOwn(property2, "value") || !property2.enumerable)) fail2("object");
-  const result = value;
+function object(value2, required, optional2 = []) {
+  if (value2 === null || typeof value2 !== "object" || Array.isArray(value2)) fail2("object");
+  if (Object.getPrototypeOf(value2) !== Object.prototype && Object.getPrototypeOf(value2) !== null || Object.getOwnPropertySymbols(value2).length || Object.values(Object.getOwnPropertyDescriptors(value2)).some((property2) => !Object.hasOwn(property2, "value") || !property2.enumerable)) fail2("object");
+  const result = value2;
   if (Object.keys(result).some((key) => !required.includes(key) && !optional2.includes(key)) || required.some((key) => !Object.hasOwn(result, key))) fail2("object keys");
   return result;
 }
-function optional(value, key, parse3) {
-  return Object.hasOwn(value, key) ? { [key]: parse3(value[key]) } : {};
+function optional(value2, key, parse3) {
+  return Object.hasOwn(value2, key) ? { [key]: parse3(value2[key]) } : {};
 }
-function parseProfileErrorInfo(value) {
-  const item = object(value, ["code", "message"], ["field", "reason", "location"]);
-  const code = text2(item.code, "code");
-  if (!errorCodes.has(code)) fail2("code");
+function parseProfileErrorInfo(value2) {
+  const item = object(value2, ["code", "message"], ["field", "reason", "location"]);
+  const code2 = text2(item.code, "code");
+  if (!errorCodes.has(code2)) fail2("code");
   const reason = item.reason === void 0 ? void 0 : text2(item.reason, "reason", 64);
   if (reason !== void 0 && (!Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, reason) || reason === "blank-label")) fail2("reason");
   const field = item.field === void 0 ? void 0 : diagnosticField(item.field);
   return {
-    code,
+    code: code2,
     message: reason === void 0 ? text2(item.message, "message", 4096) : `${field ?? "document"}: ${diagnostic(reason, field ?? "document").reason}`,
     ...field === void 0 ? {} : { field },
     ...reason === void 0 ? {} : { reason },
@@ -2872,78 +2872,78 @@ function parseProfileErrorInfo(value) {
   };
 }
 var errorInfo = parseProfileErrorInfo;
-function diagnosticField(value) {
-  if (!isSafeDiagnosticField(value)) fail2("field");
-  return value;
+function diagnosticField(value2) {
+  if (!isSafeDiagnosticField(value2)) fail2("field");
+  return value2;
 }
-function diagnosticPosition(value) {
-  const item = object(value, ["offset", "length", "line", "column"]);
+function diagnosticPosition(value2) {
+  const item = object(value2, ["offset", "length", "line", "column"]);
   const result = { offset: integer2(item.offset, "offset", 128 * 1024), length: integer2(item.length, "length", 128 * 1024), line: integer2(item.line, "line", 128 * 1024 + 1), column: integer2(item.column, "column", 128 * 1024 + 1) };
   if (result.line < 1 || result.column < 1 || result.offset + result.length > 128 * 1024) fail2("location");
   return result;
 }
-function parseProfileDiagnostic(value) {
-  const row = object(value, ["severity", "code", "field", "reason"], ["location"]);
-  if (typeof row.code !== "string" || !Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, row.code)) fail2("diagnostic code");
-  const result = diagnostic(row.code, diagnosticField(row.field));
-  if (row.severity !== result.severity || row.reason !== result.reason) fail2("diagnostic severity/reason");
-  return { ...result, ...optional(row, "location", diagnosticPosition) };
+function parseProfileDiagnostic(value2) {
+  const row2 = object(value2, ["severity", "code", "field", "reason"], ["location"]);
+  if (typeof row2.code !== "string" || !Object.hasOwn(PROFILE_DIAGNOSTIC_REASONS, row2.code)) fail2("diagnostic code");
+  const result = diagnostic(row2.code, diagnosticField(row2.field));
+  if (row2.severity !== result.severity || row2.reason !== result.reason) fail2("diagnostic severity/reason");
+  return { ...result, ...optional(row2, "location", diagnosticPosition) };
 }
-function warnings(value) {
-  if (!Array.isArray(value) || value.length > 1) fail2("warnings");
-  return value.map((value2) => {
-    const result = parseProfileDiagnostic(value2);
+function warnings(value2) {
+  if (!Array.isArray(value2) || value2.length > 1) fail2("warnings");
+  return value2.map((value3) => {
+    const result = parseProfileDiagnostic(value3);
     if (result.severity !== "warning" || result.code !== "blank-label" || result.field !== "label") fail2("warning");
     return result;
   });
 }
-function parseRoleAvailability(value) {
-  const row = object(value, ["id", "required", "startupAvailable", "deploymentEnabled", "admitted", "source", "capture"], ["requiredReason", "namedEnabled", "reason"]);
-  if (typeof row.source !== "string" || !["defaults", "global", "profile", "named-session"].includes(row.source) || typeof row.capture !== "string" || !["startup", "deployment", "named-session"].includes(row.capture)) fail2("role source/capture");
-  if (row.reason !== void 0 && (typeof row.reason !== "string" || !["module-off", "deployment-disabled", "startup-unavailable", "profile-disabled", "required-role", "current-root-disabled"].includes(row.reason))) fail2("role reason");
-  if (row.requiredReason !== void 0 && (typeof row.requiredReason !== "string" || !["deepwork-planning", "legacy-review"].includes(row.requiredReason))) fail2("requiredReason");
+function parseRoleAvailability(value2) {
+  const row2 = object(value2, ["id", "required", "startupAvailable", "deploymentEnabled", "admitted", "source", "capture"], ["requiredReason", "namedEnabled", "reason"]);
+  if (typeof row2.source !== "string" || !["defaults", "global", "profile", "named-session"].includes(row2.source) || typeof row2.capture !== "string" || !["startup", "deployment", "named-session"].includes(row2.capture)) fail2("role source/capture");
+  if (row2.reason !== void 0 && (typeof row2.reason !== "string" || !["module-off", "deployment-disabled", "startup-unavailable", "profile-disabled", "required-role", "current-root-disabled"].includes(row2.reason))) fail2("role reason");
+  if (row2.requiredReason !== void 0 && (typeof row2.requiredReason !== "string" || !["deepwork-planning", "legacy-review"].includes(row2.requiredReason))) fail2("requiredReason");
   return {
-    id: role2(row.id),
-    required: boolean(row.required, "required"),
-    startupAvailable: boolean(row.startupAvailable, "startupAvailable"),
-    deploymentEnabled: boolean(row.deploymentEnabled, "deploymentEnabled"),
-    admitted: boolean(row.admitted, "admitted"),
-    source: row.source,
-    capture: row.capture,
-    ...optional(row, "namedEnabled", (value2) => boolean(value2, "namedEnabled")),
-    ...row.reason === void 0 ? {} : { reason: row.reason },
-    ...row.requiredReason === void 0 ? {} : { requiredReason: row.requiredReason }
+    id: role2(row2.id),
+    required: boolean(row2.required, "required"),
+    startupAvailable: boolean(row2.startupAvailable, "startupAvailable"),
+    deploymentEnabled: boolean(row2.deploymentEnabled, "deploymentEnabled"),
+    admitted: boolean(row2.admitted, "admitted"),
+    source: row2.source,
+    capture: row2.capture,
+    ...optional(row2, "namedEnabled", (value3) => boolean(value3, "namedEnabled")),
+    ...row2.reason === void 0 ? {} : { reason: row2.reason },
+    ...row2.requiredReason === void 0 ? {} : { requiredReason: row2.requiredReason }
   };
 }
-function roleAvailabilityList(value) {
-  if (!Array.isArray(value) || value.length > 22) fail2("roles");
-  const result = value.map(parseRoleAvailability);
+function roleAvailabilityList(value2) {
+  if (!Array.isArray(value2) || value2.length > 22) fail2("roles");
+  const result = value2.map(parseRoleAvailability);
   if (new Set(result.map((role3) => role3.id)).size !== result.length) fail2("roles");
   return result;
 }
-function parseSubagentRuntimeAdmissionView(value) {
-  const row = object(value, ["binding", "deliveryFenceReady", "restartRequired"], ["reason"]);
-  if (typeof row.binding !== "string" || !["stock", "unavailable"].includes(row.binding) || row.reason !== void 0 && row.reason !== "authority-not-ready") fail2("subagentRuntime");
-  const ready = boolean(row.deliveryFenceReady, "deliveryFenceReady");
-  if (ready && (row.binding === "unavailable" || row.reason !== void 0)) fail2("subagentRuntime readiness");
-  return { binding: row.binding, deliveryFenceReady: ready, restartRequired: boolean(row.restartRequired, "restartRequired"), ...row.reason === void 0 ? {} : { reason: row.reason } };
+function parseSubagentRuntimeAdmissionView(value2) {
+  const row2 = object(value2, ["binding", "deliveryFenceReady", "restartRequired"], ["reason"]);
+  if (typeof row2.binding !== "string" || !["stock", "unavailable"].includes(row2.binding) || row2.reason !== void 0 && row2.reason !== "authority-not-ready") fail2("subagentRuntime");
+  const ready = boolean(row2.deliveryFenceReady, "deliveryFenceReady");
+  if (ready && (row2.binding === "unavailable" || row2.reason !== void 0)) fail2("subagentRuntime readiness");
+  return { binding: row2.binding, deliveryFenceReady: ready, restartRequired: boolean(row2.restartRequired, "restartRequired"), ...row2.reason === void 0 ? {} : { reason: row2.reason } };
 }
-function readResult(value) {
-  const item = object(value, ["id", "revision", "content"], ["label", "warnings", "refreshRequired"]);
+function readResult(value2) {
+  const item = object(value2, ["id", "revision", "content"], ["label", "warnings", "refreshRequired"]);
   return { id: id(item.id), revision: item.revision === "unavailable" && item.refreshRequired === true ? "unavailable" : revision(item.revision), content: content(item.content), ...optional(item, "refreshRequired", refresh), ...optional(item, "label", (input) => text2(input, "label", 120)), ...optional(item, "warnings", warnings) };
 }
-function content(value) {
-  const result = text2(value, "content", 128 * 1024);
+function content(value2) {
+  const result = text2(value2, "content", 128 * 1024);
   if (new TextEncoder().encode(result).byteLength > 128 * 1024) fail2("content");
   return result;
 }
-function snapshot2(value) {
-  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction", "selectedWarnings", "sourceRevision", "refreshRequired"]);
+function snapshot2(value2) {
+  const item = object(value2, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction", "selectedWarnings", "sourceRevision", "refreshRequired"]);
   if (!Array.isArray(item.profiles) || item.profiles.length > 128) fail2("profiles");
   return {
     profiles: item.profiles.map((input) => {
-      const row = object(input, ["id", "revision"], ["label", "error", "warnings"]);
-      return { id: text2(row.id, "id", 64), revision: row.revision === null ? null : revision(row.revision), ...optional(row, "label", (input2) => text2(input2, "label", 120)), ...optional(row, "error", errorInfo), ...optional(row, "warnings", warnings) };
+      const row2 = object(input, ["id", "revision"], ["label", "error", "warnings"]);
+      return { id: text2(row2.id, "id", 64), revision: row2.revision === null ? null : revision(row2.revision), ...optional(row2, "label", (input2) => text2(input2, "label", 120)), ...optional(row2, "error", errorInfo), ...optional(row2, "warnings", warnings) };
     }),
     selectedId: item.selectedId === null ? null : id(item.selectedId),
     appliedRevision: item.appliedRevision === null ? null : reference(item.appliedRevision),
@@ -2954,14 +2954,14 @@ function snapshot2(value) {
     ...optional(item, "selectedWarnings", warnings),
     ...optional(item, "roles", (input) => {
       if (!Array.isArray(input) || input.length > 22) fail2("roles");
-      const result = input.map((value2) => {
-        const row = object(value2, ["id", "label", "enabled"], ["runtimePolicy", "availability"]);
-        return { id: role2(row.id), label: text2(row.label, "label", 120), enabled: boolean(row.enabled, "enabled"), ...optional(row, "availability", parseRoleAvailability), ...optional(row, "runtimePolicy", (input2) => {
+      const result = input.map((value3) => {
+        const row2 = object(value3, ["id", "label", "enabled"], ["runtimePolicy", "availability"]);
+        return { id: role2(row2.id), label: text2(row2.label, "label", 120), enabled: boolean(row2.enabled, "enabled"), ...optional(row2, "availability", parseRoleAvailability), ...optional(row2, "runtimePolicy", (input2) => {
           const policy = object(input2, [], ["strategy", "rateLimit"]);
           return { ...optional(policy, "strategy", normalizeRoutingStrategy), ...optional(policy, "rateLimit", normalizeRateLimitOverrides) };
         }) };
       });
-      if (new Set(result.map((row) => row.id)).size !== result.length) fail2("roles");
+      if (new Set(result.map((row2) => row2.id)).size !== result.length) fail2("roles");
       return result;
     }),
     ...optional(item, "editorDefaults", runtimePolicy),
@@ -2973,16 +2973,16 @@ function snapshot2(value) {
     ...optional(item, "writeRestriction", (input) => text2(input, "writeRestriction", 1024))
   };
 }
-function rateLimit2(value) {
-  const item = object(value, Object.keys(DSMM_RATE_LIMIT_BOUNDS));
+function rateLimit2(value2) {
+  const item = object(value2, Object.keys(DSMM_RATE_LIMIT_BOUNDS));
   return normalizeRateLimitPolicy(item);
 }
-function runtimePolicy(value) {
-  const item = object(value, ["strategy", "rateLimit"]);
+function runtimePolicy(value2) {
+  const item = object(value2, ["strategy", "rateLimit"]);
   return { strategy: normalizeRoutingStrategy(item.strategy), rateLimit: rateLimit2(item.rateLimit) };
 }
-function rolePolicy(value) {
-  const item = object(value, ["strategy", "rateLimit", "retries", "rateLimitFailures", "switches", "totalDelayMs"], ["role", "route"]);
+function rolePolicy(value2) {
+  const item = object(value2, ["strategy", "rateLimit", "retries", "rateLimitFailures", "switches", "totalDelayMs"], ["role", "route"]);
   return {
     ...runtimePolicy({ strategy: item.strategy, rateLimit: item.rateLimit }),
     retries: integer2(item.retries, "retries", 10),
@@ -2993,54 +2993,54 @@ function rolePolicy(value) {
     ...optional(item, "route", modelRoute)
   };
 }
-function modelRoute(value) {
-  return normalizeModelRouteJson(value);
+function modelRoute(value2) {
+  return normalizeModelRouteJson(value2);
 }
-function initialRoleRoute(value) {
-  const row = object(value, ["status"], ["source", "route", "reason"]);
-  if (row.status === "known") {
-    object(row, ["status", "source", "route"]);
-    if (row.source !== "invocation-capture") fail2("initialRoute source");
-    return { status: "known", source: "invocation-capture", route: modelRoute(row.route) };
+function initialRoleRoute(value2) {
+  const row2 = object(value2, ["status"], ["source", "route", "reason"]);
+  if (row2.status === "known") {
+    object(row2, ["status", "source", "route"]);
+    if (row2.source !== "invocation-capture") fail2("initialRoute source");
+    return { status: "known", source: "invocation-capture", route: modelRoute(row2.route) };
   }
-  object(row, ["status", "reason"]);
-  if (row.status !== "unknown" || row.reason !== "missing-invocation-capture") fail2("initialRoute reason");
+  object(row2, ["status", "reason"]);
+  if (row2.status !== "unknown" || row2.reason !== "missing-invocation-capture") fail2("initialRoute reason");
   return { status: "unknown", reason: "missing-invocation-capture" };
 }
-function liveRoleRoute(value) {
-  const row = object(value, ["status"], ["source", "route", "reason"]);
-  if (row.status === "known") {
-    object(row, ["status", "source", "route"]);
-    if (row.source !== "own-native-request-header") fail2("liveRoute source");
-    return { status: "known", source: "own-native-request-header", route: modelRoute(row.route) };
+function liveRoleRoute(value2) {
+  const row2 = object(value2, ["status"], ["source", "route", "reason"]);
+  if (row2.status === "known") {
+    object(row2, ["status", "source", "route"]);
+    if (row2.source !== "own-native-request-header") fail2("liveRoute source");
+    return { status: "known", source: "own-native-request-header", route: modelRoute(row2.route) };
   }
-  object(row, ["status", "reason"]);
-  if (row.status !== "unknown" || typeof row.reason !== "string" || !["no-own-request-header", "invalid-own-request-header", "not-observed"].includes(row.reason)) fail2("liveRoute reason");
-  return { status: "unknown", reason: row.reason };
+  object(row2, ["status", "reason"]);
+  if (row2.status !== "unknown" || typeof row2.reason !== "string" || !["no-own-request-header", "invalid-own-request-header", "not-observed"].includes(row2.reason)) fail2("liveRoute reason");
+  return { status: "unknown", reason: row2.reason };
 }
-function parseDsmmRoleRouteComparison(value) {
-  const row = object(jsonData(value), ["childId", "initialRoute", "liveRoute"]);
-  return { childId: sessionId(row.childId), initialRoute: initialRoleRoute(row.initialRoute), liveRoute: liveRoleRoute(row.liveRoute) };
+function parseDsmmRoleRouteComparison(value2) {
+  const row2 = object(jsonData(value2), ["childId", "initialRoute", "liveRoute"]);
+  return { childId: sessionId(row2.childId), initialRoute: initialRoleRoute(row2.initialRoute), liveRoute: liveRoleRoute(row2.liveRoute) };
 }
-function parseDsmmInvocationView(value) {
-  const row = object(jsonData(value), ["role", "label", "level", "routeSource", "mode"], ["route", "runId", "childId", "jobId", "routeComparison"]);
-  if (typeof row.level !== "string" || !["normal", "low", "high", "max"].includes(row.level) || !DSMM_ROUTE_SOURCES.includes(row.routeSource) || typeof row.mode !== "string" || !["one-shot", "continuable"].includes(row.mode)) fail2("invocation");
-  const target = role2(row.role);
+function parseDsmmInvocationView(value2) {
+  const row2 = object(jsonData(value2), ["role", "label", "level", "routeSource", "mode"], ["route", "runId", "childId", "jobId", "routeComparison"]);
+  if (typeof row2.level !== "string" || !["normal", "low", "high", "max"].includes(row2.level) || !DSMM_ROUTE_SOURCES.includes(row2.routeSource) || typeof row2.mode !== "string" || !["one-shot", "continuable"].includes(row2.mode)) fail2("invocation");
+  const target = role2(row2.role);
   if (target === "dsmm-orchestrator") fail2("invocation target");
-  const routeComparison = Object.hasOwn(row, "routeComparison") ? parseDsmmRoleRouteComparison(row.routeComparison) : void 0;
-  if (routeComparison !== void 0 && (!Object.hasOwn(row, "childId") || routeComparison.childId !== row.childId)) fail2("invocation routeComparison childId");
-  return { role: target, label: text2(row.label, "label", 120), level: row.level, routeSource: row.routeSource, mode: row.mode, ...optional(row, "route", modelRoute), ...optional(row, "runId", sessionId), ...optional(row, "childId", sessionId), ...optional(row, "jobId", sessionId), ...routeComparison === void 0 ? {} : { routeComparison } };
+  const routeComparison = Object.hasOwn(row2, "routeComparison") ? parseDsmmRoleRouteComparison(row2.routeComparison) : void 0;
+  if (routeComparison !== void 0 && (!Object.hasOwn(row2, "childId") || routeComparison.childId !== row2.childId)) fail2("invocation routeComparison childId");
+  return { role: target, label: text2(row2.label, "label", 120), level: row2.level, routeSource: row2.routeSource, mode: row2.mode, ...optional(row2, "route", modelRoute), ...optional(row2, "runId", sessionId), ...optional(row2, "childId", sessionId), ...optional(row2, "jobId", sessionId), ...routeComparison === void 0 ? {} : { routeComparison } };
 }
-function selectionState(value) {
-  const item = object(value, ["selectedId", "appliedRevision", "selectionRevision"], ["sourceRevision", "refreshRequired"]);
+function selectionState(value2) {
+  const item = object(value2, ["selectedId", "appliedRevision", "selectionRevision"], ["sourceRevision", "refreshRequired"]);
   return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : reference(item.appliedRevision), selectionRevision: observedRevision(item.selectionRevision, item), ...optional(item, "sourceRevision", revision), ...optional(item, "refreshRequired", refresh) };
 }
-function actionUnavailableReason(value) {
-  if (typeof value !== "string" || !["busy", "maintenance", "module-off", "runtime-unavailable", "model-unconfigured", "model-service-unavailable", "new-session-required"].includes(value)) fail2("actionUnavailableReason");
-  return value;
+function actionUnavailableReason(value2) {
+  if (typeof value2 !== "string" || !["busy", "maintenance", "module-off", "runtime-unavailable", "model-unconfigured", "model-service-unavailable", "new-session-required"].includes(value2)) fail2("actionUnavailableReason");
+  return value2;
 }
-function sessionSnapshot(value) {
-  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed", "canSelectModel", "canToggleMode", "canApplyOverlay"], ["admittedSelection", "switchUnavailableReason", "selectModelUnavailableReason", "toggleModeUnavailableReason", "applyOverlayUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration", "warnings", "roles", "subagentRuntime", "refreshRequired"]);
+function sessionSnapshot(value2) {
+  const item = object(value2, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed", "canSelectModel", "canToggleMode", "canApplyOverlay"], ["admittedSelection", "switchUnavailableReason", "selectModelUnavailableReason", "toggleModeUnavailableReason", "applyOverlayUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration", "warnings", "roles", "subagentRuntime", "refreshRequired"]);
   if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope)) fail2("scope");
   return {
     sessionId: sessionId(item.sessionId),
@@ -3074,91 +3074,91 @@ function sessionSnapshot(value) {
     })
   };
 }
-function saveRequest(value) {
-  const item = object(value, ["id", "content", "expectedRevision"]);
+function saveRequest(value2) {
+  const item = object(value2, ["id", "content", "expectedRevision"]);
   return { id: id(item.id), content: content(item.content), expectedRevision: item.expectedRevision === null ? null : revision(item.expectedRevision) };
 }
-function selectRequest(value) {
-  const item = object(value, ["id", "expectedSelectionRevision"], ["expectedRevision"]);
+function selectRequest(value2) {
+  const item = object(value2, ["id", "expectedSelectionRevision"], ["expectedRevision"]);
   const result = { id: item.id === null ? null : id(item.id), expectedSelectionRevision: selectionRevision(item.expectedSelectionRevision), ...optional(item, "expectedRevision", revision) };
   if (result.id !== null && result.expectedRevision === void 0) fail2("expectedRevision");
   if (result.id === null && result.expectedRevision !== void 0) fail2("expectedRevision");
   return result;
 }
-function sessionSelectRequest(value) {
-  const item = object(value, ["sessionId", "id", "expectedSelectionRevision", "expectedAdmissionEpoch"], ["expectedRevision"]);
+function sessionSelectRequest(value2) {
+  const item = object(value2, ["sessionId", "id", "expectedSelectionRevision", "expectedAdmissionEpoch"], ["expectedRevision"]);
   const { sessionId: inputSessionId, expectedAdmissionEpoch, ...profileRequest } = item;
   return { ...selectRequest(profileRequest), sessionId: sessionId(inputSessionId), expectedAdmissionEpoch: epoch(expectedAdmissionEpoch) };
 }
-function modeSelectRequest(value) {
-  const item = object(value, ["sessionId", "active", "expectedModeRevision", "expectedAdmissionEpoch"]);
+function modeSelectRequest(value2) {
+  const item = object(value2, ["sessionId", "active", "expectedModeRevision", "expectedAdmissionEpoch"]);
   return { sessionId: sessionId(item.sessionId), active: boolean(item.active, "active"), expectedModeRevision: modeRevision(item.expectedModeRevision), expectedAdmissionEpoch: epoch(item.expectedAdmissionEpoch) };
 }
 function codec(symbol, parse3) {
-  return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse: (value) => parse3(jsonData(value)) }) };
+  return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse: (value2) => parse3(jsonData(value2)) }) };
 }
 function descriptor(method, result, parameter) {
   return { id: `@dsmm/dsmm#dsmmProfiles/${method}`, service: "dsmmProfiles", namespace: "dsmmProfiles", method, invocation: { kind: "direct" }, parameters: parameter === void 0 ? [] : [{ name: parameter.name, wire: parameter.name, source: "json", codec: parameter.codec }], result };
 }
-function jsonData(value, depth2 = 0, active = /* @__PURE__ */ new Set()) {
+function jsonData(value2, depth2 = 0, active = /* @__PURE__ */ new Set()) {
   if (depth2 > 32) fail2("JSON depth");
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "object" || value === null || active.has(value)) fail2("JSON value");
-  if (Array.isArray(value) ? Object.getPrototypeOf(value) !== Array.prototype : Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) fail2("JSON object");
-  if (Object.getOwnPropertySymbols(value).length) fail2("JSON symbols");
-  const properties = Object.getOwnPropertyDescriptors(value);
+  if (value2 === null || typeof value2 === "string" || typeof value2 === "boolean") return value2;
+  if (typeof value2 === "number" && Number.isFinite(value2)) return value2;
+  if (typeof value2 !== "object" || value2 === null || active.has(value2)) fail2("JSON value");
+  if (Array.isArray(value2) ? Object.getPrototypeOf(value2) !== Array.prototype : Object.getPrototypeOf(value2) !== Object.prototype && Object.getPrototypeOf(value2) !== null) fail2("JSON object");
+  if (Object.getOwnPropertySymbols(value2).length) fail2("JSON symbols");
+  const properties = Object.getOwnPropertyDescriptors(value2);
   for (const [key, property2] of Object.entries(properties)) {
-    if (Array.isArray(value) && key === "length") continue;
-    if (!Object.hasOwn(property2, "value") || !property2.enumerable || Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key)) fail2("JSON property");
+    if (Array.isArray(value2) && key === "length") continue;
+    if (!Object.hasOwn(property2, "value") || !property2.enumerable || Array.isArray(value2) && !/^(0|[1-9][0-9]*)$/u.test(key)) fail2("JSON property");
   }
-  if (Array.isArray(value) && Object.keys(value).length !== value.length) fail2("JSON array holes");
-  active.add(value);
-  const result = Array.isArray(value) ? value.map((child2) => jsonData(child2, depth2 + 1, active)) : Object.fromEntries(Object.entries(value).map(([key, child2]) => {
+  if (Array.isArray(value2) && Object.keys(value2).length !== value2.length) fail2("JSON array holes");
+  active.add(value2);
+  const result = Array.isArray(value2) ? value2.map((child2) => jsonData(child2, depth2 + 1, active)) : Object.fromEntries(Object.entries(value2).map(([key, child2]) => {
     if (["__proto__", "prototype", "constructor"].includes(key)) fail2("JSON key");
     return [key, jsonData(child2, depth2 + 1, active)];
   }));
-  active.delete(value);
+  active.delete(value2);
   return result;
 }
-function globalSnapshot(value) {
-  const row = object(value, ["config", "revision"], ["refreshRequired"]);
-  object(row.config, [], Object.keys(row.config));
-  return { config: jsonData(row.config), revision: observedRevision(row.revision, row), ...optional(row, "refreshRequired", refresh) };
+function globalSnapshot(value2) {
+  const row2 = object(value2, ["config", "revision"], ["refreshRequired"]);
+  object(row2.config, [], Object.keys(row2.config));
+  return { config: jsonData(row2.config), revision: observedRevision(row2.revision, row2), ...optional(row2, "refreshRequired", refresh) };
 }
-function admissionView(value) {
-  const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"], ["modelParameterPolicy"]);
-  object(row.settings, [], Object.keys(row.settings));
+function admissionView(value2) {
+  const row2 = object(value2, ["settings", "sources", "captures", "restartRequired", "named"], ["modelParameterPolicy"]);
+  object(row2.settings, [], Object.keys(row2.settings));
   for (const key of ["sources", "captures"]) {
-    const map = object(row[key], [], Object.keys(row[key]));
-    for (const [path, value2] of Object.entries(map)) {
+    const map = object(row2[key], [], Object.keys(row2[key]));
+    for (const [path, value3] of Object.entries(map)) {
       if (path.startsWith("lsp.env.")) fail2("private environment field");
-      text2(value2, key, 128);
+      text2(value3, key, 128);
     }
   }
-  if (!Array.isArray(row.restartRequired) || row.restartRequired.length > 256) fail2("restartRequired");
-  const named = row.named === null ? null : object(row.named, ["id", "revision"]);
+  if (!Array.isArray(row2.restartRequired) || row2.restartRequired.length > 256) fail2("restartRequired");
+  const named = row2.named === null ? null : object(row2.named, ["id", "revision"]);
   return {
-    ...optional(row, "modelParameterPolicy", (value2) => parseModelParameterPolicy(jsonData(value2))),
-    settings: readOnlySettingsData(row.settings),
-    sources: jsonData(row.sources),
-    captures: jsonData(row.captures),
-    restartRequired: row.restartRequired.map((value2) => text2(value2, "field", 256)),
+    ...optional(row2, "modelParameterPolicy", (value3) => parseModelParameterPolicy(jsonData(value3))),
+    settings: readOnlySettingsData(row2.settings),
+    sources: jsonData(row2.sources),
+    captures: jsonData(row2.captures),
+    restartRequired: row2.restartRequired.map((value3) => text2(value3, "field", 256)),
     named: named === null ? null : { id: id(named.id), revision: reference(named.revision) }
   };
 }
-function readOnlySettingsData(value) {
-  const settings = jsonData(value);
-  const configured = (value2) => {
-    if (value2 !== "" && value2 !== "<configured>") fail2("private configured value");
+function readOnlySettingsData(value2) {
+  const settings = jsonData(value2);
+  const configured = (value3) => {
+    if (value3 !== "" && value3 !== "<configured>") fail2("private configured value");
   };
   if (settings.lsp !== void 0) {
     const lsp = object(settings.lsp, ["enabled", "serverName", "command", "args", "cwd", "env", "toolCallTimeoutMs", "failOnStartupError"]);
     configured(lsp.command);
     configured(lsp.cwd);
-    if (!Array.isArray(lsp.args) || lsp.args.some((value2) => value2 !== "<configured>")) fail2("private arguments");
+    if (!Array.isArray(lsp.args) || lsp.args.some((value3) => value3 !== "<configured>")) fail2("private arguments");
     const env = object(lsp.env, [], Object.keys(lsp.env));
-    for (const [key, value2] of Object.entries(env)) if (!/^variable-[1-9][0-9]*$/u.test(key) || value2 !== "<redacted>") fail2("private environment");
+    for (const [key, value3] of Object.entries(env)) if (!/^variable-[1-9][0-9]*$/u.test(key) || value3 !== "<redacted>") fail2("private environment");
   }
   if (settings.presets !== void 0) {
     const presets = object(settings.presets, ["materialize"], ["root", "plannerRootEnabled"]);
@@ -3172,72 +3172,72 @@ function readOnlySettingsData(value) {
   }
   return settings;
 }
-function editorSnapshot(value) {
-  const row = object(value, ["entryId", "namespace", "hostProfileKey", "global", "globalRevision", "profile", "nativeRevision", "nativeFormRevision", "nativeForm", "desired", "sources", "startup", "defaults", "schema", "nextRoot", "modules"], ["startupSources", "nativeSchema", "subagentRuntime"]);
-  const result = jsonData(row);
-  text2(row.entryId, "entryId", 256);
-  if (row.namespace !== null) text2(row.namespace, "namespace", 256);
-  epoch(row.hostProfileKey);
-  selectionRevision(row.globalRevision);
-  if (row.nativeRevision !== "unavailable" && (typeof row.nativeRevision !== "string" || !/^native-v1-\d+$/u.test(row.nativeRevision))) fail2("nativeRevision");
-  if (row.nativeFormRevision !== null) integer2(row.nativeFormRevision, "nativeFormRevision");
-  for (const key of ["global", "profile", "desired", "sources", "startup", "defaults", "schema"]) object(row[key], [], Object.keys(row[key]));
-  if (row.nativeForm !== null) object(row.nativeForm, ["base", "user"]);
-  if (row.nextRoot !== null) result.nextRoot = admissionView(row.nextRoot);
-  result.desired = readOnlySettingsData(row.desired);
-  result.startup = readOnlySettingsData(row.startup);
-  result.schema = schemaNode(row.schema);
-  if (row.nativeSchema !== void 0) result.nativeSchema = schemaNode(row.nativeSchema);
-  if (row.subagentRuntime !== void 0) result.subagentRuntime = parseSubagentRuntimeAdmissionView(row.subagentRuntime);
+function editorSnapshot(value2) {
+  const row2 = object(value2, ["entryId", "namespace", "hostProfileKey", "global", "globalRevision", "profile", "nativeRevision", "nativeFormRevision", "nativeForm", "desired", "sources", "startup", "defaults", "schema", "nextRoot", "modules"], ["startupSources", "nativeSchema", "subagentRuntime"]);
+  const result = jsonData(row2);
+  text2(row2.entryId, "entryId", 256);
+  if (row2.namespace !== null) text2(row2.namespace, "namespace", 256);
+  epoch(row2.hostProfileKey);
+  selectionRevision(row2.globalRevision);
+  if (row2.nativeRevision !== "unavailable" && (typeof row2.nativeRevision !== "string" || !/^native-v1-\d+$/u.test(row2.nativeRevision))) fail2("nativeRevision");
+  if (row2.nativeFormRevision !== null) integer2(row2.nativeFormRevision, "nativeFormRevision");
+  for (const key of ["global", "profile", "desired", "sources", "startup", "defaults", "schema"]) object(row2[key], [], Object.keys(row2[key]));
+  if (row2.nativeForm !== null) object(row2.nativeForm, ["base", "user"]);
+  if (row2.nextRoot !== null) result.nextRoot = admissionView(row2.nextRoot);
+  result.desired = readOnlySettingsData(row2.desired);
+  result.startup = readOnlySettingsData(row2.startup);
+  result.schema = schemaNode(row2.schema);
+  if (row2.nativeSchema !== void 0) result.nativeSchema = schemaNode(row2.nativeSchema);
+  if (row2.subagentRuntime !== void 0) result.subagentRuntime = parseSubagentRuntimeAdmissionView(row2.subagentRuntime);
   for (const map of [result.sources, result.startupSources]) {
     if (map === void 0) continue;
     object(map, [], Object.keys(map));
-    for (const [path, value2] of Object.entries(map)) {
+    for (const [path, value3] of Object.entries(map)) {
       if (path.startsWith("lsp.env.")) fail2("private environment field");
-      text2(value2, "source", 128);
+      text2(value3, "source", 128);
     }
   }
-  result.modules = moduleStates(row.modules);
+  result.modules = moduleStates(row2.modules);
   return result;
 }
-function schemaNode(value) {
-  const row = object(value, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty", "additionalProperties"]);
-  if (typeof row.type !== "string" || !["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(row.type)) fail2("schema type");
-  const node = { type: row.type };
-  if (row.fields !== void 0) node.fields = Object.fromEntries(Object.entries(object(row.fields, [], Object.keys(row.fields))).map(([key, child2]) => [key, schemaNode(child2)]));
-  if (row.inner !== void 0) node.inner = schemaNode(row.inner);
-  if (row.alternatives !== void 0) {
-    if (!Array.isArray(row.alternatives)) fail2("schema alternatives");
-    node.alternatives = row.alternatives.map(schemaNode);
+function schemaNode(value2) {
+  const row2 = object(value2, ["type"], ["fields", "inner", "alternatives", "value", "min", "max", "step", "required", "keys", "nonempty", "additionalProperties"]);
+  if (typeof row2.type !== "string" || !["object", "dict", "array", "union", "const", "string", "number", "boolean"].includes(row2.type)) fail2("schema type");
+  const node = { type: row2.type };
+  if (row2.fields !== void 0) node.fields = Object.fromEntries(Object.entries(object(row2.fields, [], Object.keys(row2.fields))).map(([key, child2]) => [key, schemaNode(child2)]));
+  if (row2.inner !== void 0) node.inner = schemaNode(row2.inner);
+  if (row2.alternatives !== void 0) {
+    if (!Array.isArray(row2.alternatives)) fail2("schema alternatives");
+    node.alternatives = row2.alternatives.map(schemaNode);
   }
-  if (Object.hasOwn(row, "value")) {
-    if (!["string", "number", "boolean"].includes(typeof row.value)) fail2("schema value");
-    node.value = row.value;
+  if (Object.hasOwn(row2, "value")) {
+    if (!["string", "number", "boolean"].includes(typeof row2.value)) fail2("schema value");
+    node.value = row2.value;
   }
-  for (const key of ["min", "max", "step"]) if (row[key] !== void 0) {
-    if (typeof row[key] !== "number" || !Number.isFinite(row[key])) fail2("schema bound");
-    node[key] = row[key];
+  for (const key of ["min", "max", "step"]) if (row2[key] !== void 0) {
+    if (typeof row2[key] !== "number" || !Number.isFinite(row2[key])) fail2("schema bound");
+    node[key] = row2[key];
   }
-  if (row.required !== void 0) node.required = boolean(row.required, "schema required");
-  if (row.nonempty !== void 0) {
-    if (row.type !== "string") fail2("schema nonempty");
-    node.nonempty = boolean(row.nonempty, "schema nonempty");
+  if (row2.required !== void 0) node.required = boolean(row2.required, "schema required");
+  if (row2.nonempty !== void 0) {
+    if (row2.type !== "string") fail2("schema nonempty");
+    node.nonempty = boolean(row2.nonempty, "schema nonempty");
   }
-  if (Object.hasOwn(row, "additionalProperties")) {
-    if (row.type !== "object" || row.additionalProperties !== "json") fail2("schema additionalProperties");
+  if (Object.hasOwn(row2, "additionalProperties")) {
+    if (row2.type !== "object" || row2.additionalProperties !== "json") fail2("schema additionalProperties");
     node.additionalProperties = "json";
   }
-  if (row.keys !== void 0) {
-    if (row.type !== "dict" || !Array.isArray(row.keys) || row.keys.length > 64) fail2("schema keys");
-    node.keys = row.keys.map((key) => text2(key, "schema key", 128));
+  if (row2.keys !== void 0) {
+    if (row2.type !== "dict" || !Array.isArray(row2.keys) || row2.keys.length > 64) fail2("schema keys");
+    node.keys = row2.keys.map((key) => text2(key, "schema key", 128));
   }
   return node;
 }
-function globalSaveRequest(value) {
-  const row = object(value, ["expectedRevision", "edits"]);
-  if (!Array.isArray(row.edits) || row.edits.length > 128) fail2("edits");
-  return { expectedRevision: selectionRevision(row.expectedRevision), edits: row.edits.map((value2) => {
-    const edit = object(value2, ["op", "path"], ["value"]);
+function globalSaveRequest(value2) {
+  const row2 = object(value2, ["expectedRevision", "edits"]);
+  if (!Array.isArray(row2.edits) || row2.edits.length > 128) fail2("edits");
+  return { expectedRevision: selectionRevision(row2.expectedRevision), edits: row2.edits.map((value3) => {
+    const edit = object(value3, ["op", "path"], ["value"]);
     if (!Array.isArray(edit.path) || edit.path.length < 1 || edit.path.length > 8) fail2("field path");
     const path = edit.path.map((part) => {
       const key = text2(part, "field", 128);
@@ -3260,26 +3260,26 @@ function configDescriptor(method, parameter) {
     result: codec("GlobalConfigSnapshot", globalSnapshot)
   };
 }
-function moduleStates(value) {
-  if (!Array.isArray(value) || value.length !== DSMM_MODULE_DESCRIPTORS.length) fail2("modules");
+function moduleStates(value2) {
+  if (!Array.isArray(value2) || value2.length !== DSMM_MODULE_DESCRIPTORS.length) fail2("modules");
   const ids = /* @__PURE__ */ new Set();
-  return value.map((value2) => {
-    const row = object(value2, ["descriptor", "hostBundleEnabled", "desired", "startupMounted", "admitted", "nextRoot", "reason", "pending"]);
-    const descriptor4 = object(row.descriptor, ["id", "label", "key"]);
-    const known = DSMM_MODULE_DESCRIPTORS.find((known2) => known2.id === descriptor4.id);
-    if (known === void 0 || descriptor4.label !== known.label || descriptor4.key !== known.key || row.hostBundleEnabled !== "unknown" || ids.has(known.id)) fail2("module descriptor");
+  return value2.map((value3) => {
+    const row2 = object(value3, ["descriptor", "hostBundleEnabled", "desired", "startupMounted", "admitted", "nextRoot", "reason", "pending"]);
+    const descriptor6 = object(row2.descriptor, ["id", "label", "key"]);
+    const known = DSMM_MODULE_DESCRIPTORS.find((known2) => known2.id === descriptor6.id);
+    if (known === void 0 || descriptor6.label !== known.label || descriptor6.key !== known.key || row2.hostBundleEnabled !== "unknown" || ids.has(known.id)) fail2("module descriptor");
     ids.add(known.id);
-    const desired = object(row.desired, ["enabled", "source", "capture"]), next = object(row.nextRoot, ["admitted", "reason"]);
-    if (typeof desired.source !== "string" || !["defaults", "global", "profile"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture) || ![null, "global-disabled", "restart-required"].includes(next.reason) || ![null, "global-disabled", "restart-required", "captured-off"].includes(row.reason)) fail2("module state");
+    const desired = object(row2.desired, ["enabled", "source", "capture"]), next = object(row2.nextRoot, ["admitted", "reason"]);
+    if (typeof desired.source !== "string" || !["defaults", "global", "profile"].includes(desired.source) || typeof desired.capture !== "string" || !["current-global", "admission", "startup"].includes(desired.capture) || ![null, "global-disabled", "restart-required"].includes(next.reason) || ![null, "global-disabled", "restart-required", "captured-off"].includes(row2.reason)) fail2("module state");
     return {
       descriptor: { ...known },
       hostBundleEnabled: "unknown",
       desired: { enabled: boolean(desired.enabled, "desired.enabled"), source: desired.source, capture: desired.capture },
-      startupMounted: row.startupMounted === null ? null : boolean(row.startupMounted, "startupMounted"),
-      admitted: row.admitted === null ? null : boolean(row.admitted, "admitted"),
+      startupMounted: row2.startupMounted === null ? null : boolean(row2.startupMounted, "startupMounted"),
+      admitted: row2.admitted === null ? null : boolean(row2.admitted, "admitted"),
       nextRoot: { admitted: next.admitted === null ? null : boolean(next.admitted, "nextRoot.admitted"), reason: next.reason },
-      reason: row.reason,
-      pending: boolean(row.pending, "pending")
+      reason: row2.reason,
+      pending: boolean(row2.pending, "pending")
     };
   });
 }
@@ -3339,9 +3339,9 @@ function safeIssue(info) {
   }
 }
 function profileWarnings(warnings2) {
-  return (warnings2 ?? []).flatMap((value) => {
+  return (warnings2 ?? []).flatMap((value2) => {
     try {
-      const warning = parseProfileDiagnostic(value);
+      const warning = parseProfileDiagnostic(value2);
       return warning.severity === "warning" && warning.code === "blank-label" && warning.field === "label" ? [warning] : [];
     } catch {
       return [];
@@ -3398,24 +3398,24 @@ var DIAGNOSTIC_LABELS = {
 };
 
 // src/client/configuration-display.ts
-var writableSelectionVersion = (value) => value === "absent" || isConfigRevision(value);
-function configurationVersionState(value) {
-  if (value === "absent") return "versionAbsent";
-  return isConfigRevision(value) || typeof value === "string" && /^native-v1-\d+$/u.test(value) ? "versionObserved" : "versionUnknown";
+var writableSelectionVersion = (value2) => value2 === "absent" || isConfigRevision(value2);
+function configurationVersionState(value2) {
+  if (value2 === "absent") return "versionAbsent";
+  return isConfigRevision(value2) || typeof value2 === "string" && /^native-v1-\d+$/u.test(value2) ? "versionObserved" : "versionUnknown";
 }
 function sourceRelationship(selection, savedRevision) {
   return selection.sourceRevision === void 0 || savedRevision == null || !isConfigRevision(savedRevision) ? "unknown" : selection.sourceRevision === savedRevision ? "current" : "changed";
 }
 
 // src/client/structured.ts
-function record(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function record(value2) {
+  return value2 !== null && typeof value2 === "object" && !Array.isArray(value2);
 }
-function route2(value) {
-  return record(value) && typeof value.provider === "string" && typeof value.model === "string" && (value.reasoningEffort === void 0 || typeof value.reasoningEffort === "string");
+function route2(value2) {
+  return record(value2) && typeof value2.provider === "string" && typeof value2.model === "string" && (value2.reasoningEffort === void 0 || typeof value2.reasoningEffort === "string");
 }
-function level(value) {
-  return route2(value) || record(value) && value.provider === void 0 && value.model === void 0 && typeof value.reasoningEffort === "string";
+function level(value2) {
+  return route2(value2) || record(value2) && value2.provider === void 0 && value2.model === void 0 && typeof value2.reasoningEffort === "string";
 }
 function validTree(node, depth2 = 0) {
   if (depth2 > 32) return false;
@@ -3430,15 +3430,15 @@ function validTree(node, depth2 = 0) {
   return (node.children ?? []).every((child2) => validTree(child2, depth2 + 1));
 }
 function structuredDocument(content2) {
-  const errors = [];
-  const tree = parseTree2(content2, errors, { allowTrailingComma: true });
-  if (errors.length !== 0 || tree === void 0 || !validTree(tree)) return null;
-  const document2 = parse2(content2, errors, { allowTrailingComma: true });
-  if (errors.length !== 0 || !record(document2) || document2.version !== 1 || typeof document2.id !== "string" || !record(document2.settings) || document2.label !== void 0 && typeof document2.label !== "string") return null;
+  const errors2 = [];
+  const tree = parseTree2(content2, errors2, { allowTrailingComma: true });
+  if (errors2.length !== 0 || tree === void 0 || !validTree(tree)) return null;
+  const document2 = parse2(content2, errors2, { allowTrailingComma: true });
+  if (errors2.length !== 0 || !record(document2) || document2.version !== 1 || typeof document2.id !== "string" || !record(document2.settings) || document2.label !== void 0 && typeof document2.label !== "string") return null;
   const settings = document2.settings;
   if (settings.defaultActive !== void 0 && typeof settings.defaultActive !== "boolean") return null;
   if (settings.locale !== void 0 && typeof settings.locale !== "string") return null;
-  if (settings.roles !== void 0 && (!record(settings.roles) || !Object.values(settings.roles).every((value) => typeof value === "boolean"))) return null;
+  if (settings.roles !== void 0 && (!record(settings.roles) || !Object.values(settings.roles).every((value2) => typeof value2 === "boolean"))) return null;
   if (settings.subagents !== void 0 && (!record(settings.subagents) || Object.keys(settings.subagents).some((key) => key !== "toolTopology") || settings.subagents.toolTopology !== void 0 && (typeof settings.subagents.toolTopology !== "string" || !["per-role", "parameterized"].includes(settings.subagents.toolTopology)))) return null;
   if (settings.roleRouting !== void 0 && !record(settings.roleRouting)) return null;
   if (settings.runtimePolicy !== void 0 && !record(settings.runtimePolicy)) return null;
@@ -3450,7 +3450,7 @@ function structuredDocument(content2) {
     if (runtimePolicy2.rateLimit !== void 0) normalizeRateLimitOverrides(runtimePolicy2.rateLimit);
     for (const [role3, raw] of Object.entries(policies)) {
       if (!record(raw) || Object.keys(raw).some((key) => !["primary", "fallbackRoutes", "strategy", "rateLimit", "levels"].includes(key))) return null;
-      if (raw.levels !== void 0 && (role3 === "dsmm-orchestrator" || !record(raw.levels) || Object.entries(raw.levels).some(([key, value]) => !["low", "high", "max"].includes(key) || !level(value)))) return null;
+      if (raw.levels !== void 0 && (role3 === "dsmm-orchestrator" || !record(raw.levels) || Object.entries(raw.levels).some(([key, value2]) => !["low", "high", "max"].includes(key) || !level(value2)))) return null;
       if (raw.primary !== void 0 && !route2(raw.primary)) return null;
       if (raw.fallbackRoutes !== void 0 && (!Array.isArray(raw.fallbackRoutes) || raw.fallbackRoutes.length > 32 || !raw.fallbackRoutes.every(route2))) return null;
       if (raw.strategy !== void 0) normalizeRoutingStrategy(raw.strategy);
@@ -3461,10 +3461,10 @@ function structuredDocument(content2) {
   }
   return { label: document2.label, settings, roleRouting: policies, runtimePolicy: runtimePolicy2 };
 }
-function editStructuredPath(content2, path, value) {
+function editStructuredPath(content2, path, value2) {
   if (structuredDocument(content2) === null) return null;
   try {
-    return applyEdits(content2, modify(content2, path, value, {}));
+    return applyEdits(content2, modify(content2, path, value2, {}));
   } catch {
     return null;
   }
@@ -3484,14 +3484,14 @@ function moveFallback(content2, role3, from2, to) {
 }
 
 // src/client/controller.ts
-function modelSelectionWatermark(window) {
+function modelSelectionWatermark(window2) {
   let watermark = -1;
-  for (const entry of window.entries) if (entry.type === "event" && entry.event.type === "model/selection") watermark = Math.max(watermark, Number(entry.event.seq));
+  for (const entry of window2.entries) if (entry.type === "event" && entry.event.type === "model/selection") watermark = Math.max(watermark, Number(entry.event.seq));
   return watermark;
 }
-function modeIntentWatermark(window) {
+function modeIntentWatermark(window2) {
   let watermark = -1;
-  for (const entry of window.entries) if (entry.type === "event" && (entry.event.type === "deepwork/mode" || entry.event.type === "agent-preset/selected")) watermark = Math.max(watermark, Number(entry.event.seq));
+  for (const entry of window2.entries) if (entry.type === "event" && (entry.event.type === "deepwork/mode" || entry.event.type === "agent-preset/selected")) watermark = Math.max(watermark, Number(entry.event.seq));
   return watermark;
 }
 var NEW_EDITOR = "";
@@ -3515,6 +3515,8 @@ var ProfilesController = class {
     catalogBusy: false,
     catalogUnavailable: true,
     currentSessionId: null,
+    sessionViewEpoch: 0,
+    sessionUnconfirmed: false,
     session: null,
     sessionChoice: null,
     sessionBusy: null,
@@ -3529,6 +3531,14 @@ var ProfilesController = class {
   generation = 0;
   disposed = false;
   sessionGeneration = 0;
+  pendingSessionSelections = /* @__PURE__ */ new Set();
+  connection = null;
+  connectionBaseline;
+  connectionBound = false;
+  stopConnection = null;
+  composerBlocks = null;
+  composerReason = null;
+  composerBlock = null;
   catalogGeneration = 0;
   catalogRemote = null;
   modelSelectorGeneration = 0;
@@ -3560,36 +3570,38 @@ var ProfilesController = class {
   actions = {
     readProfileView: () => this.store.getSnapshot(),
     refresh: () => this.refresh(),
-    open: (id2) => this.open(id2),
+    open: (id3) => this.open(id3),
     create: () => this.open(NEW_EDITOR),
     reload: () => this.reload(),
-    editId: (id2) => this.editId(id2),
+    editId: (id3) => this.editId(id3),
     editContent: (content2) => this.editContent(content2),
     save: () => this.save(),
     apply: () => this.apply(),
     reset: () => this.reset(),
     discardAndOpen: () => this.discardAndOpen(),
     cancelDiscard: () => this.publish({ pendingEditor: null }),
-    editPath: (path, value) => this.editPath(path, value),
+    editPath: (path, value2) => this.editPath(path, value2),
     moveFallback: (role3, from2, to) => this.editFallbackOrder(role3, from2, to),
     editRoute: (path, provider, model) => this.editRoute(path, provider, model),
     refreshCatalog: () => this.refreshCatalog(),
     refreshSession: () => this.refreshSession(),
-    chooseSessionProfile: (id2) => {
-      if (!this.disposed && this.current.sessionBusy === null && this.current.busy === null && !this.current.dirty) this.publish({ sessionChoice: id2, sessionNotice: null });
+    chooseSessionProfile: (id3) => {
+      if (!this.disposed && this.connectionCurrent() && !this.current.sessionUnconfirmed && this.current.sessionBusy === null && this.current.busy === null && !this.current.dirty && this.current.pendingEditor === null && this.current.invalidFields.length === 0) this.publish({ sessionChoice: id3, sessionNotice: null });
     },
     applySession: (options) => this.selectSession(false, options),
     resetSession: () => this.selectSession(true),
     setDeepwork: (active) => this.setDeepwork(active),
     useSessionProfileModel: () => this.selectSession(false, { useProfileModel: true }, true),
-    setFieldInvalid: (field, invalid2) => {
+    setFieldInvalid: (field, invalid3) => {
       if (this.disposed) return;
-      const invalidFields = this.current.invalidFields.filter((candidate) => candidate !== field);
-      if (invalid2) invalidFields.push(field);
-      if (invalidFields.join("\n") !== this.current.invalidFields.join("\n")) this.publish({ invalidFields, ...invalid2 ? { dirty: true } : {} });
+      const invalidFields = this.current.invalidFields.filter((candidate2) => candidate2 !== field);
+      if (invalid3) invalidFields.push(field);
+      if (invalidFields.join("\n") !== this.current.invalidFields.join("\n")) this.publish({ invalidFields, ...invalid3 ? { dirty: true } : {} });
     }
   };
   dispose() {
+    this.releaseComposerBlock();
+    this.stopConnection?.();
     this.disposed = true;
     this.generation += 1;
     this.sessionGeneration += 1;
@@ -3608,6 +3620,63 @@ var ProfilesController = class {
     this.catalogRemote = null;
     this.modelSelector = null;
     this.listeners.clear();
+  }
+  bindConnection(source) {
+    if (this.disposed) return;
+    const replacement = this.connectionBound && (source !== this.connection || source?.getSnapshot() !== this.connectionBaseline);
+    this.stopConnection?.();
+    this.connection = source;
+    this.connectionBound = true;
+    this.connectionBaseline = source?.getSnapshot();
+    const invalidate = () => {
+      this.connectionBaseline = source?.getSnapshot();
+      this.generation += 1;
+      this.sessionGeneration += 1;
+      this.modelSelectorGeneration += 1;
+      this.publish({
+        session: null,
+        sessionBusy: null,
+        sessionNotice: null,
+        sessionUnconfirmed: this.current.currentSessionId !== null,
+        sessionViewEpoch: this.current.sessionViewEpoch + 1,
+        busy: null,
+        issue: { kind: "transport", code: "unavailable" }
+      });
+    };
+    if (replacement || source === null || this.connectionBaseline === void 0) invalidate();
+    this.stopConnection = source?.subscribe(() => {
+      invalidate();
+      if (this.connectionCurrent()) {
+        void this.refresh();
+        void this.refreshSession();
+      }
+    }) ?? null;
+  }
+  connectionCurrent() {
+    return !this.connectionBound || this.connectionBaseline !== void 0 && this.connection?.getSnapshot() === this.connectionBaseline;
+  }
+  attachComposerBlocks(blocks, reason) {
+    if (this.disposed) return;
+    this.releaseComposerBlock();
+    this.composerBlocks = blocks;
+    this.composerReason = reason ?? null;
+    this.syncComposerBlock();
+  }
+  releaseComposerBlock() {
+    const held = this.composerBlock;
+    this.composerBlock = null;
+    if (held !== null && this.composerBlocks?.storeFor(held.id) === held.store && held.store.getSnapshot() === held.block) this.composerBlocks.set(held.id, void 0);
+  }
+  syncComposerBlock() {
+    const { currentSessionId, sessionBusy, sessionUnconfirmed, session } = this.current;
+    const wanted = currentSessionId !== null && (sessionBusy === "apply" || sessionBusy === "reset" || sessionUnconfirmed || session?.refreshRequired || session?.selection.refreshRequired);
+    if (!wanted || this.composerBlock?.id !== currentSessionId) this.releaseComposerBlock();
+    if (!wanted || this.composerBlock !== null || this.composerBlocks === null || this.composerReason === null) return;
+    const id3 = currentSessionId, store = this.composerBlocks.storeFor(id3);
+    if (store.getSnapshot() !== void 0) return;
+    const block = { reason: this.composerReason() };
+    this.composerBlock = { id: id3, store, block };
+    this.composerBlocks.set(id3, block);
   }
   attachModelSelector(remote) {
     if (this.disposed) return;
@@ -3633,7 +3702,7 @@ var ProfilesController = class {
     this.modelEventsWatermark = source === null ? -1 : modelSelectionWatermark(source.getSnapshot());
     this.modeEventsWatermark = source === null ? -1 : modeIntentWatermark(source.getSnapshot());
     this.stopModelEvents = source?.subscribe(() => {
-      const window = source.getSnapshot(), change = window.change;
+      const window2 = source.getSnapshot(), change = window2.change;
       if (change.kind === "settle-assistant") return;
       let watermark = change.kind === "replace" ? -1 : this.modelEventsWatermark;
       for (const entry of change.entries) if (entry.type === "event" && entry.event.type === "model/selection") watermark = Math.max(watermark, Number(entry.event.seq));
@@ -3669,15 +3738,15 @@ var ProfilesController = class {
     this.publish({ catalogBusy: false, catalogUnavailable: remote === null });
     if (remote !== null) void this.refreshCatalog();
   }
-  setSession(id2) {
-    if (this.disposed || id2 === this.current.currentSessionId) return;
+  setSession(id3) {
+    if (this.disposed || id3 === this.current.currentSessionId) return;
     this.sessionGeneration += 1;
     this.modeRefreshPending = false;
-    if (id2 !== this.modelSelectionSessionId) this.attachModelSelectionSource(null, null);
-    if (id2 !== this.modelEventsSessionId) this.attachModelEventSource(null, null);
-    if (id2 !== this.modelInteractionSessionId) this.attachModelInteractionSource(null, null);
-    this.publish({ currentSessionId: id2, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null });
-    if (id2 !== null) void this.refreshSession();
+    if (id3 !== this.modelSelectionSessionId) this.attachModelSelectionSource(null, null);
+    if (id3 !== this.modelEventsSessionId) this.attachModelEventSource(null, null);
+    if (id3 !== this.modelInteractionSessionId) this.attachModelInteractionSource(null, null);
+    this.publish({ currentSessionId: id3, sessionViewEpoch: this.current.sessionViewEpoch + 1, sessionUnconfirmed: id3 !== null && this.pendingSessionSelections.has(id3), session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null });
+    if (id3 !== null) void this.refreshSession();
   }
   async refreshCatalog() {
     if (this.disposed || this.current.catalogBusy || this.catalogRemote === null) return;
@@ -3696,16 +3765,16 @@ var ProfilesController = class {
     if (!this.disposed && this.modeRefreshPending && this.current.sessionBusy === null) void this.refreshSession(true);
   }
   async refreshSession(preserveFeedback = false) {
-    const id2 = this.current.currentSessionId;
-    if (this.disposed || id2 === null || this.current.sessionBusy !== null) return;
+    const id3 = this.current.currentSessionId;
+    if (this.disposed || !this.connectionCurrent() || id3 === null || this.current.sessionBusy !== null) return;
     this.modeRefreshPending = false;
     const generation = ++this.sessionGeneration;
-    const live = () => !this.disposed && generation === this.sessionGeneration && id2 === this.current.currentSessionId;
+    const live = () => !this.disposed && this.connectionCurrent() && generation === this.sessionGeneration && id3 === this.current.currentSessionId;
     this.publish({ sessionBusy: "read", ...preserveFeedback ? {} : { sessionIssue: null, sessionNotice: null } });
     try {
-      const session = await this.unwrap(this.remote.describeSession(id2));
-      if (session.sessionId !== id2) throw { kind: "assembly", code: "unavailable" };
-      if (live()) this.publish({ session, sessionChoice: session.selection.selectedId });
+      const session = await this.unwrap(this.remote.describeSession(id3));
+      if (session.sessionId !== id3) throw { kind: "assembly", code: "unavailable" };
+      if (live()) this.publish({ session, sessionChoice: (session.admittedSelection ?? session.selection).selectedId, sessionUnconfirmed: this.pendingSessionSelections.has(id3) });
     } catch (error) {
       if (live()) this.publish({ sessionIssue: this.issue(error) });
     } finally {
@@ -3716,19 +3785,20 @@ var ProfilesController = class {
     }
   }
   async setDeepwork(active) {
-    const { currentSessionId: id2, session } = this.current;
-    if (this.disposed || id2 === null || session?.deepwork === void 0 || session.refreshRequired || session.selection.refreshRequired || session.deepwork.locked || session.canToggleMode !== true || this.current.sessionBusy !== null || this.current.busy !== null || this.remote.selectMode === void 0) return;
+    const { currentSessionId: id3, session } = this.current;
+    if (this.disposed || !this.connectionCurrent() || this.current.sessionUnconfirmed || id3 === null || session?.deepwork === void 0 || session.refreshRequired || session.selection.refreshRequired || session.deepwork.locked || session.canToggleMode !== true || this.current.sessionBusy !== null || this.current.busy !== null || this.remote.selectMode === void 0) return;
     const generation = ++this.sessionGeneration;
-    const live = () => !this.disposed && generation === this.sessionGeneration && id2 === this.current.currentSessionId;
+    const live = () => !this.disposed && this.connectionCurrent() && generation === this.sessionGeneration && id3 === this.current.currentSessionId;
     this.publish({ sessionBusy: "mode", sessionIssue: null, sessionNotice: null });
     try {
-      const accepted = await this.unwrap(this.remote.selectMode(id2, {
-        sessionId: id2,
+      if (!live()) return;
+      const accepted = await this.unwrap(this.remote.selectMode(id3, {
+        sessionId: id3,
         active,
         expectedModeRevision: session.deepwork.revision,
         expectedAdmissionEpoch: session.admissionEpoch
       }));
-      if (accepted.sessionId !== id2 || accepted.deepwork?.active !== active || !accepted.deepwork.explicit) throw { kind: "assembly", code: "unavailable" };
+      if (accepted.sessionId !== id3 || accepted.deepwork?.active !== active || !accepted.deepwork.explicit) throw { kind: "assembly", code: "unavailable" };
       if (live()) this.publish({ session: accepted, sessionNotice: active ? "mode-on" : "mode-off" });
     } catch (error) {
       if (live()) this.publish({ sessionIssue: this.issue(error) });
@@ -3740,11 +3810,11 @@ var ProfilesController = class {
     }
   }
   async selectSession(reset, options, modelOnly = false) {
-    const { currentSessionId: id2, session, sessionChoice, snapshot: snapshot4 } = this.current;
-    if (this.disposed || id2 === null || session === null || session.refreshRequired || session.selection.refreshRequired || !writableSelectionVersion(session.selection.selectionRevision) || (modelOnly ? session.canSelectModel !== true : session.canApplyOverlay !== true || session.applyOverlayUnavailableReason === "new-session-required") || this.current.sessionBusy !== null || this.current.busy !== null || this.current.dirty || this.current.invalidFields.length > 0 || this.current.pendingEditor !== null) return;
+    const { currentSessionId: id3, session, sessionChoice, snapshot: snapshot4 } = this.current;
+    if (this.disposed || !this.connectionCurrent() || this.current.sessionUnconfirmed || id3 === null || session === null || session.refreshRequired || session.selection.refreshRequired || !writableSelectionVersion(session.selection.selectionRevision) || (modelOnly ? session.canSelectModel !== true : session.canApplyOverlay !== true || session.applyOverlayUnavailableReason === "new-session-required") || this.current.sessionBusy !== null || this.current.busy !== null || this.current.dirty || this.current.invalidFields.length > 0 || this.current.pendingEditor !== null) return;
     const selectedId = reset ? null : sessionChoice;
-    const revision2 = snapshot4?.profiles.find((profile) => profile.id === selectedId)?.revision;
-    if (!modelOnly && selectedId !== null && !isConfigRevision(revision2)) return;
+    const profile = snapshot4?.profiles.find((profile2) => profile2.id === selectedId), revision2 = profile?.revision;
+    if (!modelOnly && selectedId !== null && (!isConfigRevision(revision2) || profile?.error !== void 0)) return;
     const generation = ++this.sessionGeneration;
     const useProfileModel = !reset && options?.useProfileModel === true;
     const selector = this.modelSelector, selectorGeneration = this.modelSelectorGeneration;
@@ -3755,21 +3825,27 @@ var ProfilesController = class {
     const modeWatermark = eventSource === null ? -1 : modeIntentWatermark(eventSource.getSnapshot());
     const interaction = this.modelInteraction, interactionGeneration = this.modelInteractionGeneration;
     const pendingNativeChoice = interaction?.getSnapshot().status === "selecting";
-    const live = () => !this.disposed && generation === this.sessionGeneration && id2 === this.current.currentSessionId;
+    const live = () => !this.disposed && this.connectionCurrent() && generation === this.sessionGeneration && id3 === this.current.currentSessionId;
     const selectorLive = () => live() && selector !== null && selector === this.modelSelector && selectorGeneration === this.modelSelectorGeneration;
+    if (!modelOnly) this.pendingSessionSelections.add(id3);
     this.publish({ sessionBusy: reset ? "reset" : "apply", sessionIssue: null, sessionNotice: null });
     try {
-      const accepted = await this.unwrap(modelOnly ? this.remote.describeSession(id2) : this.remote.selectSession(id2, {
-        sessionId: id2,
+      if (!live()) return;
+      const accepted = await this.unwrap(modelOnly ? this.remote.describeSession(id3) : this.remote.selectSession(id3, {
+        sessionId: id3,
         id: selectedId,
         ...selectedId === null ? {} : { expectedRevision: revision2 },
         expectedSelectionRevision: session.selection.selectionRevision,
         expectedAdmissionEpoch: session.admissionEpoch
       }));
-      if (accepted.sessionId !== id2) throw { kind: "assembly", code: "unavailable" };
+      if (accepted.sessionId !== id3) throw { kind: "assembly", code: "unavailable" };
       if (modelOnly && (accepted.admissionEpoch !== session.admissionEpoch || accepted.deepwork?.revision !== session.deepwork?.revision)) throw { kind: "domain", code: "conflict" };
       if (!live()) return;
-      this.publish({ session: accepted, sessionChoice: accepted.selection.selectedId, sessionNotice: useProfileModel ? null : reset ? "reset" : "applied" });
+      this.publish({
+        session: accepted,
+        sessionChoice: (accepted.admittedSelection ?? accepted.selection).selectedId,
+        sessionNotice: useProfileModel || accepted.refreshRequired || accepted.selection.refreshRequired ? null : reset ? "reset" : "applied"
+      });
       if (!useProfileModel || accepted.refreshRequired || accepted.selection.refreshRequired || !live()) return;
       if (accepted.canSelectModel !== true || !writableSelectionVersion(accepted.selection.selectionRevision)) {
         this.publish({ sessionIssue: { kind: "assembly", code: accepted.selectModelUnavailableReason ?? "unavailable", source: "profile-model" } });
@@ -3783,7 +3859,7 @@ var ProfilesController = class {
         this.publish({ sessionIssue: { kind: "assembly", code: "model-service-unavailable", source: "profile-model" } });
         return;
       }
-      if (modelSource === null || modelSnapshot === void 0 || this.modelSelectionSessionId !== id2 || modelSource !== this.modelSelectionSource || modelSource.getSnapshot() === void 0) {
+      if (modelSource === null || modelSnapshot === void 0 || this.modelSelectionSessionId !== id3 || modelSource !== this.modelSelectionSource || modelSource.getSnapshot() === void 0) {
         this.publish({ sessionIssue: { kind: "assembly", code: "model-observation-unavailable", source: "profile-model" } });
         return;
       }
@@ -3791,7 +3867,7 @@ var ProfilesController = class {
         this.publish({ sessionIssue: { kind: "assembly", code: "model-choice-changed", source: "profile-model" } });
         return;
       }
-      if (eventSource === null || eventSource !== this.modelEvents || this.modelEventsSessionId !== id2 || interaction === null || interaction !== this.modelInteraction || this.modelInteractionSessionId !== id2) {
+      if (eventSource === null || eventSource !== this.modelEvents || this.modelEventsSessionId !== id3 || interaction === null || interaction !== this.modelInteraction || this.modelInteractionSessionId !== id3) {
         this.publish({ sessionIssue: { kind: "assembly", code: "model-observation-unavailable", source: "profile-model" } });
         return;
       }
@@ -3802,20 +3878,27 @@ var ProfilesController = class {
       try {
         const { provider, model, reasoningEffort } = accepted.profileModel;
         await this.unwrap(selector.selectModel({
-          sessionId: id2,
+          sessionId: id3,
           provider,
           model,
           ...reasoningEffort === void 0 ? {} : { reasoningEffort }
         }));
-        if (live()) this.publish(selectorLive() && modelSource === this.modelSelectionSource && this.modelSelectionSessionId === id2 ? { sessionNotice: "applied-with-model" } : { sessionIssue: { kind: "assembly", code: "model-service-unavailable", source: "profile-model" } });
+        if (live()) this.publish(selectorLive() && modelSource === this.modelSelectionSource && this.modelSelectionSessionId === id3 ? { sessionNotice: "applied-with-model" } : { sessionIssue: { kind: "assembly", code: "model-service-unavailable", source: "profile-model" } });
       } catch {
         if (live()) this.publish({ sessionIssue: { kind: "assembly", code: selectorLive() ? "model-selection-failed" : "model-service-unavailable", source: "profile-model" } });
       }
     } catch (error) {
-      if (live()) this.publish({ sessionIssue: this.issue(error) });
+      if (live()) {
+        const issue = this.issue(error);
+        this.publish({ sessionIssue: issue, sessionUnconfirmed: !modelOnly && (issue.kind !== "domain" || issue.code === "cancelled") });
+      }
     } finally {
+      if (!modelOnly) this.pendingSessionSelections.delete(id3);
       if (live()) {
         this.publish({ sessionBusy: null });
+        this.refreshObservedMode();
+      } else if (!modelOnly && !this.disposed && this.connectionCurrent() && id3 === this.current.currentSessionId) {
+        this.modeRefreshPending = true;
         this.refreshObservedMode();
       }
     }
@@ -3823,14 +3906,15 @@ var ProfilesController = class {
   publish(patch) {
     if (this.disposed) return;
     this.current = { ...this.current, ...patch };
+    this.syncComposerBlock();
     for (const listener of this.listeners) listener();
   }
   accept(document2) {
     this.accepted = { ...document2 };
     this.publish({ editor: { ...document2 }, dirty: false, pendingEditor: null, invalidFields: [], editorEpoch: this.current.editorEpoch + 1 });
   }
-  async unwrap(request, field) {
-    const result = await request;
+  async unwrap(request2, field) {
+    const result = await request2;
     if (result.ok) return result.value;
     if (result.error.code === "dsmm-profiles/refused") {
       throw safeIssue(result.error.details);
@@ -3845,9 +3929,9 @@ var ProfilesController = class {
     return { kind: "assembly", code: "unavailable" };
   }
   async perform(busy, operation) {
-    if (this.disposed || this.current.busy !== null || this.current.sessionBusy === "apply" || this.current.sessionBusy === "reset" || this.current.pendingEditor !== null) return;
+    if (this.disposed || !this.connectionCurrent() || this.current.busy !== null || this.current.sessionBusy === "apply" || this.current.sessionBusy === "reset" || this.current.pendingEditor !== null) return;
     const generation = ++this.generation;
-    const live = () => !this.disposed && generation === this.generation;
+    const live = () => !this.disposed && this.connectionCurrent() && generation === this.generation;
     this.publish({ busy, issue: null, notice: null });
     try {
       await operation(live);
@@ -3866,14 +3950,14 @@ var ProfilesController = class {
       if (live()) this.publish({ snapshot: snapshot4 });
     });
   }
-  async open(id2) {
+  async open(id3) {
     if (this.disposed || this.current.busy !== null || this.current.pendingEditor !== null) return;
-    if (id2 !== NEW_EDITOR && this.current.editor?.id === id2) return;
+    if (id3 !== NEW_EDITOR && this.current.editor?.id === id3) return;
     if (this.current.dirty) {
-      this.publish({ pendingEditor: id2 });
+      this.publish({ pendingEditor: id3 });
       return;
     }
-    await this.loadEditor(id2);
+    await this.loadEditor(id3);
   }
   async reload() {
     const editor = this.current.editor;
@@ -3884,14 +3968,14 @@ var ProfilesController = class {
     }
     await this.loadEditor(editor.id);
   }
-  async loadEditor(id2) {
-    if (id2 === NEW_EDITOR) {
+  async loadEditor(id3) {
+    if (id3 === NEW_EDITOR) {
       this.accepted = null;
       this.publish({ editor: { id: "new-profile", content: NEW_PROFILE_CONTENT, revision: null }, dirty: true, issue: null, notice: null, pendingEditor: null, invalidFields: [], editorEpoch: this.current.editorEpoch + 1 });
       return;
     }
     await this.perform("read", async (live) => {
-      const document2 = await this.unwrap(this.remote.read(id2), "id");
+      const document2 = await this.unwrap(this.remote.read(id3), "id");
       if (live()) this.accept(document2);
     });
   }
@@ -3907,25 +3991,25 @@ var ProfilesController = class {
       this.publish({ editor: previous, dirty: true });
     }
   }
-  editId(id2) {
+  editId(id3) {
     const editor = this.current.editor;
     if (editor === null || editor.revision !== null || this.current.busy !== null || this.current.pendingEditor !== null) return;
-    const content2 = editStructuredPath(editor.content, ["id"], id2);
+    const content2 = editStructuredPath(editor.content, ["id"], id3);
     if (content2 === null) {
       this.publish({ issue: { kind: "domain", code: "validation", field: "content" }, notice: null });
       return;
     }
-    this.publish({ editor: { ...editor, id: id2, content: content2 }, dirty: true, issue: null, notice: null });
+    this.publish({ editor: { ...editor, id: id3, content: content2 }, dirty: true, issue: null, notice: null });
   }
   editContent(content2) {
     const editor = this.current.editor;
     if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null) return;
     this.publish({ editor: { ...editor, content: content2 }, dirty: this.accepted === null || this.accepted.content !== content2 || this.accepted.id !== editor.id, issue: null, notice: null });
   }
-  editPath(path, value) {
+  editPath(path, value2) {
     const editor = this.current.editor;
     if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null) return;
-    const content2 = editStructuredPath(editor.content, path, value);
+    const content2 = editStructuredPath(editor.content, path, value2);
     if (content2 === null) {
       this.publish({ issue: { kind: "domain", code: "validation", field: "content" }, notice: null });
       return;
@@ -3936,8 +4020,8 @@ var ProfilesController = class {
     const editor = this.current.editor;
     if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null) return;
     let content2 = editor.content;
-    for (const [key, value] of [["provider", provider], ["model", model], ["reasoningEffort", void 0]]) {
-      content2 = editStructuredPath(content2, [...path, key], value);
+    for (const [key, value2] of [["provider", provider], ["model", model], ["reasoningEffort", void 0]]) {
+      content2 = editStructuredPath(content2, [...path, key], value2);
       if (content2 === null) {
         this.publish({ issue: { kind: "domain", code: "validation", field: "content" }, notice: null });
         return;
@@ -3997,6 +4081,11 @@ var ProfilesController = class {
 // src/client/locales.ts
 var NS = "settings.dsmm-profiles";
 var en = {
+  sessionChooseWorkspace: "Choose a workspace to start a blank session, then choose its configuration before sending.",
+  sessionSelectionBlock: "DSMM session configuration is being confirmed. Wait for selection to finish, or refresh its state.",
+  sessionCommittedRefresh: "Session configuration saved. Refresh to confirm it; do not apply again.",
+  sessionUnconfirmedRefresh: "Session configuration result unconfirmed. Refresh its state before selecting or sending; do not retry the change.",
+  technicalDetails: "Technical details",
   diagnosticJsonc: "Correct the JSONC syntax at the indicated location.",
   diagnosticDuplicate: "Remove the duplicate field at this location.",
   diagnosticUnsafe: "Unsafe object keys are not supported; remove this field.",
@@ -4007,59 +4096,59 @@ var en = {
   diagnosticRoute: "Use a complete provider/model route or a nonempty exact-effort override.",
   diagnosticRequired: "This role is required by the selected Deepwork policy and cannot be disabled.",
   diagnosticCeiling: "A named profile cannot enable capabilities outside its captured startup/deployment ceiling.",
-  browseZone: "Browse saved profiles",
-  editZone: "Edit draft",
-  savedRevision: "Saved revision: {revision}",
-  savedInventory: "Saved profiles and diagnostics",
-  futurePin: "Future selection revision: {revision}",
-  noEditor: "Open a saved profile or create a draft to edit. Browsing does not activate a profile.",
+  browseZone: "Saved profiles",
+  editZone: "Edit profile",
+  savedRevision: "Saved version: {revision}",
+  savedInventory: "Profile warnings and errors",
+  futurePin: "Default selection version: {revision}",
+  noEditor: "Choose a profile or create one to edit.",
   warningMarker: "Warning · nonblocking · {code} · {field}",
   blockingMarker: "Blocked · {code} · {field}",
   blankLabelWarning: "The label is blank. The profile ID is used for display; the original document can still be saved and selected.",
   diagnosticLocation: "JSONC line {line}, column {column}.",
-  savedWarnings: "Saved revision warnings",
+  savedWarnings: "Saved profile warnings",
   draftWarnings: "Draft warnings",
-  futureWarnings: "Future-default pin warnings",
-  admissionWarnings: "Current-admission warnings",
+  futureWarnings: "New-session default warnings",
+  admissionWarnings: "Current-session warnings",
   warningProfile: "warning (nonblocking)",
-  omitLabel: "Inherit display name from ID (omit label)",
+  omitLabel: "Use ID as display name",
   businessLocale: "Default output language",
-  inheritLocale: "Inherit deployment / native language",
-  unsupportedLocale: "Unsupported draft language — choose an allowed value",
-  localeHint: "Omitted locale inherits the deployment preference, then native/user language. An explicit user request wins. This never changes the interface language.",
-  toolTopology: "Subagent tool topology",
-  topologyHint: "per-role exposes role tools plus the category entry; parameterized exposes role/category entries. Omitted inherits deployment (default per-role). Background, depth and route-override permissions remain deployment-only.",
+  inheritLocale: "Use deployment or native language",
+  unsupportedLocale: "Unsupported language — choose an allowed value",
+  localeHint: "User requests take priority. Interface language stays unchanged.",
+  toolTopology: "Subagent tools",
+  topologyHint: "per-role: one tool per role plus a category tool. parameterized: choose the role or category in the tool arguments.",
   levelName: "Invocation level: {level}",
   levelMode: "{level} override",
-  levelUnconfigured: "Not configured / inherit deployment level",
-  levelEffortOnly: "Exact effort only",
-  levelFullRoute: "Complete provider/model route",
-  normalLevel: "normal · default route (read-only alias; omission means normal)",
-  orchestratorLevels: "The ordinary orchestrator root has no invocation levels. Its native model is unchanged.",
-  levelsHint: "Levels are call resources, not workflow tiers. An unconfigured requested level is rejected; an effort-only override uses the resolved model. An explicit complete route replaces model and effort together.",
-  namedRole: "{name} named-profile availability",
-  namedRoleHint: "Omitted inherits the captured deployment ceiling. Required roles cannot be disabled; enable requests cannot lift startup or deployment restrictions. Routing remains editable even for disabled roles.",
-  availabilityUnknown: "Role availability metadata is unavailable. Required status and startup/deployment ceilings cannot be inferred; refresh before requesting an availability change.",
+  levelUnconfigured: "Use deployment level",
+  levelEffortOnly: "Reasoning effort only",
+  levelFullRoute: "Provider, model and effort",
+  normalLevel: "normal · default route",
+  orchestratorLevels: "Invocation levels are unavailable for the main orchestrator.",
+  levelsHint: "Unconfigured levels cannot be used. Effort-only keeps the configured model; a full route replaces both model and effort.",
+  namedRole: "Enable {name}",
+  namedRoleHint: "Required roles must stay enabled. Roles blocked by deployment settings cannot be enabled here.",
+  availabilityUnknown: "Role availability is unknown. Refresh before changing it.",
   roleRequired: "Required role · {reason}",
   roleOptional: "Optional role",
   roleCeiling: "Startup: {startup}; deployment: {deployment}; captured admission: {admitted}.",
   roleProvenance: "Source: {source}; capture: {capture}.",
   roleUnavailableReason: "Availability reason: {reason}.",
-  admittedRoles: "Captured role availability",
-  bindingUnknown: "Subagent runtime binding is unconfirmed; no delivery-readiness guarantee can be inferred from configuration.",
-  bindingState: "Captured subagent binding: {binding}; delivery fence: {ready}; restart required: {restart}. Fence readiness does not establish persistence or child-delegation support.",
-  bindingReason: "Binding reason: {reason}.",
-  sessionModelHint: "Apply/Baseline keep the native root model and existing children. Only Use profile model explicitly asks native model selection to change.",
-  savedOnlyHint: "Select the editor's saved immutable revision, not its dirty draft. Save does not select or apply it.",
-  centralOrigin: "Named resources: shared central store.",
-  legacyOrigin: "Named resources: legacy native-profile store (read-only).",
-  explicitOrigin: "Named resources: explicitly configured store.",
-  readOnlyOrigin: "This legacy store is read-only. Files are not copied or migrated; selection and current-session actions retain their own authority.",
+  admittedRoles: "Role availability",
+  bindingUnknown: "Subagent readiness is unknown. Refresh to check.",
+  bindingState: "Subagent execution ready: {ready}; restart required: {restart}.",
+  bindingReason: "Reason: {reason}.",
+  sessionModelHint: "Selecting a profile keeps your current model. Use profile model changes it explicitly.",
+  savedOnlyHint: "Save changes before selecting this profile.",
+  centralOrigin: "Shared profile storage.",
+  legacyOrigin: "Legacy profile storage (read-only).",
+  explicitOrigin: "Custom profile storage.",
+  readOnlyOrigin: "These legacy profiles are read-only.",
   headerCompactProfiles: "Profiles · keep model",
   headerCompactRefresh: "Refresh",
   headerNoSession: "Select a session to make changes.",
-  sessionNewRequired: "Applying a profile or baseline requires a new session. Save and future-default selection remain available.",
-  sessionModuleOff: "Deepwork is unavailable within this session's captured module settings.",
+  sessionNewRequired: "Start a new session to change its profile. You can still save profiles and set the new-session default.",
+  sessionModuleOff: "Deepwork is unavailable in this session.",
   headerModeEnable: "Enable Deepwork",
   headerModeDisable: "Disable Deepwork",
   headerModePreset: "Deepwork · DW preset",
@@ -4068,65 +4157,65 @@ var en = {
   headerModeOff: "Deepwork disabled.",
   headerUseCurrentModel: "Use profile model",
   title: "Deepwork Profiles",
-  description: "Save independent runtime configurations and choose which one new sessions use.",
-  newSessions: "This saved pin is the default for future sessions only. Current admissions and existing children remain unchanged; explicit session selections retain their own authority.",
+  description: "Save configurations and choose a default for new sessions.",
+  newSessions: "Choose a saved profile for new sessions. Existing sessions stay unchanged.",
   editorSelect: "Profile to edit",
   choose: "Choose a profile",
   newDraft: "New unsaved profile",
   new: "New profile",
-  profileId: "Profile ID (name)",
-  idHint: "Use 1–64 lowercase letters, digits, hyphens or underscores. The ID cannot be changed after saving. Add an optional display label in the JSONC document.",
-  configuration: "Runtime configuration (JSONC)",
-  configurationHint: "Document: version 1, matching id, optional label, and settings. Runtime overlays support role routes/levels, locale, role availability, topology, workflow, guards, recovery, calibration and default effort. Retired max-preset fields are rejected, not migrated.",
-  structuralHint: "Skills, prompt content, preset installation, providers/accounts, background/depth and arbitrary route permissions remain deployment-only. Never paste credentials. JSONC and structured controls edit the same draft without normalizing unrelated bytes.",
-  save: "Save profile",
-  saving: "Saving profile…",
-  apply: "Set as future default",
-  applying: "Selecting future default…",
-  reset: "Use baseline for future sessions",
-  resetting: "Resetting future default…",
+  profileId: "Profile ID",
+  idHint: "1–64 lowercase letters, digits, hyphens or underscores. Cannot be changed after saving.",
+  configuration: "Configuration (JSONC)",
+  configurationHint: "Use version: 1, the ID shown above, and settings. An optional label sets the display name.",
+  structuralHint: "Permissions, accounts and plugins are managed in application settings. Never paste passwords or keys.",
+  save: "Save",
+  saving: "Saving…",
+  apply: "Set as new-session default",
+  applying: "Setting default…",
+  reset: "Use default configuration",
+  resetting: "Restoring default…",
   refresh: "Refresh profiles",
   refreshing: "Refreshing profiles…",
   reload: "Reload saved profile",
   loading: "Loading profiles…",
   reading: "Reading profile…",
-  empty: "No saved profiles yet. Create a profile to start; the deployment baseline remains applied.",
-  baseline: "Applied to new sessions: deployment baseline.",
-  appliedProfile: "Applied to new sessions: {id} (revision {revision}).",
-  appliedInvalid: "The stored selection cannot be confirmed. Existing sessions remain unchanged. Resolve the Host diagnostic before applying or resetting a profile.",
-  selectionConflict: "The stored selection changed outside this Host. This Host still uses the policy shown above for new sessions. Apply a saved profile or reset to baseline to reconcile it; restarting adopts the stored selection. Existing sessions stay unchanged.",
-  dirty: "Draft differs from the saved version. Save or explicitly discard before selecting it.",
-  savedNotApplied: "Saved source version differs from the recorded future-default source, or this profile is not selected.",
-  savedApplied: "Saved source version matches the recorded future-default source, not necessarily the current admission.",
-  versionObserved: "Metadata observed",
-  versionAbsent: "Not stored",
-  versionUnknown: "Version unavailable",
-  savedRelationshipUnknown: "Saved; relationship to the selected source version is unknown. Refresh to inspect current metadata.",
-  savedRefreshRequired: "Committed — reload the affected source before editing or selecting it again. No automatic replay.",
-  saved: "Saved {id}. The applied policy was not changed.",
-  applied: "Applied {id} for new sessions. Existing sessions were not changed.",
-  resetDone: "Reset to the deployment baseline for new sessions. Existing sessions were not changed.",
+  empty: "No saved profiles. Create one to get started.",
+  baseline: "Default configuration",
+  appliedProfile: "{id}",
+  appliedInvalid: "Default selection is unconfirmed. Resolve the error below and refresh before changing it. Existing sessions stay unchanged.",
+  selectionConflict: "The default changed elsewhere. This Host still uses the selection shown above. Select a saved profile or use default configuration to update it. Restarting adopts the stored selection.",
+  dirty: "Unsaved changes. Save or discard before selecting this profile.",
+  savedNotApplied: "Saved; this version is not the new-session default.",
+  savedApplied: "Saved; this version is the new-session default.",
+  versionObserved: "Available",
+  versionAbsent: "Not saved",
+  versionUnknown: "Unknown",
+  savedRelationshipUnknown: "Saved; refresh to check the new-session default.",
+  savedRefreshRequired: "Saved. Reload before editing or selecting again.",
+  saved: "Saved {id}.",
+  applied: "New sessions will use {id}. Existing sessions stay unchanged.",
+  resetDone: "New sessions will use default configuration. Existing sessions stay unchanged.",
   discardPrompt: "Discard the unsaved draft before changing the editor?",
   discard: "Discard changes",
   cancel: "Cancel",
   conflict: "The saved file or selection changed elsewhere. Your draft and the prior selection were kept. Refresh profiles, then reload the saved profile or review your draft before retrying.",
   validation: "This profile is not valid. Correct the field below; your draft is unchanged.",
-  io: "The Host could not commit this operation. Your draft and the prior selection were kept. Check profile storage access, refresh, then retry.",
-  unavailable: "The native profile service is unavailable. Your draft is kept. Refresh after the Host reconnects or Deepwork is enabled.",
-  transport: "The native connection could not confirm this operation. Your draft is kept. Refresh the Host state before retrying; do not assume a save or apply completed.",
+  io: "Could not save. Your draft is kept. Check configuration storage access and retry.",
+  unavailable: "Configuration service unavailable. Your draft is kept. Reconnect and refresh.",
+  transport: "Connection interrupted; the result is unconfirmed. Your draft is kept. Refresh before retrying.",
   invalidProfile: "Unavailable profile: {id}",
-  details: "Host diagnostic",
-  retry: "Resolve the diagnostic, refresh profiles, then retry.",
-  globalScope: "Global default for future sessions",
-  sessionScope: "Current native session",
-  sessionSelect: "Current-session profile",
+  details: "Error details",
+  retry: "Resolve the issue shown, refresh and retry.",
+  globalScope: "New-session default configuration",
+  sessionScope: "Current-session configuration",
+  sessionSelect: "Current-session configuration",
   globalActionHint: "Set as future default selects only the saved revision for future sessions. It does not apply to the current session.",
   headerProfile: "Profile",
-  headerProfileLabel: "Current-session profile (header)",
-  headerCaptured: "captured admission · exact profile unavailable",
-  headerSavedUnavailable: "saved profile unavailable",
+  headerProfileLabel: "Current-session configuration",
+  headerCaptured: "Current configuration · profile unknown",
+  headerSavedUnavailable: "Saved profile unavailable",
   headerCurrentProfile: "Current profile: {profile}",
-  headerRefresh: "Refresh profiles and current-session state",
+  headerRefresh: "Refresh profiles and session state",
   headerUseModelAction: "Use profile model: {profile}",
   headerLoading: "Loading profile…",
   headerApplying: "Applying profile…",
@@ -4134,46 +4223,47 @@ var en = {
   headerBusy: "Session is busy.",
   headerUnavailable: "Profile unavailable.",
   headerDraft: "Save or discard the draft in Settings.",
-  headerConflict: "The session profile or admission changed elsewhere. Refresh current-session state before retrying.",
+  headerConflict: "The session configuration changed elsewhere. Refresh before retrying.",
   headerRefused: "Profile change unconfirmed. Check Settings.",
   headerKeepModelGroup: "Switch profile — keep current model",
   headerUseModelGroup: "Switch and use profile model",
   headerModelDefaultHint: "Normal switching preserves the current model. Explicit switch-and-use-model also saves the native model default, like the Models tab.",
-  headerNoProfileModel: "Profile applied; no main model configured. Current model kept.",
-  headerModelUnconfirmed: "Profile applied; model change unconfirmed. Check Models/Settings.",
-  headerAppliedWithModel: "Profile and native model applied.",
-  headerModelChoiceChanged: "Profile applied; newer native model choice kept.",
+  headerNoProfileModel: "No model is set for this configuration.",
+  headerModelUnconfirmed: "Model change unconfirmed. Check model settings.",
+  headerAppliedWithModel: "Configuration and model applied.",
+  headerModelChoiceChanged: "Your newer model selection was kept.",
+  headerActionUnavailable: "This action is unavailable. Refresh to check again.",
   headerActivationRefused: "Profile activation was refused. Check its configuration and native model catalog.",
   headerSelectionRefused: "The profile change could not be confirmed.",
   headerIssueCode: "Reason: {code}.",
   headerIssueField: "Configuration field: {field}.",
   headerRetryHint: "Refresh profiles and current-session state, resolve the indicated issue in Settings or native Models, then retry when the session is idle.",
-  headerMaintenanceRefused: "Native maintenance owns this session. The previous profile is kept.",
-  headerBusyRefused: "The session is busy. The previous profile is kept.",
-  headerCancelledRefused: "The profile request was cancelled. Refresh current-session state before retrying; do not assume a change completed.",
-  headerUnavailableRefused: "The native session or profile service is unavailable. Reconnect and refresh before retrying.",
-  headerWaitRetryHint: "Wait for the native work or maintenance to finish, then Refresh and retry. No profile change is queued automatically.",
-  noSession: "No native session is selected. Applying to the current session is unavailable.",
-  sessionUnavailable: "The current session could not be confirmed. Refresh its state before retrying; the prior policy is kept.",
-  sessionBusy: "Switching is unavailable: {reason}. The Host must reserve a truly idle ordinary session before applying.",
-  sessionState: "Current admission: {profile}; scope {scope}.",
-  sessionBaseline: "deployment baseline",
-  sessionGlobalCaptured: "captured admission (exact profile identity unavailable)",
-  sessionAdmittedProfile: "{id} (revision {revision})",
-  sessionFutureDefault: "Global default for future unscoped sessions: {profile}. This does not change this session's admission.",
-  sessionConflict: "The session selection or admission epoch changed elsewhere. The prior display and draft are kept. Refresh current-session state before applying again.",
-  sessionApply: "Apply profile to current session",
-  sessionApplying: "Applying current-session profile…",
-  sessionReset: "Pin baseline for current session",
-  sessionResetting: "Pinning current-session baseline…",
-  sessionRefresh: "Refresh current-session state",
-  sessionApplied: "Applied the saved revision to this session only. Global default and existing children were not changed.",
-  sessionResetDone: "Pinned the deployment baseline for this session only. Global default was not changed.",
+  headerMaintenanceRefused: "Another session operation is in progress. Try again shortly.",
+  headerBusyRefused: "The session is running. Try again when it finishes.",
+  headerCancelledRefused: "Operation cancelled. Refresh to confirm the current configuration.",
+  headerUnavailableRefused: "Cannot read the session configuration. Reconnect and refresh.",
+  headerWaitRetryHint: "Refresh and retry when the session is ready.",
+  noSession: "Select a session to change its configuration.",
+  sessionUnavailable: "Cannot confirm the current session. Refresh before retrying.",
+  sessionBusy: "Cannot switch: {reason}. Wait for the session to be idle, then retry.",
+  sessionState: "{profile}",
+  sessionBaseline: "Default configuration",
+  sessionGlobalCaptured: "Current configuration (profile unknown)",
+  sessionAdmittedProfile: "{id}",
+  sessionFutureDefault: "New-session default configuration: {profile}.",
+  sessionConflict: "The session configuration changed elsewhere. Your draft is kept. Refresh before retrying.",
+  sessionApply: "Use this profile",
+  sessionApplying: "Applying…",
+  sessionReset: "Use default configuration",
+  sessionResetting: "Restoring default…",
+  sessionRefresh: "Refresh session state",
+  sessionApplied: "Applied to this session only. New-session default and existing children stay unchanged.",
+  sessionResetDone: "This session uses default configuration. New-session default stays unchanged.",
   sessionAppliedWithModel: "Applied this session profile and explicitly selected its native main model. Native model-default persistence follows the Models tab; the global profile default was not changed.",
   sessionDirty: "Save or explicitly discard the editor draft before applying a current-session choice.",
   roleState: "Admitted route {route}; strategy {strategy}; retries {retries}; rate-limit failures {failures}; switches {switches}; total delay {delay} ms.",
-  catalogTitle: "Native model catalog",
-  catalogHint: "Catalog listings are advisory, not network or account health checks. Unlisted/manual routes stay editable; refresh never changes the draft or native model default.",
+  catalogTitle: "Model catalog",
+  catalogHint: "You can enter models that are not listed.",
   catalogUnavailable: "The native catalog is unavailable. Manual provider/model/effort fields and advanced JSONC remain available.",
   catalogRefresh: "Refresh model catalog",
   catalogRefreshing: "Refreshing model catalog…",
@@ -4184,16 +4274,16 @@ var en = {
   enabled: "Enabled",
   disabled: "Disabled",
   inherit: "Inherit deployment baseline",
-  profileDefaults: "Profile runtime defaults",
+  profileDefaults: "Configuration defaults",
   roleSelect: "Agent role to edit",
-  rolesUnavailable: "Native role inventory unavailable — use advanced JSONC",
-  roleEnabled: "Enabled in the native deployment",
-  roleDisabled: "Disabled in the native deployment",
+  rolesUnavailable: "Role list unavailable. Refresh or use the advanced editor.",
+  roleEnabled: "Enabled in application settings",
+  roleDisabled: "Disabled in application settings",
   strategy: "{name} strategy",
   inheritStrategy: "Inherit ({value})",
-  startupLock: "startup-lock — keep the admitted route",
-  rateFallback: "rate-limit-fallback — ordered rollover at threshold",
-  strategyHint: "Both strategies use finite, positively no-output-safe RATE_LIMIT retries. Generic, auth and quota failures do not authorize a model switch. Blank numeric fields inherit; zero is an explicit value.",
+  startupLock: "Keep the starting route",
+  rateFallback: "Switch after repeated rate limits",
+  strategyHint: "Model switches require a rate-limit failure with no output. Authentication and quota errors stop the attempt. Leave numbers blank to inherit; zero is explicit.",
   retryField: "{name} {field}",
   inheritNumber: "Inherit {value}",
   retryBounds: "Integer {min}–{max}; inherited value {value}.",
@@ -4229,10 +4319,15 @@ var en = {
   effortDefault: "Native default (omit exact effort)",
   effortChangeHint: "Changing a provider/model explicitly clears that route's exact effort. Catalog refresh preserves all configured values; choose an exact effort again if required.",
   advanced: "Advanced JSONC",
-  rawInvalid: "Structured editing is unavailable for this invalid raw draft. Correct Advanced JSONC; no fields, comments or bytes have been normalized.",
-  invalidNumber: "Correct this bounded integer before saving or changing roles. The invalid value has not replaced the saved draft policy."
+  rawInvalid: "Correct the invalid draft in Advanced JSONC to use these controls. Your draft is kept.",
+  invalidNumber: "Enter a whole number within the limits before saving or changing roles."
 };
 var zh = {
+  sessionChooseWorkspace: "请先选择工作区创建空白会话，再选择本次配置后发送。",
+  sessionSelectionBlock: "正在确认 DSMM 本次会话配置。请等待选择完成，或刷新会话状态。",
+  sessionCommittedRefresh: "本次会话配置已保存，请刷新确认，不要再次应用。",
+  sessionUnconfirmedRefresh: "本次会话配置结果待确认。请刷新状态后再选择或发送，不要重试更改。",
+  technicalDetails: "技术详情",
   diagnosticJsonc: "请修正所示位置的 JSONC 语法。",
   diagnosticDuplicate: "请删除此位置的重复字段。",
   diagnosticUnsafe: "不支持不安全对象键，请删除此字段。",
@@ -4243,193 +4338,194 @@ var zh = {
   diagnosticRoute: "请提供完整提供商与模型路由，或非空精确强度覆盖。",
   diagnosticRequired: "所选 Deepwork 策略要求此角色，不可禁用。",
   diagnosticCeiling: "具名配置档不能启用超出已捕获启动或部署上限的能力。",
-  browseZone: "浏览已保存配置档",
-  editZone: "编辑草稿",
-  savedRevision: "保存的修订：{revision}",
-  savedInventory: "已保存配置档与诊断",
-  futurePin: "未来默认选择修订：{revision}",
-  noEditor: "打开已保存配置档或新建草稿。浏览不会启用配置档。",
+  browseZone: "已保存配置",
+  editZone: "编辑配置",
+  savedRevision: "保存版本：{revision}",
+  savedInventory: "配置警告与错误",
+  futurePin: "默认选择版本：{revision}",
+  noEditor: "选择配置或新建配置后编辑。",
   warningMarker: "警告 · 不阻断 · {code} · {field}",
   blockingMarker: "已阻断 · {code} · {field}",
   blankLabelWarning: "显示名称为空，使用配置档 ID 显示。原文仍可保存和选择。",
   diagnosticLocation: "JSONC 第 {line} 行，第 {column} 列。",
-  savedWarnings: "保存修订的警告",
+  savedWarnings: "已保存配置的警告",
   draftWarnings: "草稿警告",
-  futureWarnings: "未来默认固定修订的警告",
-  admissionWarnings: "当前准入的警告",
+  futureWarnings: "新会话默认配置的警告",
+  admissionWarnings: "本次会话的警告",
   warningProfile: "警告（不阻断）",
-  omitLabel: "使用 ID 显示（省略 label）",
+  omitLabel: "使用 ID 作为显示名称",
   businessLocale: "默认输出语言",
-  inheritLocale: "继承部署或原生语言",
-  unsupportedLocale: "草稿语言不受支持，请选择允许值",
-  localeHint: "省略 locale 时继承部署偏好，再继承原生或用户语言。本次用户明确请求优先，不改变界面语言。",
-  toolTopology: "子 Agent 工具拓扑",
-  topologyHint: "per-role 暴露角色工具及类别入口；parameterized 暴露角色与类别参数化入口。省略时继承部署（默认 per-role）。后台、深度及路由覆盖权限仅可在部署中配置。",
-  levelName: "调用资源等级：{level}",
+  inheritLocale: "使用部署或原生语言",
+  unsupportedLocale: "语言不受支持，请选择允许值",
+  localeHint: "用户明确要求的语言优先，界面语言不变。",
+  toolTopology: "子代理工具",
+  topologyHint: "per-role：每个角色一个工具，另有类别工具。parameterized：通过工具参数选择角色或类别。",
+  levelName: "调用等级：{level}",
   levelMode: "{level} 覆盖",
-  levelUnconfigured: "未配置或继承部署等级",
-  levelEffortOnly: "仅精确推理强度",
-  levelFullRoute: "完整提供商与模型路由",
-  normalLevel: "normal · 默认路由（只读别名；省略即 normal）",
-  orchestratorLevels: "普通 orchestrator 根会话没有调用等级，不改变其原生模型。",
-  levelsHint: "等级代表调用资源，不代表流程等级。请求未配置等级会被拒绝；仅强度覆盖使用已解析模型；完整路由同时替换模型和强度。",
-  namedRole: "{name} 的具名配置可用性",
-  namedRoleHint: "省略时继承已捕获部署上限。必需角色不可禁用；启用请求不能突破启动或部署限制。禁用角色仍可编辑路由。",
-  availabilityUnknown: "角色可用性元数据不可用，不能猜测必需集合或启动与部署上限。请求更改可用性前请刷新。",
+  levelUnconfigured: "使用部署等级",
+  levelEffortOnly: "仅推理强度",
+  levelFullRoute: "提供商、模型与强度",
+  normalLevel: "normal · 默认路由",
+  orchestratorLevels: "主 orchestrator 不支持调用等级。",
+  levelsHint: "未配置的等级不可使用。仅强度覆盖保留配置中的模型；完整路由同时替换模型和强度。",
+  namedRole: "启用 {name}",
+  namedRoleHint: "必需角色必须保持启用；部署设置禁止的角色无法在此启用。",
+  availabilityUnknown: "角色可用性未知，请刷新后再更改。",
   roleRequired: "必需角色 · {reason}",
   roleOptional: "可选角色",
   roleCeiling: "启动：{startup}；部署：{deployment}；捕获准入：{admitted}。",
   roleProvenance: "来源：{source}；捕获：{capture}。",
   roleUnavailableReason: "可用性原因：{reason}。",
-  admittedRoles: "已捕获角色可用性",
-  bindingUnknown: "尚未确认子 Agent 运行时绑定，不能从配置推断投递守卫已就绪。",
-  bindingState: "捕获的子 Agent 绑定：{binding}；投递守卫：{ready}；需重启：{restart}。守卫就绪不证明持久化或 child 委派支持。",
-  bindingReason: "绑定原因：{reason}。",
-  sessionModelHint: "应用或固定基线保留原生根模型和已有子会话。只有「使用配置档模型」会明确请求原生模型切换。",
-  savedOnlyHint: "选择编辑器对应的已保存固定修订，而不是脏草稿。保存不会选择或应用。",
-  centralOrigin: "具名资源：共享中央存储。",
-  legacyOrigin: "具名资源：旧原生配置存储（只读）。",
-  explicitOrigin: "具名资源：显式指定的存储。",
-  readOnlyOrigin: "此旧存储只读，不复制或迁移文件；选择与当前会话操作仍使用各自的权限。",
+  admittedRoles: "角色可用性",
+  bindingUnknown: "子代理就绪状态未知，请刷新确认。",
+  bindingState: "子代理执行就绪：{ready}；需重启：{restart}。",
+  bindingReason: "原因：{reason}。",
+  sessionModelHint: "选择配置时保留当前模型；「使用配置中的模型」会明确切换模型。",
+  savedOnlyHint: "选择此配置前请保存更改。",
+  centralOrigin: "共享配置存储。",
+  legacyOrigin: "旧配置存储（只读）。",
+  explicitOrigin: "自定义配置存储。",
+  readOnlyOrigin: "这些旧配置只读。",
   headerCompactProfiles: "配置档 · 保留模型",
   headerCompactRefresh: "刷新",
   headerNoSession: "选择会话后可更改。",
-  sessionNewRequired: "应用配置档或基线需要新会话。仍可保存配置档或设置未来默认。",
-  sessionModuleOff: "此会话捕获的模块设置不允许使用 Deepwork。",
+  sessionNewRequired: "请新建会话后选择配置。仍可保存配置或设置新会话默认配置。",
+  sessionModuleOff: "此会话无法使用 Deepwork。",
   headerModeEnable: "启用 Deepwork",
   headerModeDisable: "关闭 Deepwork",
   headerModePreset: "Deepwork · DW 预设",
   headerModeUnavailable: "Deepwork 不可用",
   headerModeOn: "Deepwork 已启用。",
   headerModeOff: "Deepwork 已关闭。",
-  headerUseCurrentModel: "使用配置档模型",
-  title: "Deepwork 配置档",
-  description: "保存独立的运行时配置，并选择新会话使用的配置档。",
-  newSessions: "此固定修订仅作为未来会话默认值。当前准入与已有子会话不变；明确的会话选择保留自己的权限。",
-  editorSelect: "要编辑的配置档",
-  choose: "选择配置档",
-  newDraft: "新的未保存配置档",
-  new: "新建配置档",
-  profileId: "配置档 ID（名称）",
-  idHint: "使用 1–64 个小写字母、数字、连字符或下划线。保存后不能修改 ID。可在 JSONC 文档中添加可选的显示名称 label。",
-  configuration: "运行时配置（JSONC）",
-  configurationHint: "文档包含 version: 1、相同 id、可选 label 和 settings。支持角色路由与调用等级、语言、角色可用性、拓扑、流程、守卫、恢复、校准与默认推理强度。已退休的最高强度预设字段会被拒绝，不自动迁移。",
-  structuralHint: "技能、提示内容、预设安装、提供商与账户、后台与深度及任意路由权限仅可在部署中配置。请勿粘贴凭证。JSONC 与结构化控件共享草稿，不规范化无关字节。",
-  save: "保存配置档",
-  saving: "正在保存配置档…",
-  apply: "设为未来默认",
-  applying: "正在选择未来默认…",
-  reset: "未来会话使用基线",
-  resetting: "正在重置未来默认…",
-  refresh: "刷新配置档",
-  refreshing: "正在刷新配置档…",
-  reload: "重新加载已保存配置档",
-  loading: "正在加载配置档…",
-  reading: "正在读取配置档…",
-  empty: "尚无已保存的配置档。可新建配置档；当前仍应用部署基线。",
-  baseline: "新会话使用：部署基线。",
-  appliedProfile: "新会话使用：{id}（修订 {revision}）。",
-  appliedInvalid: "无法确认保存的选择。已有会话未改变。请先解决 Host 诊断，再应用或重置配置档。",
-  selectionConflict: "保存的选择已被此 Host 之外的操作修改。此 Host 的新会话仍使用上方策略。请应用已保存配置档或重置为基线以协调选择；重启将采用保存的选择。已有会话未改变。",
-  dirty: "草稿与保存版本不同。选择前请保存或明确丢弃。",
-  savedNotApplied: "保存的来源版本与未来默认记录不同，或尚未选择此配置档。",
-  savedApplied: "保存的来源版本与未来默认记录一致，但未必是当前准入。",
-  versionObserved: "已观测元数据",
-  versionAbsent: "未存储",
-  versionUnknown: "版本不可用",
-  savedRelationshipUnknown: "已保存；与所选来源版本的关系未知，请刷新核对当前元数据。",
-  savedRefreshRequired: "已提交——请重新加载受影响的来源后再编辑或选择，不会自动重放。",
-  saved: "已保存 {id}，未改变已应用的策略。",
-  applied: "已为新会话应用 {id}，已有会话未改变。",
-  resetDone: "已为新会话重置为部署基线，已有会话未改变。",
+  headerUseCurrentModel: "使用配置中的模型",
+  title: "Deepwork 配置",
+  description: "保存配置并选择新会话的默认配置。",
+  newSessions: "选择已保存的配置供新会话使用，已有会话不变。",
+  editorSelect: "要编辑的配置",
+  choose: "选择配置",
+  newDraft: "未保存的新配置",
+  new: "新建配置",
+  profileId: "配置 ID",
+  idHint: "1–64 个小写字母、数字、连字符或下划线，保存后不可修改。",
+  configuration: "配置内容（JSONC）",
+  configurationHint: "使用 version: 1、与上方一致的 id，以及 settings；label 可填写显示名称。",
+  structuralHint: "权限、账户、插件等由应用设置管理。请勿粘贴密码或密钥。",
+  save: "保存",
+  saving: "正在保存…",
+  apply: "设为新会话默认配置",
+  applying: "正在设置默认配置…",
+  reset: "使用默认配置",
+  resetting: "正在恢复默认配置…",
+  refresh: "刷新配置",
+  refreshing: "正在刷新…",
+  reload: "重新加载已保存配置",
+  loading: "正在加载…",
+  reading: "正在读取…",
+  empty: "尚无已保存的配置，请先新建配置。",
+  baseline: "默认配置",
+  appliedProfile: "{id}",
+  appliedInvalid: "默认选择未确认，请解决下方错误并刷新后再更改。已有会话不变。",
+  selectionConflict: "默认选择已在其他位置改变，此宿主仍使用上方选择。请选择已保存的配置或使用默认配置进行更新；重启将采用存储中的选择。",
+  dirty: "有未保存的更改，选择此配置前请保存或丢弃。",
+  savedNotApplied: "已保存，此版本尚未设为新会话默认配置。",
+  savedApplied: "已保存，此版本已设为新会话默认配置。",
+  versionObserved: "可用",
+  versionAbsent: "未保存",
+  versionUnknown: "未知",
+  savedRelationshipUnknown: "已保存，请刷新确认新会话默认配置。",
+  savedRefreshRequired: "已保存，请重新加载后再编辑或选择。",
+  saved: "已保存 {id}。",
+  applied: "新会话将使用 {id}，已有会话不变。",
+  resetDone: "新会话将使用默认配置，已有会话不变。",
   discardPrompt: "切换编辑器之前，是否丢弃未保存的草稿？",
   discard: "丢弃更改",
   cancel: "取消",
   conflict: "已保存文件或选择已被其他操作修改。草稿和原选择已保留。请刷新配置档，然后重新加载已保存配置档或检查草稿后重试。",
   validation: "此配置档无效。请修正下方字段；草稿未改变。",
-  io: "Host 无法提交此操作。草稿和原选择已保留。请检查配置档存储权限，刷新后重试。",
-  unavailable: "原生配置档服务不可用。草稿已保留。Host 重新连接或启用 Deepwork 后请刷新。",
-  transport: "原生连接无法确认此操作。草稿已保留。重试之前请刷新 Host 状态；不要假定保存或应用已完成。",
-  invalidProfile: "不可用配置档：{id}",
-  details: "Host 诊断",
-  retry: "请解决诊断问题，刷新配置档后重试。",
-  globalScope: "未来会话的全局默认值",
-  sessionScope: "当前原生会话",
-  sessionSelect: "当前会话配置档",
+  io: "无法保存。草稿已保留，请检查配置存储权限后重试。",
+  unavailable: "配置服务暂不可用。草稿已保留，请重新连接后刷新。",
+  transport: "连接中断，操作结果待确认。草稿已保留，请先刷新状态。",
+  invalidProfile: "配置不可用：{id}",
+  details: "错误详情",
+  retry: "请处理所示问题，刷新后重试。",
+  globalScope: "新会话默认配置",
+  sessionScope: "本次会话配置",
+  sessionSelect: "本次会话配置",
   globalActionHint: "「设为未来默认」只为未来会话选择已保存修订，不应用到当前会话。",
-  headerProfile: "配置档",
-  headerProfileLabel: "当前会话配置档（会话栏）",
-  headerCaptured: "已捕获准入 · 精确配置档不可用",
-  headerSavedUnavailable: "保存的配置档不可用",
-  headerCurrentProfile: "当前配置档：{profile}",
-  headerRefresh: "刷新配置档和当前会话状态",
-  headerUseModelAction: "使用配置档模型：{profile}",
-  headerLoading: "加载配置档…",
-  headerApplying: "应用配置档…",
-  headerApplied: "配置档已应用。",
+  headerProfile: "配置",
+  headerProfileLabel: "本次会话配置",
+  headerCaptured: "当前配置 · 来源未知",
+  headerSavedUnavailable: "已保存的配置不可用",
+  headerCurrentProfile: "本次配置：{profile}",
+  headerRefresh: "刷新配置和会话状态",
+  headerUseModelAction: "使用配置中的模型：{profile}",
+  headerLoading: "加载配置…",
+  headerApplying: "应用配置…",
+  headerApplied: "配置已应用。",
   headerBusy: "会话忙碌。",
-  headerUnavailable: "配置档不可用。",
+  headerUnavailable: "配置不可用。",
   headerDraft: "请在设置中保存或丢弃草稿。",
-  headerConflict: "会话配置档或准入代次已在其他位置改变，请刷新当前会话状态后重试。",
-  headerRefused: "未确认配置档更改，请检查设置。",
-  headerKeepModelGroup: "切换配置档 — 保留当前模型",
-  headerUseModelGroup: "切换并使用配置档模型",
-  headerModelDefaultHint: "普通切换保留当前模型。明确切换并使用模型还会像模型页一样保存原生模型默认值。",
-  headerNoProfileModel: "配置档已应用，未配置主模型。当前模型已保留。",
-  headerModelUnconfirmed: "配置档已应用，模型更改未确认。请检查模型或设置页。",
-  headerAppliedWithModel: "配置档和原生模型已应用。",
-  headerModelChoiceChanged: "配置档已应用，已保留更新的原生模型选择。",
+  headerConflict: "会话配置已在其他位置改变，请刷新后重试。",
+  headerRefused: "配置更改未确认，请检查设置。",
+  headerKeepModelGroup: "切换配置，保留当前模型",
+  headerUseModelGroup: "切换配置和模型",
+  headerModelDefaultHint: "使用配置中的模型也会更新默认模型。",
+  headerNoProfileModel: "此配置未指定模型。",
+  headerModelUnconfirmed: "模型更改尚未确认，请检查模型设置。",
+  headerAppliedWithModel: "配置和模型已应用。",
+  headerModelChoiceChanged: "已保留你最新选择的模型。",
+  headerActionUnavailable: "此操作暂不可用，请刷新确认。",
   headerActivationRefused: "配置档启用被拒绝，请检查其配置和原生模型目录。",
   headerSelectionRefused: "无法确认配置档更改。",
   headerIssueCode: "原因：{code}。",
   headerIssueField: "配置字段：{field}。",
   headerRetryHint: "请刷新配置档和当前会话状态，在设置或原生模型页解决所示问题，然后在会话空闲时重试。",
-  headerMaintenanceRefused: "原生维护正在占用此会话，原配置档已保留。",
-  headerBusyRefused: "会话正在运行，原配置档已保留。",
-  headerCancelledRefused: "配置档请求已取消，请刷新当前会话状态后重试，不要假定更改已完成。",
-  headerUnavailableRefused: "原生会话或配置档服务不可用，请重新连接并刷新后重试。",
-  headerWaitRetryHint: "请等待原生运行或维护结束，然后刷新并重试。不会自动排队应用配置档。",
-  noSession: "未选择原生会话。无法应用到当前会话。",
-  sessionUnavailable: "无法确认当前会话。重试前请刷新状态；原策略已保留。",
-  sessionBusy: "暂不可切换：{reason}。Host 必须先保留真正空闲的普通会话。",
-  sessionState: "当前准入：{profile}；范围 {scope}。",
-  sessionBaseline: "部署基线",
-  sessionGlobalCaptured: "已捕获准入（精确配置档身份不可用）",
-  sessionAdmittedProfile: "{id}（修订 {revision}）",
-  sessionFutureDefault: "未来没有独立选择的会话的全局默认值：{profile}。这不会改变当前会话的准入。",
-  sessionConflict: "会话选择或准入代次已在其他位置改变。原显示和草稿已保留。再次应用前请刷新当前会话状态。",
-  sessionApply: "应用配置档到当前会话",
-  sessionApplying: "正在应用当前会话配置档…",
-  sessionReset: "为当前会话固定基线",
-  sessionResetting: "正在固定当前会话基线…",
-  sessionRefresh: "刷新当前会话状态",
-  sessionApplied: "已仅对此会话应用保存的修订。全局默认值和已有子会话未改变。",
-  sessionResetDone: "已仅对此会话固定部署基线。全局默认值未改变。",
-  sessionDirty: "应用当前会话选择之前，请保存或明确丢弃编辑器草稿。",
+  headerMaintenanceRefused: "会话正在处理其他操作，请稍后重试。",
+  headerBusyRefused: "会话正在运行，请结束后重试。",
+  headerCancelledRefused: "操作已取消，请刷新以确认当前配置。",
+  headerUnavailableRefused: "无法读取会话配置，请重新连接后刷新。",
+  headerWaitRetryHint: "请稍后刷新并重试。",
+  noSession: "选择会话后可更改配置。",
+  sessionUnavailable: "无法确认当前会话，请刷新后重试。",
+  sessionBusy: "暂不可切换：{reason}。请等待会话空闲后重试。",
+  sessionState: "{profile}",
+  sessionBaseline: "默认配置",
+  sessionGlobalCaptured: "当前配置（来源未知）",
+  sessionAdmittedProfile: "{id}",
+  sessionFutureDefault: "新会话默认配置：{profile}。",
+  sessionConflict: "会话配置已在其他位置改变，草稿已保留。请刷新后重试。",
+  sessionApply: "使用此配置",
+  sessionApplying: "正在应用…",
+  sessionReset: "使用默认配置",
+  sessionResetting: "正在恢复默认配置…",
+  sessionRefresh: "刷新会话状态",
+  sessionApplied: "已应用到本次会话，新会话默认配置和已有子会话不变。",
+  sessionResetDone: "本次会话已使用默认配置，新会话默认配置不变。",
+  sessionDirty: "选择本次会话配置前，请保存或丢弃草稿。",
   sessionAppliedWithModel: "已应用此会话配置档，并明确选择其原生主模型。模型默认值像模型页一样保存；全局配置档默认值未改变。",
   roleState: "准入路由 {route}；策略 {strategy}；重试 {retries}；限流失败 {failures}；切换 {switches}；累计延迟 {delay} 毫秒。",
-  catalogTitle: "原生模型目录",
-  catalogHint: "目录仅供参考，不是网络或账户健康检查。未列出或手动路由仍可编辑；刷新不会改变草稿或原生模型默认值。",
-  catalogUnavailable: "原生模型目录不可用。仍可使用手动提供商、模型、强度字段和高级 JSONC。",
+  catalogTitle: "模型目录",
+  catalogHint: "可手动输入目录中未列出的模型。",
+  catalogUnavailable: "模型目录不可用，可手动输入提供商、模型和推理强度。",
   catalogRefresh: "刷新模型目录",
   catalogRefreshing: "正在刷新模型目录…",
   catalogFailure: "提供商目录不可用：{name}（{id}）。",
-  profileLabel: "配置档显示名称",
+  profileLabel: "配置名称",
   defaultActive: "默认 Deepwork 模式",
-  activeHint: "此默认值不会抹除已明确保存的会话模式。",
+  activeHint: "会话中明确选择的模式优先。",
   enabled: "启用",
   disabled: "禁用",
-  inherit: "继承部署基线",
-  profileDefaults: "配置档运行时默认值",
-  roleSelect: "要编辑的 Agent 角色",
-  rolesUnavailable: "原生角色列表不可用，请使用高级 JSONC",
-  roleEnabled: "原生部署中已启用",
-  roleDisabled: "原生部署中已禁用",
+  inherit: "使用上层设置",
+  profileDefaults: "配置默认值",
+  roleSelect: "要编辑的角色",
+  rolesUnavailable: "角色列表暂不可用，请刷新或使用高级编辑器。",
+  roleEnabled: "应用设置已启用",
+  roleDisabled: "应用设置已禁用",
   strategy: "{name} 策略",
   inheritStrategy: "继承（{value}）",
-  startupLock: "startup-lock — 保留准入路由",
-  rateFallback: "rate-limit-fallback — 达到阈值后按顺序切换",
-  strategyHint: "两种策略均使用有限且已证明无输出的 RATE_LIMIT 重试。普通、认证或配额失败不允许切换模型。数字留空表示继承，零是明确值。",
+  startupLock: "保留起始路由",
+  rateFallback: "多次限流后切换",
+  strategyHint: "仅在限流且没有输出时切换模型；认证或配额错误会停止尝试。数字留空表示继承，零为明确值。",
   retryField: "{name} {field}",
   inheritNumber: "继承 {value}",
   retryBounds: "整数 {min}–{max}；继承值 {value}。",
@@ -4463,10 +4559,10 @@ var zh = {
   manualValue: "手动或未列出：{value}",
   unset: "未设置",
   effortDefault: "原生默认值（省略精确强度）",
-  effortChangeHint: "明确更改提供商或模型会清除该路由的精确强度。刷新目录会保留所有配置值；需要时请重新选择精确强度。",
+  effortChangeHint: "更改提供商或模型会清除该路由的推理强度，需要时请重新选择。",
   advanced: "高级 JSONC",
-  rawInvalid: "原始草稿无效，暂不可结构化编辑。请修正高级 JSONC；字段、注释和字节均未自动规范化。",
-  invalidNumber: "保存或切换角色之前，请修正此有界整数。无效值尚未替换草稿中的策略。"
+  rawInvalid: "请在高级 JSONC 中修正草稿后使用这些控件，草稿已保留。",
+  invalidNumber: "保存或切换角色前，请输入范围内的整数。"
 };
 var RETRY_FIELD_LABEL_KEYS = {
   maxRetries: "retryCount",
@@ -4490,22 +4586,25 @@ var DSMM_LOCALES = ["en", "zh-Hans", "zh-Hant", "ja", "ko", "de", "fr", "es", "p
 
 // src/client/RoleAvailability.tsx
 var import_jsx_runtime2 = require("react/jsx-runtime");
-function roleAvailability(value) {
-  if (value === void 0) return void 0;
+function roleAvailability(value2) {
+  if (value2 === void 0) return void 0;
   try {
-    return parseRoleAvailability(value);
+    return parseRoleAvailability(value2);
   } catch {
     return void 0;
   }
 }
-function RoleAvailability({ value, t }) {
-  const state = roleAvailability(value);
+function RoleAvailability({ value: value2, t }) {
+  const state = roleAvailability(value2);
   if (state === void 0) return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "dsmm-hint", children: t("availabilityUnknown") });
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dsmm-availability", "data-dsmm-role-availability": state.id, children: [
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { children: t(state.required ? "roleRequired" : "roleOptional", { reason: state.requiredReason ?? "—" }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { children: t("roleCeiling", { startup: t(state.startupAvailable ? "enabled" : "disabled"), deployment: t(state.deploymentEnabled ? "enabled" : "disabled"), admitted: t(state.admitted ? "enabled" : "disabled") }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "dsmm-hint", children: t("roleProvenance", { source: state.source, capture: state.capture }) }),
-    state.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { children: t("roleUnavailableReason", { reason: state.reason }) })
+    state.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { children: t("roleUnavailableReason", { reason: state.reason }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("details", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("summary", { children: t("technicalDetails") }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { children: t("roleCeiling", { startup: t(state.startupAvailable ? "enabled" : "disabled"), deployment: t(state.deploymentEnabled ? "enabled" : "disabled"), admitted: t(state.admitted ? "enabled" : "disabled") }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "dsmm-hint", children: t("roleProvenance", { source: state.source, capture: state.capture }) })
+    ] })
   ] });
 }
 
@@ -4513,12 +4612,12 @@ function RoleAvailability({ value, t }) {
 var import_react = require("react");
 var import_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_jsx_runtime3 = require("react/jsx-runtime");
-function EditableChoice({ id: id2, label, value, options, disabled, placeholder, onChange, onSelect }) {
+function EditableChoice({ id: id3, label, value: value2, options, disabled, placeholder, onChange, onSelect }) {
   const input = (0, import_react.useRef)(null);
   const [open, setOpen] = (0, import_react.useState)(false);
   const [activeId, setActiveId] = (0, import_react.useState)(null);
   const distinct = new Map(options.map((option) => [option.id, option]));
-  if (value !== "" && !distinct.has(value)) distinct.set(value, { id: value, name: value });
+  if (value2 !== "" && !distinct.has(value2)) distinct.set(value2, { id: value2, name: value2 });
   const choices = [...distinct.values()];
   const activeIndex = choices.findIndex((option) => option.id === activeId);
   const visible = open && !disabled && choices.length > 0;
@@ -4527,7 +4626,7 @@ function EditableChoice({ id: id2, label, value, options, disabled, placeholder,
     setActiveId(null);
   };
   const choose = (next) => {
-    if (next !== value) (onSelect ?? onChange)(next);
+    if (next !== value2) (onSelect ?? onChange)(next);
     close();
   };
   (0, import_react.useEffect)(() => {
@@ -4537,21 +4636,21 @@ function EditableChoice({ id: id2, label, value, options, disabled, placeholder,
     if (activeId !== null && activeIndex < 0) setActiveId(null);
   }, [activeId, activeIndex]);
   (0, import_react.useEffect)(() => {
-    if (visible && activeIndex >= 0) document.getElementById(`${id2}-choice-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
-  }, [id2, visible, activeIndex]);
+    if (visible && activeIndex >= 0) document.getElementById(`${id3}-choice-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [id3, visible, activeIndex]);
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dsmm-choice", children: [
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       import_dsh_client_ui_primitives.Input,
       {
         ref: input,
-        id: id2,
+        id: id3,
         className: "dsmm-input",
         role: "combobox",
         "aria-autocomplete": "list",
         "aria-expanded": visible,
-        "aria-controls": visible ? `${id2}-choices` : void 0,
-        "aria-activedescendant": visible && activeIndex >= 0 ? `${id2}-choice-${activeIndex}` : void 0,
-        value,
+        "aria-controls": visible ? `${id3}-choices` : void 0,
+        "aria-activedescendant": visible && activeIndex >= 0 ? `${id3}-choice-${activeIndex}` : void 0,
+        value: value2,
         disabled,
         placeholder,
         autoComplete: "off",
@@ -4599,10 +4698,10 @@ function EditableChoice({ id: id2, label, value, options, disabled, placeholder,
         }
       }
     ),
-    visible && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("ul", { className: "dsmm-choice-list", id: `${id2}-choices`, role: "listbox", "aria-label": label, children: choices.map((option, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    visible && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("ul", { className: "dsmm-choice-list", id: `${id3}-choices`, role: "listbox", "aria-label": label, children: choices.map((option, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       "li",
       {
-        id: `${id2}-choice-${index}`,
+        id: `${id3}-choice-${index}`,
         role: "option",
         "data-value": option.id,
         "aria-selected": option.id === activeId,
@@ -4617,25 +4716,25 @@ function EditableChoice({ id: id2, label, value, options, disabled, placeholder,
 
 // src/client/StructuredEditor.tsx
 var import_jsx_runtime4 = require("react/jsx-runtime");
-function RetryNumber({ id: id2, name, field, value, inherited, path, disabled, actions: actions2, t }) {
-  const [draft2, setDraft] = (0, import_react2.useState)(value === void 0 ? "" : String(value));
-  const [invalid2, setInvalid] = (0, import_react2.useState)(false);
+function RetryNumber({ id: id3, name, field, value: value2, inherited, path, disabled, actions: actions2, t }) {
+  const [draft2, setDraft] = (0, import_react2.useState)(value2 === void 0 ? "" : String(value2));
+  const [invalid3, setInvalid] = (0, import_react2.useState)(false);
   const [min, max] = DSMM_RATE_LIMIT_BOUNDS[field];
   const key = path.join(".");
   (0, import_react2.useEffect)(() => {
-    setDraft(value === void 0 ? "" : String(value));
+    setDraft(value2 === void 0 ? "" : String(value2));
     setInvalid(false);
-  }, [value]);
+  }, [value2]);
   (0, import_react2.useEffect)(() => {
-    actions2.setFieldInvalid(key, invalid2);
+    actions2.setFieldInvalid(key, invalid3);
     return () => actions2.setFieldInvalid(key, false);
-  }, [actions2.setFieldInvalid, key, invalid2]);
+  }, [actions2.setFieldInvalid, key, invalid3]);
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: id2, children: t("retryField", { name, field: t(RETRY_FIELD_LABEL_KEYS[field]) }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: id3, children: t("retryField", { name, field: t(RETRY_FIELD_LABEL_KEYS[field]) }) }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
       import_dsh_client_ui_primitives2.Input,
       {
-        id: id2,
+        id: id3,
         "data-dsmm-policy-field": field,
         className: "dsmm-input",
         type: "number",
@@ -4646,8 +4745,8 @@ function RetryNumber({ id: id2, name, field, value, inherited, path, disabled, a
         disabled,
         value: draft2,
         placeholder: inherited === void 0 ? t("unknownDefault") : t("inheritNumber", { value: inherited }),
-        "aria-invalid": invalid2 || void 0,
-        "aria-describedby": `${id2}-hint${invalid2 ? ` ${id2}-invalid` : ""}`,
+        "aria-invalid": invalid3 || void 0,
+        "aria-describedby": `${id3}-hint${invalid3 ? ` ${id3}-invalid` : ""}`,
         onChange: (event) => {
           const input = event.currentTarget;
           setDraft(input.value);
@@ -4658,15 +4757,15 @@ function RetryNumber({ id: id2, name, field, value, inherited, path, disabled, a
         }
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", id: `${id2}-hint`, children: t("retryBounds", { min, max, value: inherited ?? t("unknownDefault") }) }),
-    invalid2 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { id: `${id2}-invalid`, children: t("invalidNumber") })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", id: `${id3}-hint`, children: t("retryBounds", { min, max, value: inherited ?? t("unknownDefault") }) }),
+    invalid3 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { id: `${id3}-invalid`, children: t("invalidNumber") })
   ] });
 }
-function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t }) {
+function RouteFields({ value: value2, path, name, catalog, disabled, edit, editRoute, t }) {
   const prefix = (0, import_react2.useId)();
   const providers = catalog?.groups ?? [];
-  const group = providers.find((candidate) => candidate.id === value.provider);
-  const model = group?.models.find((candidate) => candidate.id === value.model);
+  const group = providers.find((candidate2) => candidate2.id === value2.provider);
+  const model = group?.models.find((candidate2) => candidate2.id === value2.model);
   const efforts = model?.reasoning?.efforts ?? [];
   const updateModel = (provider, modelId) => {
     editRoute(path, provider, modelId);
@@ -4679,10 +4778,10 @@ function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t 
         {
           id: `${prefix}-provider`,
           label: t("routeProvider", { name }),
-          value: value.provider,
+          value: value2.provider,
           options: providers,
           disabled,
-          onChange: (provider) => updateModel(provider, value.model),
+          onChange: (provider) => updateModel(provider, value2.model),
           onSelect: (provider) => updateModel(provider, "")
         }
       )
@@ -4694,10 +4793,10 @@ function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t 
         {
           id: `${prefix}-model`,
           label: t("routeModel", { name }),
-          value: value.model,
+          value: value2.model,
           options: group?.models ?? [],
           disabled,
-          onChange: (modelId) => updateModel(value.provider, modelId)
+          onChange: (modelId) => updateModel(value2.provider, modelId)
         }
       )
     ] }),
@@ -4708,7 +4807,7 @@ function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t 
         {
           id: `${prefix}-effort`,
           label: t("routeEffort", { name }),
-          value: value.reasoningEffort ?? "",
+          value: value2.reasoningEffort ?? "",
           options: efforts,
           disabled,
           placeholder: t("effortDefault"),
@@ -4718,24 +4817,24 @@ function RouteFields({ value, path, name, catalog, disabled, edit, editRoute, t 
     ] })
   ] });
 }
-function PolicyFields({ value, inherited, path, name, disabled, actions: actions2, t }) {
+function PolicyFields({ value: value2, inherited, path, name, disabled, actions: actions2, t }) {
   const prefix = (0, import_react2.useId)();
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-policy-fields", children: [
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-strategy`, children: t("strategy", { name }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-strategy`, disabled, value: value.strategy ?? "", onChange: (event) => actions2.editPath([...path, "strategy"], event.currentTarget.value || void 0), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-strategy`, disabled, value: value2.strategy ?? "", onChange: (event) => actions2.editPath([...path, "strategy"], event.currentTarget.value || void 0), children: [
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("inheritStrategy", { value: inherited?.strategy ?? t("unknownDefault") }) }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "startup-lock", children: t("startupLock") }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "rate-limit-fallback", children: t("rateFallback") })
       ] })
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("strategyHint") }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "dsmm-route-fields", children: Object.keys(DSMM_RATE_LIMIT_BOUNDS).map((field) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RetryNumber, { id: `${prefix}-${field}`, t, name, field, value: value.rateLimit?.[field], inherited: inherited?.rateLimit[field], path: [...path, "rateLimit", field], disabled, actions: actions2 }, field)) })
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "dsmm-route-fields", children: Object.keys(DSMM_RATE_LIMIT_BOUNDS).map((field) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RetryNumber, { id: `${prefix}-${field}`, t, name, field, value: value2.rateLimit?.[field], inherited: inherited?.rateLimit[field], path: [...path, "rateLimit", field], disabled, actions: actions2 }, field)) })
   ] });
 }
-function LevelFields({ level: level2, value, path, catalog, disabled, actions: actions2, t }) {
+function LevelFields({ level: level2, value: value2, path, catalog, disabled, actions: actions2, t }) {
   const prefix = (0, import_react2.useId)();
-  const mode = value === void 0 ? "inherit" : value.provider === void 0 ? "effort" : "route";
+  const mode = value2 === void 0 ? "inherit" : value2.provider === void 0 ? "effort" : "route";
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { "data-dsmm-level": level2, children: [
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: t("levelName", { level: level2 }) }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-field", children: [
@@ -4756,14 +4855,14 @@ function LevelFields({ level: level2, value, path, catalog, disabled, actions: a
         {
           id: `${prefix}-effort`,
           label: t("routeEffort", { name: level2 }),
-          value: value?.reasoningEffort ?? "",
+          value: value2?.reasoningEffort ?? "",
           options: [],
           disabled,
           onChange: (effort) => actions2.editPath([...path, "reasoningEffort"], effort)
         }
       )
     ] }),
-    value?.provider !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RouteFields, { value, path, name: t("levelName", { level: level2 }), catalog, disabled, edit: actions2.editPath, editRoute: actions2.editRoute, t })
+    value2?.provider !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RouteFields, { value: value2, path, name: t("levelName", { level: level2 }), catalog, disabled, edit: actions2.editPath, editRoute: actions2.editRoute, t })
   ] });
 }
 function StructuredEditor({ state, actions: actions2, disabled, t }) {
@@ -4772,7 +4871,7 @@ function StructuredEditor({ state, actions: actions2, disabled, t }) {
   const document2 = state.editor === null ? null : structuredDocument(state.editor.content);
   if (document2 === null) return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", "data-dsmm-structured-invalid": true, children: t("rawInvalid") });
   const roles2 = state.snapshot?.roles ?? [];
-  const role3 = roles2.find((candidate) => candidate.id === selectedRole) ?? roles2[0];
+  const role3 = roles2.find((candidate2) => candidate2.id === selectedRole) ?? roles2[0];
   const policy = role3 === void 0 ? void 0 : document2.roleRouting[role3.id] ?? {};
   const baseline = state.snapshot?.editorDefaults;
   let inherited;
@@ -4828,10 +4927,10 @@ function StructuredEditor({ state, actions: actions2, disabled, t }) {
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { htmlFor: `${prefix}-role`, children: t("roleSelect") }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { id: `${prefix}-role`, disabled: disabled || roles2.length === 0 || state.invalidFields.length > 0, value: role3?.id ?? "", onChange: (event) => setSelectedRole(event.currentTarget.value), children: [
         roles2.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "", children: t("rolesUnavailable") }),
-        roles2.map((candidate) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("option", { value: candidate.id, children: [
-          candidate.label,
-          candidate.enabled ? "" : ` — ${t("roleDisabled")}`
-        ] }, candidate.id))
+        roles2.map((candidate2) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("option", { value: candidate2.id, children: [
+          candidate2.label,
+          candidate2.enabled ? "" : ` — ${t("roleDisabled")}`
+        ] }, candidate2.id))
       ] })
     ] }),
     role3 !== void 0 && policy !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { "data-dsmm-role": role3.id, children: [
@@ -4869,11 +4968,11 @@ function StructuredEditor({ state, actions: actions2, disabled, t }) {
         ] })
       ] }),
       policy.fallbackRoutes?.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "dsmm-hint", children: t("emptyChain") }),
-      policy.fallbackRoutes?.map((candidate, index) => {
+      policy.fallbackRoutes?.map((candidate2, index) => {
         const name = t("fallbackName", { name: role3.label, index: index + 1 });
         return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("fieldset", { children: [
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("legend", { children: name }),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RouteFields, { t, value: candidate, path: [...rolePath, "fallbackRoutes", index], name, catalog: state.catalog, disabled, edit: actions2.editPath, editRoute: actions2.editRoute }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(RouteFields, { t, value: candidate2, path: [...rolePath, "fallbackRoutes", index], name, catalog: state.catalog, disabled, edit: actions2.editPath, editRoute: actions2.editRoute }),
           /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dsmm-actions", children: [
             /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || index === 0, onClick: () => actions2.moveFallback(role3.id, index, index - 1), children: t("moveUp", { name }) }),
             /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives2.Button, { type: "button", variant: "outline", disabled: disabled || index === policy.fallbackRoutes.length - 1, onClick: () => actions2.moveFallback(role3.id, index, index + 1), children: t("moveDown", { name }) }),
@@ -4924,13 +5023,13 @@ function capabilityReason(reason, t) {
     case "new-session-required":
       return t("sessionNewRequired");
     default:
-      return t("headerUnavailable");
+      return t("headerActionUnavailable");
   }
 }
 function menuIssue(issue) {
-  const code = MENU_ISSUE_CODES.has(issue.code) ? issue.code : issue.kind === "transport" ? "transport" : "unavailable";
+  const code2 = MENU_ISSUE_CODES.has(issue.code) ? issue.code : issue.kind === "transport" ? "transport" : "unavailable";
   const field = issue.field;
-  return { code, ...isSafeDiagnosticField(field) ? { field } : {} };
+  return { code: code2, ...isSafeDiagnosticField(field) ? { field } : {} };
 }
 function SessionScope({ state, actions: actions2, t, compact = false }) {
   const prefix = (0, import_react3.useId)();
@@ -4938,8 +5037,11 @@ function SessionScope({ state, actions: actions2, t, compact = false }) {
   const labels = session === null ? null : sessionProfileLabels(session, t);
   const selected = state.snapshot?.profiles.find((profile) => profile.id === state.sessionChoice);
   const disabled = state.busy !== null || state.pendingEditor !== null || state.sessionBusy !== null || state.dirty || state.invalidFields.length > 0;
-  const current = () => actions2.readProfileView().currentSessionId === state.currentSessionId;
-  const ready = session !== null && !session.refreshRequired && !session.selection.refreshRequired && writableSelectionVersion(session.selection.selectionRevision);
+  const current2 = () => {
+    const live = actions2.readProfileView();
+    return live.currentSessionId === state.currentSessionId && live.sessionViewEpoch === state.sessionViewEpoch && live.session === session;
+  };
+  const ready = session !== null && !state.sessionUnconfirmed && !session.refreshRequired && !session.selection.refreshRequired && writableSelectionVersion(session.selection.selectionRevision);
   const allowed = ready && session.canApplyOverlay === true && session.applyOverlayUnavailableReason !== "new-session-required";
   const modelAllowed = ready && session.canSelectModel === true && session.profileModel !== void 0;
   const status = state.sessionNotice === null ? "" : t(state.sessionNotice === "mode-on" ? "headerModeOn" : state.sessionNotice === "mode-off" ? "headerModeOff" : state.sessionNotice === "applied-with-model" ? "sessionAppliedWithModel" : state.sessionNotice === "applied" ? "sessionApplied" : "sessionResetDone");
@@ -4951,7 +5053,7 @@ function SessionScope({ state, actions: actions2, t, compact = false }) {
   }
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-session-scope", "aria-busy": state.sessionBusy !== null, "data-dsmm-session-scope": true, children: [
     !compact && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { children: t("sessionScope") }),
-    state.currentSessionId === null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("noSession") }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_jsx_runtime5.Fragment, { children: [
+    state.currentSessionId === null ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("sessionChooseWorkspace") }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_jsx_runtime5.Fragment, { children: [
       labels !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { "data-dsmm-session-state": true, children: labels.admitted }),
       labels !== null && !compact && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", "data-dsmm-session-future-default": true, children: labels.futureDefault }),
       session === null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", id: `${prefix}-overlay-reason`, children: t("sessionUnavailable") }),
@@ -4963,12 +5065,12 @@ function SessionScope({ state, actions: actions2, t, compact = false }) {
       /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-field", children: [
         /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("label", { htmlFor: `${prefix}-choice`, children: t("sessionSelect") }),
         /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("select", { id: `${prefix}-choice`, value: state.sessionChoice ?? "", disabled: disabled || !allowed, "aria-describedby": !allowed ? `${prefix}-overlay-reason` : void 0, onChange: (event) => {
-          if (current()) actions2.chooseSessionProfile(event.currentTarget.value || null);
+          if (current2()) actions2.chooseSessionProfile(event.currentTarget.value || null);
         }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("option", { value: "", children: t("sessionBaseline") }),
           state.sessionChoice !== null && selected === void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("option", { value: state.sessionChoice, children: state.sessionChoice }),
           state.snapshot?.profiles.map((profile) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("option", { value: profile.id, disabled: !isConfigRevision(profile.revision) || profile.error !== void 0, children: [
-            profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id,
+            profile.label?.trim() || profile.id,
             profileWarnings(profile.warnings).length ? ` — ${t("warningProfile")}` : ""
           ] }, profile.id))
         ] })
@@ -4976,35 +5078,39 @@ function SessionScope({ state, actions: actions2, t, compact = false }) {
       !compact && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_jsx_runtime5.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("sessionModelHint") }),
         /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: disabled || !modelAllowed, "aria-describedby": !modelAllowed ? `${prefix}-model-reason` : void 0, onClick: () => {
-          if (current()) void actions2.useSessionProfileModel();
+          if (current2()) void actions2.useSessionProfileModel();
         }, children: t("headerUseCurrentModel") }),
         !modelAllowed && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", id: `${prefix}-model-reason`, children: capabilityReason(session?.selectModelUnavailableReason, t) }),
-        session !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-availability", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: binding === void 0 ? t("bindingUnknown") : t("bindingState", { binding: binding.binding, ready: t(binding.deliveryFenceReady ? "enabled" : "disabled"), restart: t(binding.restartRequired ? "enabled" : "disabled") }) }),
-          binding?.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("bindingReason", { reason: binding.reason }) })
-        ] }),
-        session?.roles !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("details", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("summary", { children: t("admittedRoles") }),
-          session.roles.map((role3) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-availability", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: role3.id }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RoleAvailability, { value: role3, t })
-          ] }, role3.id))
+        session !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("details", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("summary", { children: t("technicalDetails") }),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-availability", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: binding === void 0 ? t("bindingUnknown") : t("bindingState", { binding: binding.binding, ready: t(binding.deliveryFenceReady ? "enabled" : "disabled"), restart: t(binding.restartRequired ? "enabled" : "disabled") }) }),
+            binding?.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("bindingReason", { reason: binding.reason }) })
+          ] }),
+          session.roles !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("details", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("summary", { children: t("admittedRoles") }),
+            session.roles.map((role3) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-availability", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: role3.id }),
+              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RoleAvailability, { value: role3, t })
+            ] }, role3.id))
+          ] }),
+          session.rolePolicy !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { "data-dsmm-session-policy": true, children: t("roleState", { route: session.rolePolicy.route === void 0 ? t("inheritRoute") : `${session.rolePolicy.route.provider}/${session.rolePolicy.route.model}${session.rolePolicy.route.reasoningEffort === void 0 ? "" : ` (${session.rolePolicy.route.reasoningEffort})`}`, strategy: session.rolePolicy.strategy, retries: session.rolePolicy.retries, failures: session.rolePolicy.rateLimitFailures, switches: session.rolePolicy.switches, delay: session.rolePolicy.totalDelayMs }) })
         ] })
       ] }),
       state.dirty && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "dsmm-hint", children: t("sessionDirty") }),
-      (session?.refreshRequired || session?.selection.refreshRequired) && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "status", children: t("savedRefreshRequired") }),
+      (session?.refreshRequired || session?.selection.refreshRequired) && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "status", children: t("sessionCommittedRefresh") }),
+      state.sessionUnconfirmed && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "status", children: t("sessionUnconfirmedRefresh") }),
       /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-actions", children: [
         /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: disabled || !allowed || state.sessionChoice !== null && !isConfigRevision(selected?.revision), "aria-describedby": !allowed ? `${prefix}-overlay-reason` : void 0, onClick: () => {
-          if (current()) void actions2.applySession();
+          if (current2()) void actions2.applySession();
         }, children: t(state.sessionBusy === "apply" ? "sessionApplying" : "sessionApply") }),
         !compact && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: disabled || !allowed, "aria-describedby": !allowed ? `${prefix}-overlay-reason` : void 0, onClick: () => {
-          if (current()) void actions2.resetSession();
+          if (current2()) void actions2.resetSession();
         }, children: t(state.sessionBusy === "reset" ? "sessionResetting" : "sessionReset") }),
         /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", variant: "outline", disabled: state.sessionBusy !== null || state.busy !== null || state.pendingEditor !== null, onClick: () => {
-          if (current()) void actions2.refreshSession();
+          if (current2()) void actions2.refreshSession();
         }, children: t("sessionRefresh") })
-      ] }),
-      !compact && session?.rolePolicy !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { "data-dsmm-session-policy": true, children: t("roleState", { route: session.rolePolicy.route === void 0 ? t("inheritRoute") : `${session.rolePolicy.route.provider}/${session.rolePolicy.route.model}${session.rolePolicy.route.reasoningEffort === void 0 ? "" : ` (${session.rolePolicy.route.reasoningEffort})`}`, strategy: session.rolePolicy.strategy, retries: session.rolePolicy.retries, failures: session.rolePolicy.rateLimitFailures, switches: session.rolePolicy.switches, delay: session.rolePolicy.totalDelayMs }) })
+      ] })
     ] }),
     state.sessionIssue !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "alert", children: state.sessionIssue.source === "profile-model" ? t(state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed") : state.sessionIssue.code === "conflict" ? t("sessionConflict") : ["busy", "maintenance", "disposed", "not-owned"].includes(state.sessionIssue.code) ? t("sessionBusy", { reason: state.sessionIssue.code }) : t(state.sessionIssue.code === "validation" ? "validation" : "sessionUnavailable") }),
     state.sessionIssue !== null && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IssueDetails, { issue: state.sessionIssue, t }),
@@ -5014,37 +5120,38 @@ function SessionScope({ state, actions: actions2, t, compact = false }) {
 function SessionProfiles(props) {
   const prefix = (0, import_react3.useId)();
   const state = props.useProfiles((snapshot4) => snapshot4);
-  const id2 = state.currentSessionId;
+  const id3 = state.currentSessionId;
   const [openFor, setOpenFor] = (0, import_react3.useState)(void 0);
   (0, import_react3.useEffect)(() => {
     setOpenFor(void 0);
-  }, [id2]);
-  if (props.sessionId !== void 0 && props.sessionId !== id2) return null;
+  }, [id3]);
+  if (props.sessionId !== void 0 && props.sessionId !== id3) return null;
   const { t } = props;
   const session = state.session;
   const admission = session?.admittedSelection;
   const unknownCaptured = session !== null && admission === void 0;
-  const current = session === null ? "__dsmm_session_unavailable__" : unknownCaptured ? "__dsmm_captured_default__" : admission?.selectedId ?? "";
+  const current2 = session === null ? "__dsmm_session_unavailable__" : unknownCaptured ? "__dsmm_captured_default__" : admission?.selectedId ?? "";
   const profiles = state.snapshot?.profiles ?? [];
-  const currentSaved = profiles.find((profile) => profile.id === current);
+  const currentSaved = profiles.find((profile) => profile.id === current2);
   const committing = state.sessionBusy !== null;
-  const unavailable = id2 === null || committing || state.busy !== null || session === null || session.refreshRequired === true || session.selection.refreshRequired === true;
+  const unavailable = id3 === null || committing || state.busy !== null || state.sessionUnconfirmed || session === null || session.refreshRequired === true || session.selection.refreshRequired === true;
   const profileDisabled = unavailable || state.pendingEditor !== null || state.dirty || state.invalidFields.length > 0 || session === null || !writableSelectionVersion(session.selection.selectionRevision);
   const disabled = profileDisabled || session?.canApplyOverlay !== true || session?.applyOverlayUnavailableReason === "new-session-required" || state.snapshot === null;
   let feedback = "";
-  if (state.sessionIssue !== null) feedback = t(state.sessionIssue.source === "profile-model" ? state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed" : state.sessionIssue.code === "conflict" ? "headerConflict" : state.sessionIssue.code === "activation" ? "headerActivationRefused" : state.sessionIssue.code === "maintenance" ? "headerMaintenanceRefused" : state.sessionIssue.code === "busy" ? "headerBusyRefused" : state.sessionIssue.code === "cancelled" ? "headerCancelledRefused" : state.sessionIssue.code === "unavailable" || state.sessionIssue.kind === "assembly" ? "headerUnavailableRefused" : "headerSelectionRefused");
+  if (state.sessionUnconfirmed) feedback = t("sessionUnconfirmedRefresh");
+  else if (session?.refreshRequired || session?.selection.refreshRequired) feedback = t("sessionCommittedRefresh");
+  else if (state.sessionIssue !== null) feedback = t(state.sessionIssue.source === "profile-model" ? state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed" : state.sessionIssue.code === "conflict" ? "headerConflict" : state.sessionIssue.code === "activation" ? "headerActivationRefused" : state.sessionIssue.code === "maintenance" ? "headerMaintenanceRefused" : state.sessionIssue.code === "busy" ? "headerBusyRefused" : state.sessionIssue.code === "cancelled" ? "headerCancelledRefused" : state.sessionIssue.code === "unavailable" || state.sessionIssue.kind === "assembly" ? "headerUnavailableRefused" : "headerSelectionRefused");
   else if (committing || state.busy !== null) feedback = t(state.sessionBusy === "apply" || state.sessionBusy === "reset" ? "headerApplying" : "headerLoading");
   else if (state.dirty || state.invalidFields.length > 0 || state.pendingEditor !== null) feedback = t("headerDraft");
-  else if (id2 === null) feedback = t("headerNoSession");
+  else if (id3 === null) feedback = t("sessionChooseWorkspace");
   else if (session === null || state.snapshot === null) feedback = t("headerUnavailable");
-  else if (session.refreshRequired || session.selection.refreshRequired) feedback = t("savedRefreshRequired");
   else if (state.sessionNotice !== null) feedback = t(state.sessionNotice === "mode-on" ? "headerModeOn" : state.sessionNotice === "mode-off" ? "headerModeOff" : state.sessionNotice === "applied-with-model" ? "headerAppliedWithModel" : "headerApplied");
-  const profileName = unknownCaptured ? t("headerCaptured") : admission !== void 0 && sourceRelationship(admission, currentSaved?.revision) === "current" && currentSaved?.label?.trim() ? `${currentSaved.label} (${currentSaved.id})` : admission?.selectedId ?? t("sessionBaseline");
+  const profileName = unknownCaptured ? t("headerCaptured") : admission !== void 0 && sourceRelationship(admission, currentSaved?.revision) === "current" && currentSaved?.label?.trim() ? currentSaved.label : admission?.selectedId ?? t("sessionBaseline");
   const currentLabel = t("headerCurrentProfile", { profile: session === null ? t("headerUnavailable") : profileName });
   const entries = [{ type: "label", id: "@current", text: currentLabel }];
   for (const warning of profileWarnings(session?.warnings)) entries.push({ type: "label", id: `@warning:${warning.code}`, text: t("warningMarker", { code: warning.code, field: warning.field }) });
-  if (id2 === null && state.snapshot !== null) entries.push({ type: "label", id: "@future", text: t("sessionFutureDefault", { profile: state.snapshot.profiles.find((profile) => profile.id === state.snapshot.selectedId)?.label?.trim() || state.snapshot.selectedId || t("sessionBaseline") }) });
-  if (feedback !== "" && (state.sessionNotice === null || state.sessionIssue !== null)) entries.push({ type: "label", id: "@status", text: feedback });
+  if ((id3 === null || session?.canApplyOverlay === true) && state.snapshot !== null) entries.push({ type: "label", id: "@future", text: t("sessionFutureDefault", { profile: state.snapshot.profiles.find((profile) => profile.id === state.snapshot.selectedId)?.label?.trim() || state.snapshot.selectedId || t("sessionBaseline") }) });
+  if (feedback !== "" && (state.sessionNotice === null || state.sessionIssue !== null || state.sessionUnconfirmed || session?.refreshRequired || session?.selection.refreshRequired)) entries.push({ type: "label", id: "@status", text: feedback });
   const mode = session?.deepwork;
   entries.push({
     id: "@mode",
@@ -5054,7 +5161,7 @@ function SessionProfiles(props) {
   if (session !== null && session.canToggleMode !== true) entries.push({ type: "label", id: "@mode-reason", text: capabilityReason(session.toggleModeUnavailableReason, t) });
   const diagnostic2 = state.sessionIssue === null ? null : menuIssue(state.sessionIssue);
   const diagnosticText = diagnostic2 === null ? "" : t("headerIssueCode", { code: diagnostic2.code }) + (diagnostic2.field === void 0 ? "" : ` ${t("headerIssueField", { field: diagnostic2.field })}`);
-  const retryHint = t(diagnostic2?.code === "maintenance" || diagnostic2?.code === "busy" ? "headerWaitRetryHint" : "headerRetryHint");
+  const retryHint = t(state.sessionUnconfirmed ? "sessionUnconfirmedRefresh" : diagnostic2?.code === "maintenance" || diagnostic2?.code === "busy" ? "headerWaitRetryHint" : "headerRetryHint");
   if (diagnostic2 !== null) entries.push({ type: "label", id: "@diagnostic", text: diagnosticText }, { type: "label", id: "@retry", text: retryHint });
   if (admission?.selectedId != null && currentSaved === void 0) entries.push({ id: admission.selectedId, label: `${admission.selectedId} — ${t("headerSavedUnavailable")}`, disabled: true });
   if (unknownCaptured) entries.push({ id: "__dsmm_captured_default__", label: t("headerCaptured"), disabled: true });
@@ -5063,7 +5170,7 @@ function SessionProfiles(props) {
   for (const profile of profiles) entries.push({ id: profile.id, label: (profile.label?.trim() ? profile.label : profile.id) + (profile.error === void 0 && isConfigRevision(profile.revision) ? "" : ` — ${t("headerSavedUnavailable")}`) + (profileWarnings(profile.warnings).length ? ` — ${t("warningProfile")}` : ""), disabled: disabled || !isConfigRevision(profile.revision) || profile.error !== void 0 });
   entries.push({ type: "separator", id: "@model-separator" }, { id: "@use-model", label: t("headerUseCurrentModel"), disabled: profileDisabled || session?.canSelectModel !== true || session?.profileModel === void 0 });
   if (session !== null && session.canSelectModel !== true) entries.push({ type: "label", id: "@model-reason", text: capabilityReason(session.selectModelUnavailableReason, t) });
-  const open = openFor === id2;
+  const open = openFor === id3;
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "dsmm-header-profiles", "data-dsmm-header-profile": true, "aria-busy": committing, children: [
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
       import_dsh_client_ui_primitives3.Menu,
@@ -5075,26 +5182,27 @@ function SessionProfiles(props) {
         className: "dsmm-profile-anchor",
         listClassName: "dsmm-profile-menu",
         items: entries,
-        selectedId: current,
+        selectedId: current2,
         footer: [{ id: "@refresh", label: t("headerCompactRefresh"), disabled: committing || state.busy !== null }],
-        anchor: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", size: "sm", variant: "toolbar", className: "dsmm-profile-trigger", icon: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.IconBranchOutlineRegular, {}), "aria-label": t("headerProfileLabel"), "aria-haspopup": "menu", "aria-expanded": open, "aria-describedby": `${prefix}-feedback`, onClick: () => setOpenFor(open ? void 0 : id2) }),
+        anchor: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.Button, { type: "button", size: "sm", variant: "toolbar", className: "dsmm-profile-trigger", icon: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives3.IconBranchOutlineRegular, {}), "aria-label": t("headerProfileLabel"), "aria-haspopup": "menu", "aria-expanded": open, "aria-describedby": `${prefix}-feedback`, onClick: () => setOpenFor(open ? void 0 : id3) }),
         onClose: () => setOpenFor(void 0),
-        onSelect: (value) => {
-          if (props.readProfileView().currentSessionId !== id2) return;
-          if (value === "@refresh") {
+        onSelect: (value2) => {
+          const live = props.readProfileView();
+          if (live.currentSessionId !== id3 || live.sessionViewEpoch !== state.sessionViewEpoch || live.session !== session) return;
+          if (value2 === "@refresh") {
             if (committing || state.busy !== null) return;
             void (async () => {
               await props.refresh();
-              if (id2 !== null && props.readProfileView().currentSessionId === id2) await props.refreshSession();
+              if (id3 !== null && props.readProfileView().currentSessionId === id3 && props.readProfileView().sessionViewEpoch === state.sessionViewEpoch) await props.refreshSession();
             })();
           } else {
-            const row = entries.find((entry) => entry.id === value && !("type" in entry));
-            if (row === void 0 || !("disabled" in row) || row.disabled) return;
-            if (value === "@mode") {
+            const row2 = entries.find((entry) => entry.id === value2 && !("type" in entry));
+            if (row2 === void 0 || !("disabled" in row2) || row2.disabled) return;
+            if (value2 === "@mode") {
               if (mode !== void 0) void props.setDeepwork(!mode.active);
-            } else if (value === "@use-model") void props.useSessionProfileModel();
+            } else if (value2 === "@use-model") void props.useSessionProfileModel();
             else {
-              props.chooseSessionProfile(value || null);
+              props.chooseSessionProfile(value2 || null);
               void props.applySession();
             }
           }
@@ -5135,8 +5243,8 @@ function ProfilesSection(props) {
   const editorDisabled = disabled || readOnly || editor?.refreshRequired === true || editor?.revision === "unavailable";
   const reconcilable = canReconcileSelection(snapshot4);
   const selectionConflict = reconcilable && snapshot4?.selectionError?.code === "conflict";
-  const invalid2 = state.issue?.kind === "domain" && state.issue.code === "validation";
-  const idInvalid = invalid2 && state.issue?.field === "id" && state.issue.location === void 0 && editor?.revision === null && !editorDisabled;
+  const invalid3 = state.issue?.kind === "domain" && state.issue.code === "validation";
+  const idInvalid = invalid3 && state.issue?.field === "id" && state.issue.location === void 0 && editor?.revision === null && !editorDisabled;
   const rawInvalid = editor !== null && structuredDocument(editor.content) === null;
   (0, import_react4.useEffect)(() => {
     if (state.pendingEditor !== null) {
@@ -5169,10 +5277,7 @@ function ProfilesSection(props) {
   else if (snapshot4?.selectedId !== null && snapshot4?.selectedId !== void 0) selection = t("appliedProfile", { id: snapshot4.selectedId, revision: t(configurationVersionState(snapshot4.sourceRevision)) });
   const notice = state.notice === null ? "" : t(state.notice.key === "reset" ? "resetDone" : state.notice.key, { id: state.notice.id });
   const warnings2 = editor === null ? [] : draftWarnings(editor.content);
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-profiles", "aria-labelledby": `${prefix}-title`, "aria-busy": state.busy !== null, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h2", { id: `${prefix}-title`, children: t("title") }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("description") }),
-    snapshot4?.origin !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t(snapshot4.origin === "legacy" ? "legacyOrigin" : snapshot4.origin === "central" ? "centralOrigin" : "explicitOrigin") }),
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-profiles", "aria-label": t("title"), "aria-busy": state.busy !== null, children: [
     readOnly && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { role: "status", className: "dsmm-hint", children: t("readOnlyOrigin") }),
     /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-zone", "aria-labelledby": `${prefix}-browse`, "data-dsmm-zone": "browse", children: [
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h3", { id: `${prefix}-browse`, children: t("browseZone") }),
@@ -5198,9 +5303,8 @@ function ProfilesSection(props) {
         ] }),
         snapshot4.profiles.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("empty") })
       ] }),
-      snapshot4 !== null && snapshot4.profiles.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { className: "dsmm-profile-list", "aria-label": t("savedInventory"), children: snapshot4.profiles.map((profile, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
+      snapshot4 !== null && snapshot4.profiles.some((profile) => profile.error !== void 0 || profile.warnings?.length) && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("ul", { className: "dsmm-profile-list", "aria-label": t("savedInventory"), children: snapshot4.profiles.filter((profile) => profile.error !== void 0 || profile.warnings?.length).map((profile, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("li", { children: [
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("savedRevision", { revision: t(configurationVersionState(profile.revision)) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ProfileWarnings, { warnings: profile.warnings, t }),
         profile.error !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IssueDetails, { issue: profile.error, t })
       ] }, `${index}:${profile.id}`)) }),
@@ -5224,7 +5328,6 @@ function ProfilesSection(props) {
       editor === null && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("noEditor") }),
       editor !== null && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-editor", children: [
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { "data-dsmm-editor-state": true, children: t(editor.refreshRequired ? "savedRefreshRequired" : state.dirty ? "dirty" : applied ? "savedApplied" : relationship === "unknown" ? "savedRelationshipUnknown" : "savedNotApplied") }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("savedRevision", { revision: t(editor.revision === null ? "versionAbsent" : configurationVersionState(editor.revision)) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-actions", children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "primary", disabled: editorDisabled || !state.dirty || snapshot4 === null || state.invalidFields.length > 0, onClick: () => {
             void props.save();
@@ -5247,10 +5350,8 @@ function ProfilesSection(props) {
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-id-hint`, className: "dsmm-hint", children: t("idHint") })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-catalog", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h3", { children: t("catalogTitle") }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("catalogHint") }),
           state.catalogUnavailable && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("catalogUnavailable") }),
-          state.catalog?.failures.map((failure) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("catalogFailure", { name: failure.name, id: failure.id }) }, failure.id)),
+          state.catalog?.failures.map((failure2) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("catalogFailure", { name: failure2.name, id: failure2.id }) }, failure2.id)),
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "outline", disabled: state.catalogBusy, onClick: () => {
             void props.refreshCatalog();
           }, children: t(state.catalogBusy ? "catalogRefreshing" : "catalogRefresh") })
@@ -5260,7 +5361,7 @@ function ProfilesSection(props) {
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("summary", { children: t("advanced") }),
           /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-field", children: [
             /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: `${prefix}-content`, children: t("configuration") }),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("textarea", { ref: editorRef, id: `${prefix}-content`, rows: 12, spellCheck: false, value: editor.content, readOnly, disabled: editorDisabled, "aria-invalid": rawInvalid || invalid2 && !idInvalid || void 0, "aria-describedby": `${prefix}-content-hint ${prefix}-structural-hint${invalid2 && !idInvalid ? ` ${prefix}-issue` : ""}`, onChange: (event) => props.editContent(event.currentTarget.value) }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("textarea", { ref: editorRef, id: `${prefix}-content`, rows: 12, spellCheck: false, value: editor.content, readOnly, disabled: editorDisabled, "aria-invalid": rawInvalid || invalid3 && !idInvalid || void 0, "aria-describedby": `${prefix}-content-hint ${prefix}-structural-hint${invalid3 && !idInvalid ? ` ${prefix}-issue` : ""}`, onChange: (event) => props.editContent(event.currentTarget.value) }),
             /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-content-hint`, className: "dsmm-hint", children: t("configurationHint") }),
             /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-structural-hint`, className: "dsmm-hint", children: t("structuralHint") })
           ] })
@@ -5273,16 +5374,13 @@ function ProfilesSection(props) {
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("section", { className: "dsmm-zone", "aria-labelledby": `${prefix}-global`, "data-dsmm-zone": "future-default", children: [
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h3", { id: `${prefix}-global`, children: t("globalScope") }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("newSessions") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-global-action`, className: "dsmm-hint", children: t("newSessions") }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { "data-dsmm-selection": true, children: selection }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("futurePin", { revision: t(configurationVersionState(snapshot4?.selectionRevision)) }) }),
       snapshot4?.refreshRequired && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { role: "status", children: t("savedRefreshRequired") }),
       snapshot4?.selectedWarnings?.length ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { children: [
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { children: t("futureWarnings") }),
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ProfileWarnings, { warnings: snapshot4.selectedWarnings, t })
       ] }) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dsmm-hint", children: t("savedOnlyHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { id: `${prefix}-global-action`, className: "dsmm-hint", children: t("globalActionHint") }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dsmm-actions", children: [
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives4.Button, { type: "button", variant: "primary", "aria-describedby": `${prefix}-global-action`, disabled: editorDisabled || state.dirty || editor?.revision == null || !reconcilable || applied && !selectionConflict, onClick: () => {
           void props.apply();
@@ -5382,18 +5480,18 @@ var PROFILE_STYLES = `
 `;
 
 // src/client/deployment-data.ts
-function record2(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function record2(value2) {
+  return value2 !== null && typeof value2 === "object" && !Array.isArray(value2);
 }
 function scopeSchema(snapshot4, layer) {
   return layer === "profile" ? snapshot4.nativeSchema ?? snapshot4.schema : snapshot4.schema;
 }
-function at(value, path) {
-  return path.reduce((node, key) => record2(node) && Object.hasOwn(node, key) ? node[key] : void 0, value);
+function at(value2, path) {
+  return path.reduce((node, key) => record2(node) && Object.hasOwn(node, key) ? node[key] : void 0, value2);
 }
 function equal(a, b) {
   if (record2(a) && record2(b)) return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((key) => Object.hasOwn(b, key) && equal(a[key], b[key]));
-  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((value, i) => equal(value, b[i]));
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((value2, i) => equal(value2, b[i]));
   return a === b;
 }
 function mergeLayer(base, override) {
@@ -5403,10 +5501,10 @@ function mergeLayer(base, override) {
     Object.hasOwn(override, key) ? mergeLayer(base[key], override[key]) : base[key]
   ]));
 }
-function parseAdvanced(text5) {
-  if (text5.trim() === "") return void 0;
-  const errors = [];
-  const root = parseTree2(text5, errors, { disallowComments: true, allowTrailingComma: false });
+function parseAdvanced(text6) {
+  if (text6.trim() === "") return void 0;
+  const errors2 = [];
+  const root = parseTree2(text6, errors2, { disallowComments: true, allowTrailingComma: false });
   const unique = (node) => {
     if (node.type === "object") {
       const keys = node.children.map((child2) => child2.children[0].value);
@@ -5414,10 +5512,10 @@ function parseAdvanced(text5) {
     }
     return (node.children ?? []).every(unique);
   };
-  if (root === void 0 || errors.length || !unique(root)) throw new Error("Invalid JSON");
-  return JSON.parse(text5);
+  if (root === void 0 || errors2.length || !unique(root)) throw new Error("Invalid JSON");
+  return JSON.parse(text6);
 }
-function editLayer(base, path, value) {
+function editLayer(base, path, value2) {
   const next = structuredClone(base);
   let node = next;
   for (const key2 of path.slice(0, -1)) {
@@ -5425,8 +5523,8 @@ function editLayer(base, path, value) {
     node = node[key2];
   }
   const key = path.at(-1);
-  if (value === void 0) delete node[key];
-  else node[key] = structuredClone(value);
+  if (value2 === void 0) delete node[key];
+  else node[key] = structuredClone(value2);
   return next;
 }
 function layerDiff(base, draft2, prefix = []) {
@@ -5438,38 +5536,38 @@ function layerDiff(base, draft2, prefix = []) {
     return [{ op: "set", path, value: after }];
   });
 }
-function validateEditorValue(value, schema, sparse = false) {
-  if (schema.type === "transform") return schema.inner !== void 0 && validateEditorValue(value, schema.inner, sparse);
+function validateEditorValue(value2, schema, sparse = false) {
+  if (schema.type === "transform") return schema.inner !== void 0 && validateEditorValue(value2, schema.inner, sparse);
   if (schema.type === "any") {
     try {
-      copyRouteJson(value);
+      copyRouteJson(value2);
       return true;
     } catch {
       return false;
     }
   }
-  if (schema.type === "union") return schema.alternatives?.some((node) => validateEditorValue(value, node, sparse)) === true;
-  if (schema.type === "const") return value === schema.value;
+  if (schema.type === "union") return schema.alternatives?.some((node) => validateEditorValue(value2, node, sparse)) === true;
+  if (schema.type === "const") return value2 === schema.value;
   if (schema.type === "object" && schema.additionalProperties === "json") {
     try {
       if (schema.fields?.provider?.type === "string" && schema.fields.model?.type === "string") {
-        normalizeModelRouteJson(value, sparse, true);
+        normalizeModelRouteJson(value2, sparse, true);
         return true;
       }
-      copyRouteJson(value);
+      copyRouteJson(value2);
     } catch {
       return false;
     }
   }
-  if (schema.type === "object" || schema.type === "dict") return record2(value) && (sparse || schema.type !== "object" || Object.entries(schema.fields ?? {}).every(([key, node]) => !node.required || Object.hasOwn(value, key))) && Object.entries(value).every(([key, child2]) => {
+  if (schema.type === "object" || schema.type === "dict") return record2(value2) && (sparse || schema.type !== "object" || Object.entries(schema.fields ?? {}).every(([key, node]) => !node.required || Object.hasOwn(value2, key))) && Object.entries(value2).every(([key, child2]) => {
     if (["__proto__", "prototype", "constructor"].includes(key)) return false;
     if (schema.keys !== void 0 && !schema.keys.includes(key)) return false;
     const node = schema.type === "dict" ? schema.inner : schema.fields !== void 0 && Object.hasOwn(schema.fields, key) ? schema.fields[key] : void 0;
     return node !== void 0 ? validateEditorValue(child2, node, sparse) : schema.type === "object" && schema.additionalProperties === "json";
   });
-  if (schema.type === "array") return Array.isArray(value) && (schema.max === void 0 || value.length <= schema.max) && schema.inner !== void 0 && value.every((child2) => validateEditorValue(child2, schema.inner));
-  if (schema.type === "string" && schema.nonempty) return typeof value === "string" && value.trim() !== "";
-  if (["string", "boolean", "number"].includes(schema.type)) return typeof value === schema.type && (typeof value !== "number" || Number.isFinite(value) && (schema.min === void 0 || value >= schema.min) && (schema.max === void 0 || value <= schema.max) && (schema.step === void 0 || Number.isInteger(value / schema.step)));
+  if (schema.type === "array") return Array.isArray(value2) && (schema.max === void 0 || value2.length <= schema.max) && schema.inner !== void 0 && value2.every((child2) => validateEditorValue(child2, schema.inner));
+  if (schema.type === "string" && schema.nonempty) return typeof value2 === "string" && value2.trim() !== "";
+  if (["string", "boolean", "number"].includes(schema.type)) return typeof value2 === schema.type && (typeof value2 !== "number" || Number.isFinite(value2) && (schema.min === void 0 || value2 >= schema.min) && (schema.max === void 0 || value2 <= schema.max) && (schema.step === void 0 || Number.isInteger(value2 / schema.step)));
   return false;
 }
 function enumValues(schema) {
@@ -5487,33 +5585,33 @@ function inspectorPaths(snapshot4, admitted) {
     ...Object.keys(admitted?.sources ?? {}),
     ...Object.keys(admitted?.captures ?? {})
   ]);
-  const visit2 = (value, path) => {
+  const visit2 = (value2, path) => {
     if (!visibleDeploymentPath(path)) return;
-    if (record2(value) && Object.keys(value).length) for (const [key, child2] of Object.entries(value)) visit2(child2, [...path, key]);
+    if (record2(value2) && Object.keys(value2).length) for (const [key, child2] of Object.entries(value2)) visit2(child2, [...path, key]);
     else if (path.length) paths.add(path.join("."));
   };
-  for (const value of [snapshot4.desired, snapshot4.startup, snapshot4.nextRoot?.settings, admitted?.settings]) if (value !== void 0) visit2(value, []);
+  for (const value2 of [snapshot4.desired, snapshot4.startup, snapshot4.nextRoot?.settings, admitted?.settings]) if (value2 !== void 0) visit2(value2, []);
   return [...paths].filter((path) => visibleDeploymentPath(path.split("."))).sort();
 }
 
 // src/client/deployment-controller.ts
 var Refusal = class extends Error {
-  constructor(code) {
-    super(code);
-    this.code = code;
+  constructor(code2) {
+    super(code2);
+    this.code = code2;
   }
 };
-function isNativeJson(value, active = /* @__PURE__ */ new Set()) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "object" || active.has(value) || Object.getOwnPropertySymbols(value).length > 0) return false;
-  const array2 = Array.isArray(value), prototype = Object.getPrototypeOf(value);
+function isNativeJson(value2, active = /* @__PURE__ */ new Set()) {
+  if (value2 === null || typeof value2 === "string" || typeof value2 === "boolean") return true;
+  if (typeof value2 === "number") return Number.isFinite(value2);
+  if (typeof value2 !== "object" || active.has(value2) || Object.getOwnPropertySymbols(value2).length > 0) return false;
+  const array2 = Array.isArray(value2), prototype = Object.getPrototypeOf(value2);
   if (array2 ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return false;
-  active.add(value);
-  const properties = Object.getOwnPropertyDescriptors(value);
-  const valid = Object.entries(properties).every(([key, descriptor4]) => array2 && key === "length" || descriptor4.enumerable && Object.hasOwn(descriptor4, "value") && (!array2 || /^(0|[1-9][0-9]*)$/u.test(key) && Number(key) < value.length) && isNativeJson(descriptor4.value, active));
-  active.delete(value);
-  return valid && (!array2 || Object.keys(properties).length === value.length + 1);
+  active.add(value2);
+  const properties = Object.getOwnPropertyDescriptors(value2);
+  const valid = Object.entries(properties).every(([key, descriptor6]) => array2 && key === "length" || descriptor6.enumerable && Object.hasOwn(descriptor6, "value") && (!array2 || /^(0|[1-9][0-9]*)$/u.test(key) && Number(key) < value2.length) && isNativeJson(descriptor6.value, active));
+  active.delete(value2);
+  return valid && (!array2 || Object.keys(properties).length === value2.length + 1);
 }
 function nativePathEdit(edit) {
   if (edit.op === "unset") return edit;
@@ -5524,8 +5622,8 @@ async function unwrap(promise) {
   const result = await promise;
   if (result.ok) return result.value;
   if (result.error.code === "dsmm-profiles/refused") {
-    const code = result.error.details.code;
-    throw new Refusal(["conflict", "validation", "not-owned"].includes(code) ? code : "unavailable");
+    const code2 = result.error.details.code;
+    throw new Refusal(["conflict", "validation", "not-owned"].includes(code2) ? code2 : "unavailable");
   }
   throw new Refusal("transport");
 }
@@ -5588,16 +5686,16 @@ var DeploymentController = class _DeploymentController {
   attachForm(form) {
     this.form = form;
   }
-  setInvalid(path, invalid2) {
-    if (this.invalid.has(path) === invalid2) return;
-    if (invalid2) this.invalid.add(path);
+  setInvalid(path, invalid3) {
+    if (this.invalid.has(path) === invalid3) return;
+    if (invalid3) this.invalid.add(path);
     else this.invalid.delete(path);
     this.publish({ invalidFields: [...this.invalid], dirty: this.invalid.size > 0 || !equal(this.baseline, this.state.draft), saved: false });
   }
-  setRaw(path, text5, invalid2) {
+  setRaw(path, text6, invalid3) {
     if (!this.canEdit()) return;
-    this.publish({ raw: { ...this.state.raw, [path]: { text: text5, invalid: invalid2 } } });
-    this.setInvalid(path, invalid2);
+    this.publish({ raw: { ...this.state.raw, [path]: { text: text6, invalid: invalid3 } } });
+    this.setInvalid(path, invalid3);
   }
   clearRaw(prefix) {
     if (!this.canEdit()) return;
@@ -5618,9 +5716,9 @@ var DeploymentController = class _DeploymentController {
     const native = this.form?.state;
     return this.currentConnection() && snapshot4 !== null && this.rowNamespace !== null && this.rowNamespace === snapshot4.namespace && native?.status === "ready" && native.writable && native.revision === snapshot4.nativeFormRevision && snapshot4.nativeForm !== null && equal(native.base ?? null, snapshot4.nativeForm.base) && equal(native.user ?? null, snapshot4.nativeForm.user);
   }
-  edit(path, value) {
+  edit(path, value2) {
     if (!this.canEdit()) return;
-    const draft2 = editLayer(this.state.draft, path, value);
+    const draft2 = editLayer(this.state.draft, path, value2);
     this.publish({ draft: draft2, dirty: this.invalid.size > 0 || !equal(this.baseline, draft2), issue: null, saved: false });
   }
   async refresh(discard = false) {
@@ -5662,8 +5760,8 @@ var DeploymentController = class _DeploymentController {
     const mergedSchema = { ...snapshot4.schema, fields: { ...snapshot4.schema.fields, ...snapshot4.nativeSchema?.fields } };
     const editable = { ...draft2 };
     const lower = this.layer === "global" ? snapshot4.defaults : mergeLayer(mergeLayer(snapshot4.defaults, snapshot4.global), snapshot4.nativeForm?.base ?? {});
-    const candidate = mergeLayer(lower, editable);
-    const merged = this.layer === "global" ? mergeLayer(candidate, snapshot4.profile) : candidate;
+    const candidate2 = mergeLayer(lower, editable);
+    const merged = this.layer === "global" ? mergeLayer(candidate2, snapshot4.profile) : candidate2;
     if (!validateEditorValue(editable, schema, true) || !validateEditorValue(merged, mergedSchema)) {
       this.publish({ issue: "validation" });
       return;
@@ -5676,15 +5774,15 @@ var DeploymentController = class _DeploymentController {
     const generation = ++this.generation;
     this.publish({ busy: true, saved: false });
     try {
-      const current = await unwrap(this.remote.describeSettings());
+      const current2 = await unwrap(this.remote.describeSettings());
       if (this.disposed || generation !== this.generation) return;
-      if (current.entryId !== snapshot4.entryId || current.hostProfileKey !== snapshot4.hostProfileKey || current.globalRevision !== snapshot4.globalRevision) throw new Refusal("conflict");
+      if (current2.entryId !== snapshot4.entryId || current2.hostProfileKey !== snapshot4.hostProfileKey || current2.globalRevision !== snapshot4.globalRevision) throw new Refusal("conflict");
       let acceptedRefreshRequired = false;
       if (this.layer === "global") {
         const accepted = await unwrap(this.remote.save({ expectedRevision: snapshot4.globalRevision, edits }));
         acceptedRefreshRequired = accepted.refreshRequired === true || accepted.revision === "unavailable";
       } else {
-        if (current.nativeRevision !== snapshot4.nativeRevision || !this.canWriteProfile(current)) throw new Refusal("conflict");
+        if (current2.nativeRevision !== snapshot4.nativeRevision || !this.canWriteProfile(current2)) throw new Refusal("conflict");
         const form = this.form;
         if (!await form.mutate(edits.map(nativePathEdit), snapshot4.nativeFormRevision)) throw new Refusal("unconfirmed");
       }
@@ -5714,8 +5812,8 @@ var DeploymentController = class _DeploymentController {
 };
 
 // src/client/DeploymentPage.tsx
-var import_react8 = require("react");
-var import_dsh_client_ui_primitives8 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_react10 = require("react");
+var import_dsh_client_ui_primitives9 = require("@deepseek-ai/dsh-client-ui-primitives");
 
 // src/client/deployment-workspace.ts
 var DeploymentWorkspace = class {
@@ -5891,21 +5989,21 @@ var deploymentEn = {
   global: "DSMM Global config",
   globalHint: "Shared by this Home’s DSH profiles. Unset fields use built-in defaults.",
   profile: "Current DSH profile overrides",
-  profileHint: "This native entry only. Ordinary Unset fields inherit Global plus Host base pins. Native runtime uses Host base/native defaults, never Global.",
+  profileHint: "This DSH profile only. Unset fields use Global and Host defaults; native runtime uses Host defaults.",
   profileUnavailable: "Unavailable",
-  unavailableForm: "Current profile is read-only: no verified writable native form at this connection, namespace and revision. Global configuration remains a separate authority.",
+  unavailableForm: "This DSH profile is read-only. Reconnect and refresh to check editing access.",
   ceiling: "Deepwork master is Global-only; profiles and session modes cannot lift its captured ceiling.",
   hostUnknown: "Host bundle status: unknown (separate switch).",
-  boundaries: "New roots capture saved settings within startup capabilities. Save does not restart the Host; startup-only changes require a separate Host restart, which may cancel sessions.",
+  boundaries: "Saved settings apply to new sessions. Changes marked restart required need a separate Host restart, which may cancel sessions.",
   core: "Core",
   coreHint: "Core-owned desired settings. Model-parameter passthrough is ordinary config, not a subplugin. The permission-control enabled flag is startup-pinned. Save does not change current-session admission; inspect desired, startup and admitted values below. Unavailable admission stays unknown.",
-  modelParametersHint: "Default On. Off retains saved custom/opaque model parameters without forwarding them, and DSMM reasoningEffort / reasoning_effort aliases use native defaults. Standard SDK parameters and explicit native root choices remain intact. Raw JSON and exact effort values remain editable; saving desired settings does not verify provider transport readiness.",
+  modelParametersHint: "Off stops sending custom parameters and uses native reasoning defaults. Saved values and your selected model stay unchanged.",
   permissionControlHint: "Permission-control mounting is startup-pinned. Saved configuration does not prove runtime coverage or remove current protections. Root rules keep their independent authority inside Permissions.",
   modules: "Configuration modules",
   scope: "Configuration scope",
   close: "Close module",
   loading: "Loading configuration…",
-  unset: "Unset — inherit",
+  unset: "Use default configuration",
   "module:run": "Run and modules",
   "module:routes": "Model routes and recovery",
   "module:workflow": "Workflow, roles and skills",
@@ -5917,17 +6015,17 @@ var deploymentEn = {
   pendingModules: "Pending modules in this scope",
   savedRefreshRequired: "Saved — refresh required before further edits",
   sessionObserved: "Current-session admission observed",
-  noModuleFields: "No editable schema fields for this module in the selected scope.",
+  noModuleFields: "No editable settings in this scope.",
   leaveDraft: "Unsaved or invalid draft. Choose how to leave; nothing is saved or discarded automatically.",
   continueEditing: "Continue editing",
   keepDraft: "Keep draft and return",
   discardDraft: "Discard draft and leave",
-  rootRules: "Current Root rules",
-  rootRulesHint: "This transaction is separate from Global/native configuration Save. It requires an open trusted Root, writable operator authority and synchronized runtime. It never borrows Global authority to bypass a refusal.",
-  rootRulesUnavailable: "Root rules service unavailable. No session or authority is inferred.",
+  rootRules: "Session permission rules",
+  rootRulesHint: "Rules save separately. Select an open main session with editing access and synchronized permissions.",
+  rootRulesUnavailable: "Permission rules unavailable. Reconnect and refresh.",
   nativeRuntimeHint: "Native default On; Host base pins still apply. Mounting is captured at startup. Saving stages desired configuration only; it does not start/stop providers or cancel running sessions. A separate Host restart may cancel sessions.",
-  nativeRuntimeReadinessHint: "Official Host services own execution and JSONL storage. This snapshot reports native execution admission readiness, not guaranteed inbox acceptance or completion. Storage is configured on the native JSONL service, not DSMM.",
-  unsetGroup: "Unset this group — restore inheritance",
+  nativeRuntimeReadinessHint: "Task progress is available in the session.",
+  unsetGroup: "Use defaults for this group",
   nativeRuntimeState: "Observed native runtime",
   nativeRuntimeBinding: "Observed runtime composition",
   nativeRuntimeFence: "Execution admission ready",
@@ -5940,8 +6038,8 @@ var deploymentEn = {
   "nativeRuntimeReason-disabled": "The saved native runtime is disabled.",
   "nativeRuntimeReason-pending-restart": "Saved desired state differs from the mounted native composition; restart is pending.",
   "nativeRuntimeReason-scope-conflict": "Native scope ownership conflicts; readiness is not confirmed.",
-  saveGlobal: "Save Global config",
-  saveProfile: "Save profile overrides",
+  saveGlobal: "Save",
+  saveProfile: "Save",
   saving: "Saving…",
   refresh: "Refresh",
   discard: "Discard and reload",
@@ -5976,14 +6074,14 @@ var deploymentEn = {
   versionAbsent: "Not stored",
   versionUnknown: "Version unavailable",
   advanced: "Advanced JSON",
-  advancedHint: "Schema keys only; omit to inherit. Arrays replace. No credentials or scripts; use existing providers.",
+  advancedHint: "Use supported fields; omit to inherit. Arrays replace inherited values. Do not enter credentials or scripts.",
   invalid: "Invalid field. Check type, bounds and keys; draft retained.",
   conflict: "Revision conflict; draft retained. Review changes, then discard and reload. Refresh does not merge.",
   unavailable: "Scope unavailable; draft retained. Reconnect and refresh.",
   "not-owned": "Read-only: requires an authenticated local Host operator.",
   validation: "Host rejected configuration; draft retained. Check fields and merged constraints.",
-  transport: "Disconnected; draft retained. Reconnect and refresh.",
-  unconfirmed: "The native form did not confirm Save. The Host may have committed; refresh the affected source before deciding to retry. Draft retained; no automatic replay.",
+  transport: "Connection lost; result unknown. Draft kept. Reconnect and refresh before retrying.",
+  unconfirmed: "Save result unknown. Draft kept. Refresh before retrying.",
   namedIndependent: "Deepwork Profiles is a separate named JSONC runtime-resource editor in Settings. Saving here does not apply a named profile or select its model."
 };
 var deploymentZh = {
@@ -5993,21 +6091,21 @@ var deploymentZh = {
   global: "DSMM 全局配置",
   globalHint: "同一 Home 的 DSH 配置共用；未设置字段使用内建默认值。",
   profile: "当前 DSH 配置覆盖",
-  profileHint: "仅此原生实例。普通字段 Unset 后继承 Global 与 Host base 固定值；原生 runtime 仅取 Host base／原生默认值，不继承 Global。",
+  profileHint: "仅影响此 DSH 配置。未设置字段使用全局与宿主默认值；原生运行时使用宿主默认值。",
   profileUnavailable: "不可用",
-  unavailableForm: "当前配置只读：连接、namespace 与版本尚无已核验的可写原生表单；Global 配置仍使用独立权限。",
+  unavailableForm: "此 DSH 配置只读，请重连并刷新以检查编辑权限。",
   ceiling: "Deepwork 总开关仅全局可改；配置和会话模式不能突破已捕获上限。",
   hostUnknown: "宿主整包状态：未知（独立开关）。",
-  boundaries: "新根会话在启动能力内采用已保存设置。保存不重启宿主；仅启动时生效的更改需另行重启宿主，可能取消会话。",
+  boundaries: "保存的设置供新会话使用。标注「需重启」的更改需另行重启宿主，可能取消会话。",
   core: "Core 核心配置",
   coreHint: "Core 所有的 desired 意图配置。模型参数透传为普通配置，非子插件；权限控制 enabled 仅启动时捕获。保存不改变当前会话准入；下方可检查意图、启动与准入值，不可用的准入仍为未知。",
-  modelParametersHint: "默认开启。关闭后仍保存 custom／opaque 模型参数但不发送；DSMM reasoningEffort／reasoning_effort 两种别名采用原生默认值。标准 SDK 参数与根会话原生显式选择保留。仍可编辑原始 JSON 和精确 effort 值；保存意图不代表提供商传输已就绪。",
+  modelParametersHint: "关闭后停止发送自定义参数，并使用原生推理默认值；已保存的值和所选模型不变。",
   permissionControlHint: "权限控制挂载仅启动时捕获。保存配置不证明运行时覆盖，也不移除当前保护；Root 规则在权限模块内保持独立权限。",
   modules: "配置模块",
-  scope: "配置作用域",
+  scope: "配置范围",
   close: "关闭模块",
   loading: "正在加载配置…",
-  unset: "Unset——继承",
+  unset: "使用默认配置",
   "module:run": "运行与模块",
   "module:routes": "模型路由与恢复",
   "module:workflow": "工作流、角色与技能",
@@ -6019,17 +6117,17 @@ var deploymentZh = {
   pendingModules: "此作用域的待保存模块",
   savedRefreshRequired: "已保存——需刷新后继续编辑",
   sessionObserved: "已观测当前会话准入",
-  noModuleFields: "所选作用域中，此模块没有可编辑的 schema 字段。",
+  noModuleFields: "此范围内没有可编辑的设置。",
   leaveDraft: "仍有未保存或无效草稿，请选择离开方式；不会自动保存或丢弃。",
   continueEditing: "继续编辑",
   keepDraft: "保留草稿并返回",
   discardDraft: "放弃草稿并离开",
-  rootRules: "当前 Root 规则",
-  rootRulesHint: "此事务与 Global／native 配置保存分开，需要已打开的可信 Root、可写 operator 权限及已同步运行时；不会借 Global 权限绕过拒绝。",
-  rootRulesUnavailable: "Root 规则服务不可用，不推断或创建会话和权限。",
+  rootRules: "会话权限规则",
+  rootRulesHint: "规则单独保存。请选择已打开的主会话，并确认有编辑权限且权限已同步。",
+  rootRulesUnavailable: "权限规则不可用，请重连后刷新。",
   nativeRuntimeHint: "原生默认开启，Host base 固定值仍适用；挂载仅启动时捕获。保存只设置 desired，不会启动／停止提供商或取消当前会话；独立 Host 重启可能取消会话。",
-  nativeRuntimeReadinessHint: "执行和 JSONL 存储由官方 Host 服务负责。此快照只报告原生执行准入就绪，不保证收件箱接受或任务完成。存储配置属于原生 JSONL 服务，不属于 DSMM。",
-  unsetGroup: "Unset 整组——恢复继承",
+  nativeRuntimeReadinessHint: "任务进度可在会话中查看。",
+  unsetGroup: "整组使用默认配置",
   nativeRuntimeState: "已观测原生运行时",
   nativeRuntimeBinding: "已观测运行时组合",
   nativeRuntimeFence: "执行准入已就绪",
@@ -6042,8 +6140,8 @@ var deploymentZh = {
   "nativeRuntimeReason-disabled": "已保存的原生运行时为关闭。",
   "nativeRuntimeReason-pending-restart": "已保存 desired 与已挂载原生组合不同，等待独立重启。",
   "nativeRuntimeReason-scope-conflict": "原生 scope 所有权冲突，无法确认就绪状态。",
-  saveGlobal: "保存全局配置",
-  saveProfile: "保存当前配置覆盖",
+  saveGlobal: "保存",
+  saveProfile: "保存",
   saving: "正在保存…",
   refresh: "刷新",
   discard: "丢弃并重载",
@@ -6078,14 +6176,14 @@ var deploymentZh = {
   versionAbsent: "未存储",
   versionUnknown: "版本不可用",
   advanced: "高级 JSON",
-  advancedHint: "仅 schema 声明的键；省略为继承，数组整项替换。不填凭据或脚本，仅用已有提供商。",
+  advancedHint: "仅使用支持的字段，省略表示继承；数组整体替换继承值。请勿填写凭据或脚本。",
   invalid: "字段无效，请核对类型、范围与键；草稿保留。",
   conflict: "版本冲突，草稿保留。核对后丢弃并重载；刷新不自动合并。",
   unavailable: "作用域不可用，草稿保留；重连后刷新。",
   "not-owned": "只读：需要本地宿主已认证 operator 权限。",
   validation: "宿主拒绝配置，草稿保留；核对字段及合并约束。",
-  transport: "连接中断，草稿保留；重连后刷新。",
-  unconfirmed: "原生表单未确认保存结果，Host 可能已提交。请先刷新受影响的来源再决定是否重试；草稿已保留，不会自动重放。",
+  transport: "连接中断，结果未知，草稿已保留。请重连并刷新后再重试。",
+  unconfirmed: "保存结果未知，草稿已保留。请刷新后再重试。",
   namedIndependent: "设置中的 Deepwork Profiles 是独立的具名 JSONC 运行时资源编辑器。在此保存不会应用具名配置或选择其模型。"
 };
 var deploymentFieldLabels = {
@@ -6155,12 +6253,38 @@ var deploymentFieldLabels = {
 // src/client/permission-locales.ts
 var PERMISSIONS_NS = "settings.dsmm-permissions";
 var permissionEn = {
+  childPermissions: "Permissions",
+  childEnable: "Allow this child to ask me for approval",
+  childRevoke: "Revoke child approvals",
+  childPermissionBoundary: "Future approvals for this live child only. Root grants, siblings and future children are unchanged. Role and sandbox limits remain. Revocation does not cancel an already pending native request or replay work.",
+  childUnavailable: "Verified live ownership, policy or approval route is unavailable. Refresh; retired children cannot be revived here.",
+  childNoPending: "No native approval is pending for this child.",
+  childEnabled: "This child may request approval.",
+  childDisabled: "Interactive approval is off for this child.",
+  childUnconfirmed: "The child permission result is unavailable or unconfirmed. Refresh before retrying.",
+  childProject: "Project",
+  childRole: "Role ceiling",
+  childReadOnly: "Read-only",
+  temporaryChildSession: "This child task",
+  temporaryWebBoundary: "Exact scheme, host and port for native Web Fetch only; no subdomains, shell sockets, search, model or MCP access. Existing redirect, DNS, proxy and Fake-IP restrictions remain. A proxy path does not provide local DNS proof.",
+  temporaryTitle: "Temporary approvals",
+  temporaryDuration: "Approval duration",
+  temporaryApprove: "Approve",
+  temporaryRevoke: "Revoke",
+  temporaryRefresh: "Refresh",
+  temporaryEmpty: "No active temporary approvals.",
+  "temporary:once": "Once only",
+  "temporary:session": "This session",
+  "temporary:15min": "15 minutes",
+  "temporary:1h": "1 hour",
+  temporaryBoundary: "Selected tool scope in this live session only; no child inheritance or sandbox upgrade. Revocation stops future handoffs, not effects already started. File scopes do not confine shell processes or guarantee final-inode/hardlink isolation.",
+  temporaryUnavailable: "Temporary approval is unavailable or unconfirmed. Refresh, or use the native once-only prompt. No operation is replayed.",
   title: "Permission control",
   rules: "Global permission rules",
-  nativeApproval: "Command approval uses the native prompt; ordinary Allow is once only. Deployment permission settings and exact nativeCommands are in this Permissions module. Choose Global or Current DSH profile above; Root rules below save independently.",
-  root: "Selected native Root session",
-  noRoot: "Select a trusted Root session in native session navigation. No Root is inferred from task or model text.",
-  child: "This is a child session. Select its Root in native session navigation to edit Global rules.",
+  nativeApproval: "Approve commands in the native prompt. Allow approves only that call.",
+  root: "Selected main session",
+  noRoot: "Select a main session to view its permission rules.",
+  child: "Select this child’s main session to edit Global rules.",
   unknown: "Unavailable / unknown",
   reading: "Reading…",
   busy: "Operation pending…",
@@ -6187,14 +6311,14 @@ var permissionEn = {
   pathScope: "Path match",
   exact: "Exact path",
   tree: "Path and descendants",
-  networkLimit: "SDK network boundary: allowing public web fetch does not allow private-network destinations. These web policies are not an all-shell or socket firewall.",
-  rulesHint: "This Save uses the trusted Root’s Global rules CAS authority. Native dynamic permission overrides can refuse this RPC: edit or Unset them in the profile scope above, then refresh Root rules. No fallback Global write bypasses a refusal. Enabled and nativeCommands use configuration Save, not this Root transaction.",
-  configPolicyHint: "Sparse permission settings: Global Unset restores built-in defaults; profile Unset inherits Global plus any Host base pin. Profile overrides win over Global. Arrays replace as a whole. Config Save does not bypass Root/operator/readonly checks or prove runtime synchronization; inspect saved/startup/admitted state below and refresh Permission control for live coverage.",
-  configRulesHint: "Persisted rule records (exact schema, including source/revision/revoked). Edit existing records or supply valid import provenance; this config editor does not mint verified operator approval. Empty array explicitly replaces inherited records; Unset restores inheritance. The Root rules editor can stamp verified operator changes when its authority is writable.",
-  coldHint: "Enabled is a cold switch (default On). Saving requires an independent Host restart to change mounting; it does not remove current protection. Restart may cancel sessions.",
-  nativeCommands: "Exact native command entries",
-  nativeCommandsHint: "Default Off. Each entry matches tool, executable, optional subcommand, ordered args, workingDirectory and sandboxMode exactly; no wildcards, command parsing or normalization. Allow cannot override downstream Ask/Deny or role readonly. New entries use Ask and workspace-write; no full-access grant is generated.",
-  registrationUnresolved: "Native command registration / executor identity is unresolved here. A trusted kind:shell tool name is not proof of a nativeCommands bash/pwsh executor, executable, environment or sandbox. Enter only independently verified exact values; nothing is auto-filled or certified by this UI. Stale scope, controller or registration is still rejected by the Host.",
+  networkLimit: "Web rules cover public web tools only. Private networks, shell commands and sockets remain outside this permission.",
+  rulesHint: "Saves Global rules for the selected main session. If profile overrides block saving, edit or clear them in the profile scope above, then refresh.",
+  configPolicyHint: "Profile settings override Global settings. Arrays replace inherited lists. Refresh session permissions after saving to check what is effective.",
+  configRulesHint: "Edit existing records or imported rules with valid provenance. Use the session rules editor for verified approvals. An empty array clears inherited records.",
+  coldHint: "Changing this switch requires a Host restart. Current protection stays active until then. Restart may cancel sessions.",
+  nativeCommands: "Exact command rules",
+  nativeCommandsHint: "Default Off. Match the tool, executable, subcommand, ordered arguments, directory and sandbox exactly. No wildcards. Other approval, denial and read-only restrictions still apply. New entries ask for approval and use workspace-write.",
+  registrationUnresolved: "Executor identity is unconfirmed. Verify the tool, executable, environment and sandbox before entering exact values.",
   entryId: "Entry ID",
   tool: "Tool (exact)",
   nativeExecutable: "Executable (exact)",
@@ -6209,12 +6333,12 @@ var permissionEn = {
   inheritedEntries: "Inherited entries; editing pins a replacement array in this layer.",
   explicitEntries: "Explicit replacement array in this layer.",
   invalidEntry: "Invalid exact entry: use unique nonblank IDs, exact nonblank strings, an absolute Host working directory, and a JSON string array. Draft retained; Save locked.",
-  rulesUnavailable: "Global rules are not editable until a trusted, open Root and writable local operator authority return a synchronized policy. A refusal is not an empty rules list. Edit or Unset native overrides in this module’s profile scope; there is no automatic Global-write fallback.",
+  rulesUnavailable: "Editing requires an open main session, local editing permission and synchronized rules. Check profile overrides, reconnect and refresh.",
   invalidArgsHint: "Correct invalid argument JSON before removing rows, or explicitly Unset this entire array to restore inheritance. Other fields do not discard invalid text.",
-  observedPolicy: "Last observed effective policy (may include native profile overrides; not the sparse Global document)",
-  profileOverrideState: "Native profile override state",
-  profileOverrideUnknown: "Unknown from this Root rules response. Choose Current DSH profile above to inspect explicit overrides and inheritance. A failed Global rules Save does not clear or bypass them.",
-  matchHint: "Rules match actual canonical paths (exact/tree), the native Shell registration identity plus full command/cwd, or web kind. Rule Allow only satisfies that rule; it does not grant external writes. Different IDs add records until explicitly revoked.",
+  observedPolicy: "Effective policy (including profile overrides)",
+  profileOverrideState: "Profile overrides",
+  profileOverrideUnknown: "Unknown. Choose Current DSH profile above to inspect overrides.",
+  matchHint: "Match an exact path or directory tree, an exact shell tool/command/directory, or a web tool. Allow does not grant outside-workspace writes. Rules stay active until revoked.",
   source: "Actual source",
   recordVersion: "Record version",
   savedAt: "Saved at",
@@ -6222,19 +6346,19 @@ var permissionEn = {
   imported: "User import",
   active: "Active record",
   revoked: "Revoked record",
-  base: "Draft CAS source",
-  savedRevision: "Saved source",
-  runtimeRevision: "Runtime source",
-  runtime: "Runtime synchronization",
+  base: "Draft version",
+  savedRevision: "Saved version",
+  runtimeRevision: "Effective version",
+  runtime: "Rule synchronization",
   synced: "Synced",
   updating: "Updating",
-  unsynced: "Unsynced — rules saves locked",
+  unsynced: "Unsynced — saving unavailable",
   mounted: "Startup mounted",
   on: "On",
   off: "Off",
   restart: "Independent restart required",
-  coverageTitle: "Observed trusted tool coverage",
-  coverage: "Last observed for this Root from trusted registrations and the native rule consumer, separately from source synchronization. Saved, synced, mounted or a matching tool name does not prove coverage. Listed registrations do not prove executor readiness, network reachability or final-body ownership.",
+  coverageTitle: "Tool coverage",
+  coverage: "Last observed for this main session. Executor readiness and network access must be checked separately.",
   coverageUnavailable: "Coverage unavailable / unknown. No trusted live observation was returned.",
   coverageEmpty: "No trusted tool registrations observed for this Root.",
   coverageRuntime: "Observed consumer state",
@@ -6258,7 +6382,7 @@ var permissionEn = {
   "limit:proxyAddressBinding": "Depends on the native proxy; no stronger address-binding guarantee.",
   "limit:shellSockets": "Depends on the native executor; no all-Shell or socket firewall.",
   "limit:providerAuthMcp": "Not covered by these rules.",
-  pathEvidence: "Path evidence: read uses its actual scoped native FS. Glob/grep's production rg executor coLocation remains unproven; trusted registration is not shared-path proof. Shell read interpretation and path checks depend on explicit native executor evidence. No final-inode, full-filesystem or socket guarantee.",
+  pathEvidence: "Read checks its active filesystem. Search and shell path checks depend on the executor. Final-file identity, full filesystem confinement and socket isolation are not guaranteed.",
   newRule: "Add exact-match rule",
   editRule: "Edit rule",
   stage: "Stage rule",
@@ -6266,12 +6390,12 @@ var permissionEn = {
   stageRevoke: "Stage revocation",
   unstage: "Remove staged change",
   editor: "Rule draft",
-  staged: "Staged changes — not saved",
-  noRules: "No persisted rule records.",
-  save: "Save Global rules",
+  staged: "Unsaved rule changes",
+  noRules: "No saved rules.",
+  save: "Save",
   discard: "Discard draft and reload",
   dirty: "Unsaved rules draft",
-  saved: "Host accepted Global rules. Check runtime synchronization below.",
+  saved: "Rules saved. Check synchronization below.",
   "issue:not-owned": "Root/operator/readonly authority refused. Select the intended Root and refresh.",
   "issue:stale": "Source conflict. Draft retained. Review, then explicitly discard and reload.",
   "issue:cancelled": "Operation cancelled; refresh actual saved state.",
@@ -6285,12 +6409,38 @@ var permissionEn = {
   "issue:protocol": "Untrusted or mismatched service response. Refresh or reconnect."
 };
 var permissionZh = {
+  childPermissions: "权限",
+  childEnable: "允许此子任务向我请求批准",
+  childRevoke: "撤销子任务批准",
+  childPermissionBoundary: "仅影响此 live 子任务的后续审批，不继承 Root 批准，不影响同级或未来子任务。角色与沙箱上限不变。撤销不取消已经 pending 的原生请求，也不重放任务。",
+  childUnavailable: "可信 live ownership、策略或审批入口不可用。请刷新；这里不能复活已结束的子任务。",
+  childNoPending: "此子任务当前没有原生待审批请求。",
+  childEnabled: "此子任务可请求批准。",
+  childDisabled: "此子任务的交互审批已关闭。",
+  childUnconfirmed: "子任务权限结果不可用或待确认。请刷新后再重试。",
+  childProject: "项目",
+  childRole: "角色上限",
+  childReadOnly: "只读",
+  temporaryChildSession: "本次子任务",
+  temporaryWebBoundary: "仅限原生 Web Fetch 的精确 scheme、主机与端口，不含子域、Shell socket、搜索、模型或 MCP。原有重定向、DNS、代理和 Fake-IP 限制保留；代理路径不提供本地 DNS 证明。",
+  temporaryTitle: "临时批准",
+  temporaryDuration: "批准时长",
+  temporaryApprove: "批准",
+  temporaryRevoke: "撤销",
+  temporaryRefresh: "刷新",
+  temporaryEmpty: "没有生效中的临时批准。",
+  "temporary:once": "仅本次",
+  "temporary:session": "本次会话",
+  "temporary:15min": "15 分钟",
+  "temporary:1h": "1 小时",
+  temporaryBoundary: "仅限当前 live 会话的所选工具范围，不传给子任务、不提升沙箱。撤销阻止后续交接，不回滚已经开始的效果。文件范围不约束 Shell 进程，也不保证最终 inode／hardlink 隔离。",
+  temporaryUnavailable: "临时批准不可用或结果待确认。请刷新，或使用原生仅本次审批；不会自动重放操作。",
   title: "权限控制",
   rules: "全局权限规则",
-  nativeApproval: "命令批准使用原生提示，普通 Allow 仅批准本次。部署权限配置与精确 nativeCommands 在本权限模块内；上方选择 Global 或当前 DSH 配置，下面的 Root 规则独立保存。",
-  root: "当前原生 Root 会话",
-  noRoot: "请在原生会话导航中选择可信 Root 会话；不从任务或模型文本推断 Root。",
-  child: "当前为 child 会话；编辑全局规则请在原生导航选择其 Root。",
+  nativeApproval: "请在原生提示中批准命令；「允许」仅批准本次调用。",
+  root: "所选主会话",
+  noRoot: "请选择主会话以查看权限规则。",
+  child: "请切换到此子会话的主会话后编辑全局规则。",
   unknown: "不可用／未知",
   reading: "正在读取…",
   busy: "操作处理中…",
@@ -6317,14 +6467,14 @@ var permissionZh = {
   pathScope: "路径匹配",
   exact: "精确路径",
   tree: "此路径及子树",
-  networkLimit: "SDK 网络边界：允许 public web fetch 不代表放行私网目标；这些网页策略不是全部 Shell 或 socket 的防火墙。",
-  rulesHint: "此保存使用可信 Root 的 Global 规则 CAS 权限。native 动态权限覆盖可能使此 RPC 拒绝：请在上方当前配置作用域编辑或 Unset 覆盖，再刷新 Root 规则。拒绝后不会改走 Global 写入绕过。enabled 与 nativeCommands 使用配置保存，不属于此 Root 事务。",
-  configPolicyHint: "稀疏权限配置：Global 的 Unset 恢复内建默认；当前配置的 Unset 继承 Global 及宿主 base 固定值。当前配置覆盖 Global；数组整体替换。配置保存不绕过 Root／operator／只读检查，也不证明运行时同步；请核对下方保存／启动／准入状态，并在权限控制页刷新实时覆盖。",
-  configRulesHint: "持久规则记录（精确 schema，包含 source／revision／revoked）。可编辑现有记录或提供合法导入来源；此配置编辑器不生成已核验 operator 批准。空数组显式替换继承记录；Unset 恢复继承。Root 规则编辑器仅在权限可写时写入已核验 operator 来源。",
-  coldHint: "enabled 为冷开关（默认开启），保存后需另行重启宿主才改变挂载；不会移除当前保护。重启可能取消会话。",
-  nativeCommands: "精确原生命令条目",
-  nativeCommandsHint: "默认关闭。每条精确匹配 tool、executable、可选 subcommand、有序 args、workingDirectory 与 sandboxMode；不使用通配符、不解析或归一化命令。Allow 不能覆盖下游 Ask／Deny 或角色只读。新条目使用 Ask 和 workspace-write，不生成完全访问授权。",
-  registrationUnresolved: "此处原生命令注册／执行器身份未解析。可信 kind:shell 工具名称不证明 nativeCommands 的 bash／pwsh 执行器、executable、环境或沙箱。仅填写独立核验的精确值；本 UI 不自动填充或认证可信身份。过期 scope、controller 或注册仍由宿主拒绝。",
+  networkLimit: "网页规则仅覆盖公共网页工具，不包含私网、Shell 命令或 socket 权限。",
+  rulesHint: "为所选主会话保存全局规则。若配置覆盖阻止保存，请在上方当前配置范围内编辑或清除覆盖，再刷新。",
+  configPolicyHint: "当前配置优先于全局配置，数组整体替换继承列表。保存后请刷新会话权限以检查实际生效状态。",
+  configRulesHint: "可编辑已有记录或带合法来源的导入规则。经核验的批准请使用会话规则编辑器。空数组会清除继承的记录。",
+  coldHint: "更改此开关需重启宿主，此前保留当前保护。重启可能取消会话。",
+  nativeCommands: "精确命令规则",
+  nativeCommandsHint: "默认关闭。精确匹配工具、可执行程序、子命令、有序参数、目录和沙箱，不支持通配符。其他审批、拒绝和只读限制仍有效。新条目使用询问与 workspace-write。",
+  registrationUnresolved: "执行器身份尚未确认，请核验工具、可执行程序、环境和沙箱后再填写精确值。",
   entryId: "条目 ID",
   tool: "工具（精确）",
   nativeExecutable: "可执行程序（精确）",
@@ -6339,12 +6489,12 @@ var permissionZh = {
   inheritedEntries: "继承的条目；编辑后在此层固定为整体替换数组。",
   explicitEntries: "此层显式整体替换数组。",
   invalidEntry: "精确条目无效：ID 需唯一且非空，精确字符串不可空，工作目录为宿主绝对路径，参数为 JSON 字符串数组。草稿保留，保存已锁定。",
-  rulesUnavailable: "需可信且已打开的 Root、可写的本地 operator 权限及已同步策略，才能编辑 Global 规则。拒绝不代表空规则列表。请在本模块的当前配置作用域编辑或 Unset native 覆盖；不会自动改走 Global 写入。",
+  rulesUnavailable: "编辑需要已打开的主会话、本地编辑权限和已同步的规则。请检查配置覆盖，重连后刷新。",
   invalidArgsHint: "请修正无效参数 JSON 后再移除条目；也可显式 Unset 整个数组以恢复继承。修改其他字段不会丢弃无效文本。",
-  observedPolicy: "最近观测的有效策略（可能包含 native 配置覆盖，非稀疏 Global 文档）",
-  profileOverrideState: "Native 配置覆盖状态",
-  profileOverrideUnknown: "此 Root 规则响应未提供覆盖状态。请在上方选择当前 DSH 配置，核对显式覆盖与继承；Global 规则保存失败不会清除或绕过覆盖。",
-  matchHint: "规则匹配实际规范路径、原生 Shell 注册身份＋完整命令＋工作目录，或网页类型。规则 Allow 仅满足该规则，不授予外部写。不同 ID 添加记录，保留至显式撤销。",
+  observedPolicy: "有效策略（含当前配置覆盖）",
+  profileOverrideState: "配置覆盖",
+  profileOverrideUnknown: "未知，请在上方选择当前 DSH 配置查看覆盖值。",
+  matchHint: "可匹配精确路径或目录树、精确 Shell 工具与命令及目录，或网页工具。允许不授予工作区外写入权限。规则保留至撤销。",
   source: "实际来源",
   recordVersion: "记录版本",
   savedAt: "保存时间",
@@ -6352,19 +6502,19 @@ var permissionZh = {
   imported: "用户导入",
   active: "有效记录",
   revoked: "已撤销记录",
-  base: "草稿 CAS 来源",
-  savedRevision: "已保存来源",
-  runtimeRevision: "运行时来源",
-  runtime: "运行时同步",
+  base: "草稿版本",
+  savedRevision: "保存版本",
+  runtimeRevision: "生效版本",
+  runtime: "规则同步",
   synced: "已同步",
   updating: "同步中",
-  unsynced: "未同步——规则保存已锁定",
+  unsynced: "未同步——暂不可保存",
   mounted: "启动时已挂载",
   on: "开启",
   off: "关闭",
   restart: "需要另行重启",
-  coverageTitle: "已观测的可信工具覆盖",
-  coverage: "此 Root 最近一次可信注册及原生规则 consumer 观测，与来源同步分开。已保存、已同步、已挂载或工具同名均不证明覆盖；所列注册不证明执行器就绪、网络可达或最终 body 归属。",
+  coverageTitle: "工具覆盖范围",
+  coverage: "所选主会话最近观测的覆盖范围，执行器就绪和网络访问需另行检查。",
   coverageUnavailable: "覆盖不可用／未知：未返回可信的实时观测。",
   coverageEmpty: "未观测到此 Root 的可信工具注册。",
   coverageRuntime: "已观测 consumer 状态",
@@ -6388,7 +6538,7 @@ var permissionZh = {
   "limit:proxyAddressBinding": "依赖原生代理，不提供更强的地址绑定保证。",
   "limit:shellSockets": "依赖原生执行器，不是全部 Shell 或 socket 的防火墙。",
   "limit:providerAuthMcp": "不在这些规则覆盖范围。",
-  pathEvidence: "路径证据：read 使用其实际 scope 的原生 FS。glob／grep 的生产 rg 执行器 coLocation 仍未证明；可信注册不等于共享路径证据。Shell 读取解析及路径检查依赖明确的原生执行器证据。不保证最终 inode、完整文件系统或 socket 隔离。",
+  pathEvidence: "读取检查当前文件系统；搜索和 Shell 的路径检查取决于执行器。不保证最终文件身份、完整文件系统或 socket 隔离。",
   newRule: "添加精确匹配规则",
   editRule: "编辑规则",
   stage: "暂存规则",
@@ -6396,12 +6546,12 @@ var permissionZh = {
   stageRevoke: "暂存撤销",
   unstage: "移除暂存更改",
   editor: "规则草稿",
-  staged: "暂存更改——尚未保存",
-  noRules: "尚无持久化规则记录。",
-  save: "保存全局规则",
+  staged: "未保存的规则更改",
+  noRules: "尚无已保存规则。",
+  save: "保存",
   discard: "丢弃草稿并重载",
   dirty: "规则草稿未保存",
-  saved: "宿主已接受全局规则，请核对运行时同步状态。",
+  saved: "规则已保存，请核对下方同步状态。",
   "issue:not-owned": "Root／operator／只读权限拒绝，请选择目标 Root 后刷新。",
   "issue:stale": "来源冲突，草稿保留；核对后显式丢弃并重载。",
   "issue:cancelled": "操作已取消，请刷新实际保存状态。",
@@ -6430,11 +6580,11 @@ function validNativeEntries(entries) {
 function emptyNativeEntry() {
   return { id: "", mode: "ask", sandboxMode: "workspace-write", match: { tool: "bash", executable: "", args: [], workingDirectory: "" } };
 }
-function Arguments({ value, controller, name, disabled, onChange, t }) {
-  const state = (0, import_react5.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), id2 = (0, import_react5.useId)(), raw = state.raw[name], text5 = raw?.text ?? JSON.stringify(value), bad = raw?.invalid === true;
+function Arguments({ value: value2, controller, name, disabled, onChange, t }) {
+  const state = (0, import_react5.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), id3 = (0, import_react5.useId)(), raw = state.raw[name], text6 = raw?.text ?? JSON.stringify(value2), bad = raw?.invalid === true;
   return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: id2, children: t("args") }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("textarea", { id: id2, rows: 3, maxLength: 32768, disabled, value: text5, "aria-invalid": bad, "aria-describedby": `${id2}-error`, onChange: (event) => {
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: id3, children: t("args") }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("textarea", { id: id3, rows: 3, maxLength: 32768, disabled, value: text6, "aria-invalid": bad, "aria-describedby": `${id3}-error`, onChange: (event) => {
       const raw2 = event.currentTarget.value;
       let parsed;
       try {
@@ -6445,45 +6595,45 @@ function Arguments({ value, controller, name, disabled, onChange, t }) {
       controller.setRaw(name, raw2, !valid);
       if (valid) onChange(parsed);
     } }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { id: `${id2}-error`, className: "dsmm-hint", children: bad ? t("invalidEntry") : "" })
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { id: `${id3}-error`, className: "dsmm-hint", children: bad ? t("invalidEntry") : "" })
   ] });
 }
 function Entry({ entry, index, controller, disabled, removeDisabled, change, remove, t }) {
-  const id2 = (0, import_react5.useId)();
+  const id3 = (0, import_react5.useId)();
   const valid = validNativeEntries([entry]);
-  const text5 = (key, label) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${id2}-${key}`, children: t(label) }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Input, { className: "dsmm-input", id: `${id2}-${key}`, value: key === "id" ? entry.id : entry.match[key] ?? "", maxLength: 32768, disabled, required: key !== "subcommand", onChange: (event) => {
-      const value = event.currentTarget.value;
-      if (key === "id") change({ ...entry, id: value });
-      else if (key === "subcommand" && value === "") {
+  const text6 = (key, label) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${id3}-${key}`, children: t(label) }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Input, { className: "dsmm-input", id: `${id3}-${key}`, value: key === "id" ? entry.id : entry.match[key] ?? "", maxLength: 32768, disabled, required: key !== "subcommand", onChange: (event) => {
+      const value2 = event.currentTarget.value;
+      if (key === "id") change({ ...entry, id: value2 });
+      else if (key === "subcommand" && value2 === "") {
         const { subcommand: _omitted, ...match } = entry.match;
         change({ ...entry, match });
-      } else change({ ...entry, match: { ...entry.match, [key]: value } });
+      } else change({ ...entry, match: { ...entry.match, [key]: value2 } });
     } })
   ] });
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("fieldset", { "aria-describedby": !valid ? `${id2}-error` : void 0, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("fieldset", { "aria-describedby": !valid ? `${id3}-error` : void 0, children: [
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("legend", { children: [
       t("nativeCommands"),
       " ",
       index + 1
     ] }),
-    !valid && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", id: `${id2}-error`, children: t("invalidEntry") }),
-    text5("id", "entryId"),
+    !valid && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", id: `${id3}-error`, children: t("invalidEntry") }),
+    text6("id", "entryId"),
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${id2}-tool`, children: t("tool") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("select", { id: `${id2}-tool`, disabled, value: entry.match.tool, onChange: (event) => {
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${id3}-tool`, children: t("tool") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("select", { id: `${id3}-tool`, disabled, value: entry.match.tool, onChange: (event) => {
         const tool = event.currentTarget.value;
         if (tool === "bash" || tool === "pwsh") change({ ...entry, match: { ...entry.match, tool } });
-      }, children: ["bash", "pwsh"].map((value) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value, children: value }, value)) })
+      }, children: ["bash", "pwsh"].map((value2) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: value2, children: value2 }, value2)) })
     ] }),
-    text5("executable", "nativeExecutable"),
-    text5("subcommand", "subcommand"),
+    text6("executable", "nativeExecutable"),
+    text6("subcommand", "subcommand"),
     /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Arguments, { value: entry.match.args, controller, name: `permissionControl.nativeCommands.entries.${index}.args`, disabled, t, onChange: (args) => change({ ...entry, match: { ...entry.match, args } }) }),
-    text5("workingDirectory", "cwd"),
+    text6("workingDirectory", "cwd"),
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${id2}-sandbox`, children: t("sandboxMode") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("select", { id: `${id2}-sandbox`, disabled, value: entry.sandboxMode, onChange: (event) => {
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${id3}-sandbox`, children: t("sandboxMode") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("select", { id: `${id3}-sandbox`, disabled, value: entry.sandboxMode, onChange: (event) => {
         if (event.currentTarget.value === "workspace-write") change({ ...entry, sandboxMode: "workspace-write" });
       }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "workspace-write", children: "workspace-write" }),
@@ -6495,8 +6645,8 @@ function Entry({ entry, index, controller, disabled, removeDisabled, change, rem
       ] })
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${id2}-mode`, children: t("mode") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("select", { id: `${id2}-mode`, disabled, value: entry.mode, onChange: (event) => {
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: `${id3}-mode`, children: t("mode") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("select", { id: `${id3}-mode`, disabled, value: entry.mode, onChange: (event) => {
         const mode = event.currentTarget.value;
         if (mode === "ask" || mode === "allow") change({ ...entry, mode });
       }, children: [
@@ -6511,8 +6661,8 @@ function Entry({ entry, index, controller, disabled, removeDisabled, change, rem
     ] })
   ] });
 }
-function NativeCommandEntries({ value, inherited, controller, disabled, onChange, setInvalid, t }) {
-  const entries = value ?? inherited, name = "permissionControl.nativeCommands.entries";
+function NativeCommandEntries({ value: value2, inherited, controller, disabled, onChange, setInvalid, t }) {
+  const entries = value2 ?? inherited, name = "permissionControl.nativeCommands.entries";
   const state = (0, import_react5.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
   const invalidArgs = state.invalidFields.filter((path) => path.startsWith(`${name}.`) && path.endsWith(".args"));
   const valid = validNativeEntries(entries);
@@ -6529,7 +6679,7 @@ function NativeCommandEntries({ value, inherited, controller, disabled, onChange
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-structured", children: [
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("nativeCommandsHint") }),
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("registrationUnresolved") }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t(value === void 0 ? "inheritedEntries" : "explicitEntries") }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t(value2 === void 0 ? "inheritedEntries" : "explicitEntries") }),
       !valid && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-issue", role: "alert", children: t("invalidEntry") }),
       invalidArgs.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "dsmm-hint", children: t("invalidArgsHint") }),
       entries.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("noEntries") }),
@@ -6542,7 +6692,7 @@ function NativeCommandEntries({ value, inherited, controller, disabled, onChange
           disabled,
           removeDisabled: invalidArgs.length > 0,
           t,
-          change: (next) => change(entries.map((row, position) => position === index ? next : row)),
+          change: (next) => change(entries.map((row2, position) => position === index ? next : row2)),
           remove: () => {
             controller.clearRaw(name);
             change(entries.filter((_, position) => position !== index));
@@ -6552,7 +6702,7 @@ function NativeCommandEntries({ value, inherited, controller, disabled, onChange
       )),
       /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "dsmm-actions", children: [
         /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", disabled: disabled || entries.length >= 1024, onClick: () => change([...entries, emptyNativeEntry()]), children: t("addEntry") }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", "data-dsmm-unset": name, disabled: disabled || value === void 0 && invalidArgs.length === 0, onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives5.Button, { type: "button", variant: "outline", "data-dsmm-unset": name, disabled: disabled || value2 === void 0 && invalidArgs.length === 0, onClick: () => {
           controller.clearRaw(name);
           change(void 0);
         }, children: t("unset") })
@@ -6570,50 +6720,45 @@ function fieldLabel(path, t) {
   const item = deploymentFieldLabels[key];
   return item === void 0 ? key.replace(/^dsmm-/u, "").replace(/([a-z])([A-Z])/gu, "$1 $2") : item[t("global") === "DSMM 全局配置" ? 1 : 0];
 }
-function displayValue(value, t) {
-  if (value === void 0) return t("unknown");
-  if (typeof value === "boolean") return t(value ? "on" : "off");
-  const text5 = JSON.stringify(value);
-  return text5.length > 120 ? `${text5.slice(0, 120)}…` : text5;
+function displayValue(value2, t) {
+  if (value2 === void 0) return t("unknown");
+  if (typeof value2 === "boolean") return t(value2 ? "on" : "off");
+  const text6 = JSON.stringify(value2);
+  return text6.length > 120 ? `${text6.slice(0, 120)}…` : text6;
 }
-function AdvancedField({ schema, path, controller, inherited, upper, t }) {
-  const state = (0, import_react6.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), id2 = (0, import_react6.useId)(), name = path.join(".");
-  const value = at(state.draft, path), raw = state.raw[name], text5 = raw?.text ?? (value === void 0 ? "" : JSON.stringify(value, null, 2)), invalid2 = raw?.invalid === true;
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("details", { className: "dsmm-deployment-group", "data-field": name, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("summary", { children: [
+function AdvancedField({ schema, path, controller, inherited, upper, expanded, onExpandedChange, t }) {
+  const state = (0, import_react6.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), id3 = (0, import_react6.useId)(), name = path.join(".");
+  const value2 = at(state.draft, path), raw = state.raw[name], text6 = raw?.text ?? (value2 === void 0 ? "" : JSON.stringify(value2, null, 2)), invalid3 = raw?.invalid === true;
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("details", { className: "dsmm-deployment-group", "data-field": name, open: expanded, onToggle: (event) => onExpandedChange?.(event.currentTarget.open), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("summary", { id: `${id3}-label`, children: [
       fieldLabel(path, t),
       " · ",
       t("advanced")
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("label", { htmlFor: id2, children: [
-        fieldLabel(path, t),
-        " · ",
-        t("advanced")
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", id: `${id2}-hint`, children: t("advancedHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", id: `${id3}-hint`, children: t("advancedHint") }),
       path[0] === "permissionControl" && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: permissionText(t)("configRulesHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t(value === void 0 ? "inherit" : "explicit") }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t(value2 === void 0 ? "inherit" : "explicit") }),
       upper !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { className: "dsmm-hint", children: [
         t("profileSource"),
         ": ",
         displayValue(upper, t)
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("textarea", { id: id2, rows: 6, maxLength: 32768, value: text5, disabled: !controller.canEdit(), "aria-invalid": invalid2, "aria-describedby": `${id2}-hint ${id2}-error`, onChange: (event) => {
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("textarea", { id: id3, rows: 6, maxLength: 32768, value: text6, disabled: !controller.canEdit(), "aria-labelledby": `${id3}-label`, "aria-invalid": invalid3, "aria-describedby": `${id3}-hint ${id3}-error`, onChange: (event) => {
         const next = event.currentTarget.value;
         let parsed, valid = true;
         try {
           parsed = parseAdvanced(next);
-          const candidate = parsed === void 0 ? inherited : mergeLayer(inherited, parsed);
-          valid = parsed === void 0 || validateEditorValue(parsed, schema, true) && validateEditorValue(upper === void 0 ? candidate : mergeLayer(candidate, upper), schema);
+          const candidate2 = parsed === void 0 ? inherited : mergeLayer(inherited, parsed);
+          valid = parsed === void 0 || validateEditorValue(parsed, schema, true) && validateEditorValue(upper === void 0 ? candidate2 : mergeLayer(candidate2, upper), schema);
         } catch {
           valid = false;
         }
         controller.setRaw(name, next, !valid);
         if (valid) controller.edit(path, parsed);
       } }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { id: `${id2}-error`, className: "dsmm-hint", children: invalid2 ? t("invalid") : "" }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", "data-dsmm-unset": name, disabled: !controller.canEdit() || value === void 0 && raw === void 0, onClick: () => {
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { id: `${id3}-error`, className: "dsmm-hint", children: invalid3 ? t("invalid") : "" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", "data-dsmm-unset": name, disabled: !controller.canEdit() || value2 === void 0 && raw === void 0, onClick: () => {
         controller.clearRaw(name);
         controller.edit(path, void 0);
       }, children: t("unset") }),
@@ -6629,35 +6774,40 @@ function AdvancedField({ schema, path, controller, inherited, upper, t }) {
   ] });
 }
 function ScalarField({ schema, path, controller, inherited, t }) {
-  const state = (0, import_react6.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), id2 = (0, import_react6.useId)(), name = path.join(".");
-  const value = at(state.draft, path), raw = state.raw[name], bad = raw?.invalid === true;
+  const state = (0, import_react6.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), id3 = (0, import_react6.useId)(), name = path.join(".");
+  const value2 = at(state.draft, path), raw = state.raw[name], bad = raw?.invalid === true;
   return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { htmlFor: id2, children: fieldLabel(path, t) }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { htmlFor: id3, children: fieldLabel(path, t) }),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-actions", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Input, { className: "dsmm-input", id: id2, type: "text", inputMode: schema.type === "number" ? "decimal" : void 0, value: raw?.text ?? String(value ?? inherited ?? ""), disabled: !controller.canEdit(), "aria-invalid": bad, "aria-describedby": `${id2}-error`, onChange: (event) => {
-        const text5 = event.currentTarget.value, candidate = schema.type === "number" ? Number(text5) : text5;
-        const valid = (schema.type !== "number" || text5.trim() !== "") && validateEditorValue(candidate, schema);
-        controller.setRaw(name, text5, !valid);
-        if (valid) controller.edit(path, candidate);
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Input, { className: "dsmm-input", id: id3, type: "text", inputMode: schema.type === "number" ? "decimal" : void 0, value: raw?.text ?? String(value2 ?? inherited ?? ""), disabled: !controller.canEdit(), "aria-invalid": bad, "aria-describedby": `${id3}-error`, onChange: (event) => {
+        const text6 = event.currentTarget.value, candidate2 = schema.type === "number" ? Number(text6) : text6;
+        const valid = (schema.type !== "number" || text6.trim() !== "") && validateEditorValue(candidate2, schema);
+        controller.setRaw(name, text6, !valid);
+        if (valid) controller.edit(path, candidate2);
       } }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", "data-dsmm-unset": name, disabled: !controller.canEdit() || value === void 0 && raw === void 0, onClick: () => {
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", "data-dsmm-unset": name, disabled: !controller.canEdit() || value2 === void 0 && raw === void 0, onClick: () => {
         controller.clearRaw(name);
         controller.edit(path, void 0);
       }, children: t("unset") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { id: `${id2}-error`, className: "dsmm-hint", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { id: `${id3}-error`, className: "dsmm-hint", children: [
       bad ? t("invalid") : "",
       schema.type === "number" && (schema.min !== void 0 || schema.max !== void 0) ? ` ${schema.min ?? "—"} – ${schema.max ?? "—"}` : ""
     ] })
   ] });
 }
-function Field({ schema, path, controller, t }) {
+function Field({ schema, path, controller, initiallyOpen = false, disclosures, t }) {
   if (schema.type === "transform" && schema.inner !== void 0) schema = schema.inner;
-  const state = (0, import_react6.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), snapshot4 = state.snapshot, id2 = (0, import_react6.useId)(), name = path.join(".");
+  const state = (0, import_react6.useSyncExternalStore)(controller.subscribe, controller.getSnapshot), snapshot4 = state.snapshot, id3 = (0, import_react6.useId)(), name = path.join(".");
+  const [open, setOpen] = (0, import_react6.useState)(disclosures?.get(name) ?? initiallyOpen);
+  const expand = (expanded) => {
+    disclosures?.set(name, expanded);
+    setOpen(expanded);
+  };
   const explicit = at(state.draft, path), inherited = controller.layer === "global" ? at(snapshot4.defaults, path) : at(mergeLayer(mergeLayer(snapshot4.defaults, snapshot4.global), snapshot4.nativeForm?.base ?? {}), path);
   const choices = enumValues(schema), disabled = !controller.canEdit();
-  if (name === "permissionControl.nativeCommands.entries") return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { "data-field": name, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(NativeCommandEntries, { controller, value: explicit, inherited: inherited ?? [], disabled, onChange: (value) => controller.edit(path, value), setInvalid: (key, bad) => controller.setInvalid(key, bad), t: permissionText(t) }) });
-  if (schema.type === "object" && schema.fields !== void 0 && path[0] !== "roleRouting") return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("details", { className: "dsmm-deployment-group", "data-field": name, children: [
+  if (name === "permissionControl.nativeCommands.entries") return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { "data-field": name, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(NativeCommandEntries, { controller, value: explicit, inherited: inherited ?? [], disabled, onChange: (value2) => controller.edit(path, value2), setInvalid: (key, bad) => controller.setInvalid(key, bad), t: permissionText(t) }) });
+  if (schema.type === "object" && schema.fields !== void 0 && path[0] !== "roleRouting") return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("details", { className: "dsmm-deployment-group", "data-field": name, open, onToggle: (event) => expand(event.currentTarget.open), children: [
     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("summary", { children: fieldLabel(path, t) }),
     /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { children: [
       name === "permissionControl" && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: permissionText(t)("configPolicyHint") }),
@@ -6666,16 +6816,16 @@ function Field({ schema, path, controller, t }) {
         controller.clearRaw(name);
         controller.edit(path, void 0);
       }, children: t("unsetGroup") }),
-      Object.entries(schema.fields).map(([key, node]) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Field, { schema: node, path: [...path, key], controller, t }, key))
+      Object.entries(schema.fields).map(([key, node]) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Field, { schema: node, path: [...path, key], controller, disclosures, t }, key))
     ] })
   ] });
-  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(AdvancedField, { schema, path, controller, inherited, upper: controller.layer === "global" ? at(snapshot4.profile, path) : void 0, t });
+  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(AdvancedField, { schema, path, controller, inherited, upper: controller.layer === "global" ? at(snapshot4.profile, path) : void 0, expanded: open, onExpandedChange: expand, t });
   return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dsmm-field dsmm-deployment-field", "data-field": name, children: [
     schema.type === "boolean" || choices !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { htmlFor: id2, children: fieldLabel(path, t) }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("select", { id: id2, disabled, value: explicit === void 0 ? "inherit" : JSON.stringify(explicit), onChange: (event) => controller.edit(path, event.currentTarget.value === "inherit" ? void 0 : JSON.parse(event.currentTarget.value)), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("label", { htmlFor: id3, children: fieldLabel(path, t) }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("select", { id: id3, disabled, value: explicit === void 0 ? "inherit" : JSON.stringify(explicit), onChange: (event) => controller.edit(path, event.currentTarget.value === "inherit" ? void 0 : JSON.parse(event.currentTarget.value)), children: [
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: "inherit", children: `${t("unset")} · ${displayValue(inherited, t)}` }),
-        (choices ?? [true, false]).map((choice2) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: JSON.stringify(choice2), children: displayValue(choice2, t) }, String(choice2)))
+        (choices ?? [true, false]).map((choice3) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("option", { value: JSON.stringify(choice3), children: displayValue(choice3, t) }, String(choice3)))
       ] })
     ] }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ScalarField, { schema, path, controller, inherited, t }),
     name === "modelParameters.passthrough" && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "dsmm-hint", children: t("modelParametersHint") }),
@@ -6692,254 +6842,555 @@ function Field({ schema, path, controller, t }) {
   ] });
 }
 
+// src/client/PermissionPanelEntry.tsx
+var import_react9 = require("react");
+
 // src/client/PermissionsPanel.tsx
+var import_react8 = require("react");
+var import_dsh_client_ui_primitives8 = require("@deepseek-ai/dsh-client-ui-primitives");
+
+// src/client/TemporaryPermissions.tsx
 var import_react7 = require("react");
 var import_dsh_client_ui_primitives7 = require("@deepseek-ai/dsh-client-ui-primitives");
+
+// src/permission-temporary-remote.ts
+function row(value2, required, optional2 = []) {
+  if (!value2 || typeof value2 !== "object" || Array.isArray(value2) || required.some((key) => !Object.hasOwn(value2, key)) || Object.keys(value2).some((key) => !required.includes(key) && !optional2.includes(key))) throw new TypeError("Invalid temporary permission DTO.");
+  return value2;
+}
+function parseTemporaryId(value2) {
+  if (typeof value2 !== "string" || !value2.length || value2.length > 512 || /[\u0000-\u001f]/u.test(value2)) throw new TypeError("Invalid temporary permission identity.");
+  return value2;
+}
+function parseTemporaryDuration(value2) {
+  if (value2 !== "once" && value2 !== "session" && value2 !== "15min" && value2 !== "1h") throw new TypeError("Invalid duration.");
+  return value2;
+}
+function parseTemporaryDelivery(value2) {
+  const input = row(value2, ["requestId", "deliveryId"]);
+  return { requestId: parseTemporaryId(input.requestId), deliveryId: parseTemporaryId(input.deliveryId) };
+}
+function summary(value2) {
+  if (typeof value2 !== "string" || value2.length > 65536) throw new TypeError("Invalid summary.");
+  return value2;
+}
+function parseTemporaryGrants(value2) {
+  if (!Array.isArray(value2) || value2.length > 1024) throw new TypeError("Invalid grants.");
+  return value2.map((item) => {
+    const input = row(item, ["id", "sessionId", "tool", "summary", "duration"], ["remainingMs"]), duration = parseTemporaryDuration(input.duration);
+    if (duration === "once" || input.remainingMs !== void 0 && (typeof input.remainingMs !== "number" || !Number.isFinite(input.remainingMs) || input.remainingMs < 0)) throw new TypeError("Invalid grant lifetime.");
+    return {
+      id: parseTemporaryId(input.id),
+      sessionId: parseTemporaryId(input.sessionId),
+      tool: parseTemporaryId(input.tool),
+      summary: summary(input.summary),
+      duration,
+      ...typeof input.remainingMs === "number" ? { remainingMs: input.remainingMs } : {}
+    };
+  });
+}
+function parseTemporaryRequest(value2) {
+  const input = row(value2, ["requestId", "deliveryId", "sessionId", "tool", "summary", "reusable"], ["scopes"]);
+  if (typeof input.reusable !== "boolean") throw new TypeError("Invalid request capability.");
+  let scopes;
+  if (input.scopes !== void 0) {
+    if (!Array.isArray(input.scopes) || input.scopes.length > 4) throw new TypeError("Invalid scopes.");
+    scopes = input.scopes.map((value3) => {
+      const scope = row(value3, ["id", "summary"]);
+      return { id: parseTemporaryId(scope.id), summary: summary(scope.summary) };
+    });
+  }
+  return {
+    requestId: parseTemporaryId(input.requestId),
+    deliveryId: parseTemporaryId(input.deliveryId),
+    sessionId: parseTemporaryId(input.sessionId),
+    tool: parseTemporaryId(input.tool),
+    summary: summary(input.summary),
+    reusable: input.reusable,
+    ...scopes ? { scopes } : {}
+  };
+}
+var codec2 = (name, parse3) => ({ mode: "strict", typeSymbol: `@dsmm/dsmm#Temporary${name}`, create: () => ({ parse: parse3 }) });
+function parseChildPermission(value2) {
+  const input = row(value2, ["parentSessionId", "childSessionId", "project", "state", "canEnable", "canRevoke"], ["role", "readOnly"]);
+  const state = input.state;
+  if (state !== "disabled" && state !== "enabled" && state !== "unavailable" || typeof input.canEnable !== "boolean" || typeof input.canRevoke !== "boolean" || input.readOnly !== void 0 && typeof input.readOnly !== "boolean") throw new TypeError("Invalid child permission state.");
+  return {
+    parentSessionId: parseTemporaryId(input.parentSessionId),
+    childSessionId: parseTemporaryId(input.childSessionId),
+    project: summary(input.project),
+    state,
+    canEnable: input.canEnable,
+    canRevoke: input.canRevoke,
+    ...input.role === void 0 ? {} : { role: parseTemporaryId(input.role) },
+    ...typeof input.readOnly === "boolean" ? { readOnly: input.readOnly } : {}
+  };
+}
+var id2 = codec2("Id", parseTemporaryId);
+var delivery = codec2("Delivery", parseTemporaryDelivery);
+var grants = codec2("Grants", parseTemporaryGrants);
+var request = codec2("Request", parseTemporaryRequest);
+function descriptor2(method, fields, result) {
+  return {
+    id: `@dsmm/dsmm-temporary-permissions#dsmmTemporaryPermissions/${method}`,
+    service: "dsmmTemporaryPermissions",
+    namespace: "dsmmTemporaryPermissions",
+    method,
+    invocation: { kind: "direct" },
+    parameters: [["sessionId", id2], ...fields].map(([name, codec6]) => ({ name, wire: name, source: "json", codec: codec6 })),
+    result
+  };
+}
+var TEMPORARY_PERMISSION_REMOTE = { package: "@dsmm/dsmm-temporary-permissions", descriptors: [
+  descriptor2("describe", [], grants),
+  descriptor2("request", [["delivery", delivery]], request),
+  descriptor2("retain", [["delivery", delivery], ["duration", codec2("Duration", parseTemporaryDuration)], ["scope", codec2("Scope", (value2) => value2 === void 0 ? "exact" : parseTemporaryId(value2))]], id2),
+  descriptor2("permit", [["delivery", delivery]], codec2("Permit", (value2) => value2 === null ? null : parseTemporaryId(value2))),
+  descriptor2("revoke", [["grantId", id2]], grants),
+  ...["child", "enableChild", "revokeChild"].map((method) => descriptor2(method, [["childSessionId", id2]], codec2("Child", parseChildPermission)))
+] };
+var TEMPORARY_PERMISSION_HOST = { package: TEMPORARY_PERMISSION_REMOTE.package, face: "host", schemas: [], model: { services: [], events: [], objects: [] }, invocations: TEMPORARY_PERMISSION_REMOTE.descriptors };
+
+// src/client/temporary-permission-client.ts
+function temporaryPermissionClient(connection, signal) {
+  const generation = connection.generation.getSnapshot();
+  const check = () => {
+    signal.throwIfAborted();
+    if (connection.generation.getSnapshot() !== generation) throw new Error("Connection generation changed.");
+  };
+  async function call(method, args) {
+    check();
+    const result = await connection.rpc.call("/api", `dsmmTemporaryPermissions/${method}`, { args }, signal);
+    check();
+    if (!result.ok) throw new Error("Temporary permission service unavailable; use the native once-only prompt.");
+    const descriptor6 = TEMPORARY_PERMISSION_REMOTE.descriptors.find((value2) => value2.method === method);
+    if (descriptor6.result.mode !== "strict") throw new Error("Invalid permission protocol.");
+    return descriptor6.result.create().parse(result.value);
+  }
+  return {
+    async describe(sessionId2) {
+      return parseTemporaryGrants(await call("describe", { sessionId: sessionId2 }));
+    },
+    async request(sessionId2, delivery2) {
+      return parseTemporaryRequest(await call("request", { sessionId: sessionId2, delivery: delivery2 }));
+    },
+    async retain(sessionId2, delivery2, duration, scope = "exact") {
+      return String(await call("retain", { sessionId: sessionId2, delivery: delivery2, duration, scope }));
+    },
+    async permit(sessionId2, delivery2) {
+      const value2 = await call("permit", { sessionId: sessionId2, delivery: delivery2 });
+      return value2 === null ? null : String(value2);
+    },
+    async revoke(sessionId2, grantId) {
+      return parseTemporaryGrants(await call("revoke", { sessionId: sessionId2, grantId }));
+    },
+    async child(sessionId2, childSessionId) {
+      return parseChildPermission(await call("child", { sessionId: sessionId2, childSessionId }));
+    },
+    async enableChild(sessionId2, childSessionId) {
+      return parseChildPermission(await call("enableChild", { sessionId: sessionId2, childSessionId }));
+    },
+    async revokeChild(sessionId2, childSessionId) {
+      return parseChildPermission(await call("revokeChild", { sessionId: sessionId2, childSessionId }));
+    }
+  };
+}
+function pendingDelivery(pending) {
+  return pending.requestId && pending.deliveryId ? { requestId: pending.requestId, deliveryId: pending.deliveryId } : void 0;
+}
+async function retainAndAnswer(pending, remote, duration, current2, scope = "exact") {
+  if (!current2() || !pending.answerable) return;
+  const delivery2 = pendingDelivery(pending);
+  let retention;
+  if (duration !== "once") {
+    if (!delivery2) throw new Error("Scoped approval unsupported.");
+    retention = await remote.retain(pending.sessionId, delivery2, duration, scope);
+  }
+  if (current2() && pending.answerable) await pending.answer("allowed-once", retention === void 0 ? void 0 : { retention });
+}
+async function answerWithTemporaryPermit(pending, remote, current2) {
+  const delivery2 = pendingDelivery(pending);
+  if (!delivery2 || !current2() || !pending.answerable) return;
+  const permit = await remote.permit(pending.sessionId, delivery2);
+  if (permit && current2() && pending.answerable) await pending.answer("allowed-once", { permit });
+}
+
+// src/client/TemporaryPermissions.tsx
 var import_jsx_runtime9 = require("react/jsx-runtime");
+var durations = ["once", "session", "15min", "1h"];
+function registerTemporaryPermissionSlots(ctx, connection) {
+  const lifetime = new AbortController();
+  ctx.effect(() => () => lifetime.abort());
+  ctx.slots.inject("conversation.composer", () => ctx.slots.register({
+    name: "conversation.approval.permissions",
+    priority: 0,
+    locale: PERMISSIONS_NS
+  }, function PermissionSlot(props) {
+    const remote = (0, import_react7.useMemo)(() => temporaryPermissionClient(connection, lifetime.signal), [props.pending]);
+    const child2 = props.useSession((snapshot4) => snapshot4.subagent !== void 0);
+    return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(TemporaryApproval, { pending: props.pending, remote, t: props.t, child: child2 }, props.pending.key);
+  }));
+}
+function TemporaryApproval({ pending, remote, t, child: child2 = false }) {
+  const id3 = (0, import_react7.useId)(), [view, setView] = (0, import_react7.useState)(), [duration, setDuration] = (0, import_react7.useState)("once");
+  const [busy, setBusy] = (0, import_react7.useState)(false), [error, setError] = (0, import_react7.useState)(false);
+  const [scope, setScope] = (0, import_react7.useState)("exact");
+  const identity2 = (0, import_react7.useRef)({ pending, remote, active: true });
+  if (identity2.current.pending !== pending || identity2.current.remote !== remote) identity2.current = { pending, remote, active: true };
+  const captured = identity2.current, isCurrent = () => captured.active && identity2.current === captured;
+  (0, import_react7.useEffect)(() => {
+    let current2 = true;
+    setView(void 0);
+    setDuration("once");
+    setScope("exact");
+    setError(false);
+    setBusy(false);
+    const delivery2 = pendingDelivery(pending);
+    if (delivery2) void remote.request(pending.sessionId, delivery2).then(async (value2) => {
+      if (!current2) return;
+      setView(value2);
+      if (value2.reusable) await answerWithTemporaryPermit(pending, remote, () => current2);
+    }).catch(() => {
+      if (current2) setError(true);
+    });
+    captured.active = true;
+    return () => {
+      current2 = false;
+      captured.active = false;
+    };
+  }, [pending, remote]);
+  if (!pendingDelivery(pending)) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "dsmm-structured", "aria-label": t("temporaryTitle"), "aria-busy": busy, children: [
+    view && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: view.summary }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: id3, children: t("temporaryDuration") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("select", { id: id3, value: duration, disabled: busy || !pending.answerable, onChange: (event) => {
+          const value2 = durations.find((value3) => value3 === event.currentTarget.value);
+          if (value2) setDuration(value2);
+        }, children: durations.filter((value2) => view.reusable || value2 === "once").map((value2) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: value2, children: t(child2 && value2 === "session" ? "temporaryChildSession" : `temporary:${value2}`) }, value2)) })
+      ] }),
+      !!view.scopes?.length && duration !== "once" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id3}-scope`, children: t("pathScope") }),
+        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("select", { id: `${id3}-scope`, value: scope, disabled: busy || !pending.answerable, onChange: (event) => setScope(event.currentTarget.value), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "exact", children: view.summary }),
+          view.scopes.map((choice3) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: choice3.id, children: choice3.summary }, choice3.id))
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { variant: "primary", disabled: busy || !pending.answerable, onClick: () => {
+        setBusy(true);
+        setError(false);
+        void retainAndAnswer(pending, remote, duration, isCurrent, scope).catch(() => {
+          if (isCurrent()) setError(true);
+        }).finally(() => {
+          if (isCurrent()) setBusy(false);
+        });
+      }, children: t("temporaryApprove") })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("temporaryBoundary") }),
+    view?.tool === "web_fetch" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("temporaryWebBoundary") }),
+    error && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-issue", role: "alert", children: t("temporaryUnavailable") })
+  ] });
+}
+function TemporaryGrants({ sessionId: sessionId2, remote, t, child: child2 = false }) {
+  const [grants2, setGrants] = (0, import_react7.useState)(), [busy, setBusy] = (0, import_react7.useState)(false), [error, setError] = (0, import_react7.useState)(false);
+  const identity2 = (0, import_react7.useRef)({ sessionId: sessionId2, remote, active: true });
+  if (identity2.current.sessionId !== sessionId2 || identity2.current.remote !== remote) identity2.current = { sessionId: sessionId2, remote, active: true };
+  const captured = identity2.current, current2 = () => captured.active && identity2.current === captured;
+  const accept = (value2) => {
+    if (current2()) setGrants(value2);
+  };
+  const fail5 = () => {
+    if (current2()) setError(true);
+  };
+  const finish = () => {
+    if (current2()) setBusy(false);
+  };
+  (0, import_react7.useEffect)(() => {
+    let current3 = true;
+    setGrants(void 0);
+    setError(false);
+    void remote.describe(sessionId2).then((value2) => {
+      if (current3) setGrants(value2);
+    }).catch(() => {
+      if (current3) setError(true);
+    });
+    captured.active = true;
+    return () => {
+      current3 = false;
+      captured.active = false;
+    };
+  }, [sessionId2, remote]);
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "dsmm-zone", "aria-label": t("temporaryTitle"), "aria-busy": busy, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { children: t("temporaryTitle") }),
+    grants2?.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("temporaryEmpty") }),
+    grants2?.map((grant) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("fieldset", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("legend", { children: grant.tool }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: grant.summary }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t(child2 && grant.duration === "session" ? "temporaryChildSession" : `temporary:${grant.duration}`) }),
+      grant.tool === "web_fetch" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("temporaryWebBoundary") }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { variant: "outline", disabled: busy, onClick: () => {
+        setBusy(true);
+        setError(false);
+        void remote.revoke(sessionId2, grant.id).then(accept).catch(fail5).finally(finish);
+      }, children: t("temporaryRevoke") })
+    ] }, grant.id)),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { variant: "outline", disabled: busy, onClick: () => {
+      setBusy(true);
+      setError(false);
+      void remote.describe(sessionId2).then(accept).catch(fail5).finally(finish);
+    }, children: t("temporaryRefresh") }),
+    error && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-issue", role: "alert", children: t("temporaryUnavailable") }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("temporaryBoundary") })
+  ] });
+}
+
+// src/client/PermissionsPanel.tsx
+var import_jsx_runtime10 = require("react/jsx-runtime");
 var actions = ["inherit", "allow", "ask", "deny"];
 var kinds = ["outside-read", "shell", "webSearch", "webFetch"];
 var ruleDraft = (rule) => ({ id: rule.id, action: rule.action, match: structuredClone(rule.match) });
 var newMatch = (kind) => kind === "outside-read" ? { kind, path: "", scope: "exact" } : kind === "shell" ? { kind, executable: "", command: "", workingDirectory: "" } : { kind };
-function Issue({ value, t }) {
-  return value === null ? null : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { className: "dsmm-issue", role: "alert", children: [
-    t(`issue:${value}`),
+function Issue({ value: value2, t }) {
+  return value2 === null ? null : /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { className: "dsmm-issue", role: "alert", children: [
+    t(`issue:${value2}`),
     " ",
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: value })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("code", { children: value2 })
   ] });
 }
 function RootState({ state, t }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
       t("root"),
       ": ",
       t(state.scope === "root" && state.connected ? "active" : "unknown")
     ] }),
-    state.scope !== "root" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t(state.scope === "child" ? "child" : "noRoot") }),
-    !state.connected && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("unknown") })
+    state.scope !== "root" && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t(state.scope === "child" ? "child" : "noRoot") }),
+    !state.connected && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("unknown") })
   ] });
 }
-function ActionSelect({ id: id2, value, inherit = true, onChange, disabled, t }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("select", { id: id2, value, disabled, onChange: (event) => {
-    const choice2 = actions.find((value2) => value2 === event.currentTarget.value);
-    if (choice2 !== void 0) onChange(choice2);
-  }, children: actions.filter((value2) => inherit || value2 !== "inherit").map((value2) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: value2, children: t(value2 === "inherit" ? "inherit" : `action:${value2}`) }, value2)) });
+function ActionSelect({ id: id3, value: value2, inherit = true, onChange, disabled, t }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("select", { id: id3, value: value2, disabled, onChange: (event) => {
+    const choice3 = actions.find((value3) => value3 === event.currentTarget.value);
+    if (choice3 !== void 0) onChange(choice3);
+  }, children: actions.filter((value3) => inherit || value3 !== "inherit").map((value3) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: value3, children: t(value3 === "inherit" ? "inherit" : `action:${value3}`) }, value3)) });
 }
 function RuleEditor({ controller, state, t }) {
-  const id2 = (0, import_react7.useId)(), editor = state.draft?.editor;
+  const id3 = (0, import_react8.useId)(), editor = state.draft?.editor;
   if (editor == null) return null;
-  const disabled = !controller.canEdit(state.generation), change = (value) => controller.edit(state.generation, { editor: value });
-  const field = (key, label) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-${key}`, children: t(label) }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Input, { className: "dsmm-input", id: `${id2}-${key}`, required: true, maxLength: 32768, disabled, value: key in editor.match ? String(Reflect.get(editor.match, key)) : "", onChange: (event) => change({ ...editor, match: { ...editor.match, [key]: event.currentTarget.value } }) })
+  const disabled = !controller.canEdit(state.generation), change = (value2) => controller.edit(state.generation, { editor: value2 });
+  const field = (key, label) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { htmlFor: `${id3}-${key}`, children: t(label) }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Input, { className: "dsmm-input", id: `${id3}-${key}`, required: true, maxLength: 32768, disabled, value: key in editor.match ? String(Reflect.get(editor.match, key)) : "", onChange: (event) => change({ ...editor, match: { ...editor.match, [key]: event.currentTarget.value } }) })
   ] });
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("form", { className: "dsmm-structured", "aria-label": t("editor"), onSubmit: (event) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("form", { className: "dsmm-structured", "aria-label": t("editor"), onSubmit: (event) => {
     event.preventDefault();
     controller.stageRule(state.generation);
   }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-id`, children: t("id") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Input, { className: "dsmm-input", id: `${id2}-id`, required: true, maxLength: 256, value: editor.id, disabled, onChange: (event) => change({ ...editor, id: event.currentTarget.value }) })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { htmlFor: `${id3}-id`, children: t("id") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Input, { className: "dsmm-input", id: `${id3}-id`, required: true, maxLength: 256, value: editor.id, disabled, onChange: (event) => change({ ...editor, id: event.currentTarget.value }) })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-action`, children: t("action") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(ActionSelect, { id: `${id2}-action`, value: editor.action, disabled, inherit: false, t, onChange: (action2) => {
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { htmlFor: `${id3}-action`, children: t("action") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(ActionSelect, { id: `${id3}-action`, value: editor.action, disabled, inherit: false, t, onChange: (action2) => {
         if (action2 !== "inherit") change({ ...editor, action: action2 });
       } })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-kind`, children: t("match") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("select", { id: `${id2}-kind`, value: editor.match.kind, disabled, onChange: (event) => {
-        const kind = kinds.find((value) => value === event.currentTarget.value);
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { htmlFor: `${id3}-kind`, children: t("match") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("select", { id: `${id3}-kind`, value: editor.match.kind, disabled, onChange: (event) => {
+        const kind = kinds.find((value2) => value2 === event.currentTarget.value);
         if (kind !== void 0) change({ ...editor, match: newMatch(kind) });
-      }, children: kinds.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: kind, children: t(`kind:${kind}`) }, kind)) })
+      }, children: kinds.map((kind) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: kind, children: t(`kind:${kind}`) }, kind)) })
     ] }),
-    editor.match.kind === "outside-read" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+    editor.match.kind === "outside-read" && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
       field("path", "path"),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-path-scope`, children: t("pathScope") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("select", { id: `${id2}-path-scope`, value: editor.match.scope, disabled, onChange: (event) => {
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { htmlFor: `${id3}-path-scope`, children: t("pathScope") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("select", { id: `${id3}-path-scope`, value: editor.match.scope, disabled, onChange: (event) => {
           const scope = event.currentTarget.value;
           if (editor.match.kind === "outside-read" && (scope === "exact" || scope === "tree")) change({ ...editor, match: { ...editor.match, scope } });
         }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "exact", children: t("exact") }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("option", { value: "tree", children: t("tree") })
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: "exact", children: t("exact") }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: "tree", children: t("tree") })
         ] })
       ] })
     ] }),
-    editor.match.kind === "shell" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
+    editor.match.kind === "shell" && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
       field("executable", "executable"),
       field("command", "command"),
       field("workingDirectory", "cwd")
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-actions", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "submit", variant: "outline", disabled, children: t("stage") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { editor: null }), children: t("cancel") })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-actions", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "submit", variant: "outline", disabled, children: t("stage") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { editor: null }), children: t("cancel") })
     ] })
   ] });
 }
 function RuleRecords({ controller, state, t }) {
   const records = state.rules?.snapshot.policy.rules ?? state.base?.policy.rules;
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-structured", children: [
-    records?.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("noRules") }),
-    records?.map((rule) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("fieldset", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("legend", { children: rule.id }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-structured", children: [
+    records?.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("noRules") }),
+    records?.map((rule) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("fieldset", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("legend", { children: rule.id }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
         t(rule.revoked ? "revoked" : "active"),
         " · ",
         t(`action:${rule.action}`)
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("match") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t(`kind:${rule.match.kind}`) }),
-        rule.match.kind === "outside-read" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("path") }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dd", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dl", { className: "dsmm-child-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("match") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t(`kind:${rule.match.kind}`) }),
+        rule.match.kind === "outside-read" && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("path") }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dd", { children: [
             rule.match.path,
             " · ",
             t(rule.match.scope)
           ] })
         ] }),
-        rule.match.kind === "shell" && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("executable") }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: rule.match.executable }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("command") }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: rule.match.command }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("cwd") }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: rule.match.workingDirectory })
+        rule.match.kind === "shell" && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("executable") }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: rule.match.executable }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("command") }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("code", { children: rule.match.command }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("cwd") }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: rule.match.workingDirectory })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("source") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t(rule.source.kind === "operator" ? "operator" : "imported") })
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("source") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t(rule.source.kind === "operator" ? "operator" : "imported") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled: !controller.canEdit(state.generation) || state.draft === null, onClick: () => controller.edit(state.generation, { editor: ruleDraft(rule) }), children: t("editRule") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled: !controller.canEdit(state.generation) || state.draft === null || rule.revoked || state.draft.revoke.includes(rule.id), onClick: () => controller.stageRevoke(state.generation, rule.id), children: t("stageRevoke") })
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled: !controller.canEdit(state.generation) || state.draft === null, onClick: () => controller.edit(state.generation, { editor: ruleDraft(rule) }), children: t("editRule") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled: !controller.canEdit(state.generation) || state.draft === null || rule.revoked || state.draft.revoke.includes(rule.id), onClick: () => controller.stageRevoke(state.generation, rule.id), children: t("stageRevoke") })
       ] })
     ] }, rule.id))
   ] });
 }
 function PermissionCoverage({ state, t }) {
-  const value = state.rules?.capabilities;
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "dsmm-structured", "aria-label": t("coverageTitle"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { children: t("coverageTitle") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("coverage") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("registrationUnresolved") }),
-    value === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("coverageUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("coverageRuntime") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dd", { children: [
-          t(value.runtime.state),
+  const value2 = state.rules?.capabilities;
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-structured", "aria-label": t("coverageTitle"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h3", { children: t("coverageTitle") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("coverage") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("registrationUnresolved") }),
+    value2 === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("coverageUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dl", { className: "dsmm-child-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("coverageRuntime") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dd", { children: [
+          t(value2.runtime.state),
           " · ",
           t("mounted"),
           ": ",
-          t(value.runtime.mounted ? "on" : "off")
+          t(value2.runtime.mounted ? "on" : "off")
         ] })
       ] }),
-      value.runtime.restartRequired && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("restart") }),
-      value.tools.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("coverageEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { className: "dsmm-profile-list", children: value.tools.map((tool) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("li", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolName") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: tool.name }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolKind") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children: tool.kind }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolApproval") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("nativeOnce") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolMemory") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("notProvided") })
+      value2.runtime.restartRequired && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("restart") }),
+      value2.tools.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("coverageEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("ul", { className: "dsmm-profile-list", children: value2.tools.map((tool) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("li", { children: /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dl", { className: "dsmm-child-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("toolName") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("code", { children: tool.name }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("toolKind") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("code", { children: tool.kind }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("toolApproval") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("nativeOnce") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("toolMemory") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("notProvided") })
       ] }) }, tool.name)) }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("outsideReads") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:outsideReads") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("finalInode") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:finalInode") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("toolMemory") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:scopedMemory") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("webFetch") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:webFetch") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("searchDestinations") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:webSearchDestinations") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("proxyBinding") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:proxyAddressBinding") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("shellSockets") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:shellSockets") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("providerAuthMcp") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("limit:providerAuthMcp") })
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dl", { className: "dsmm-child-meta", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("outsideReads") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("limit:outsideReads") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("finalInode") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("limit:finalInode") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("toolMemory") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("limit:scopedMemory") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("webFetch") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("limit:webFetch") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("searchDestinations") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("limit:webSearchDestinations") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("proxyBinding") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("limit:proxyAddressBinding") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("shellSockets") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("limit:shellSockets") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("providerAuthMcp") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("limit:providerAuthMcp") })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("pathEvidence") })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("pathEvidence") })
   ] });
 }
 function PermissionRulesEditor({ controller, state, t }) {
-  const id2 = (0, import_react7.useId)(), draft2 = state.draft, disabled = !controller.canEdit(state.generation), value = state.rules;
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "dsmm-zone", "aria-label": t("rules"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { children: t("rules") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("rulesHint") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("networkLimit") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("matchHint") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Issue, { value: state.rulesIssue, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("observedPolicy") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("profileOverrideState") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t("profileOverrideUnknown") })
+  const id3 = (0, import_react8.useId)(), draft2 = state.draft, disabled = !controller.canEdit(state.generation), value2 = state.rules;
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-zone", "aria-label": t("rules"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h3", { children: t("rules") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("rulesHint") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("networkLimit") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("matchHint") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(Issue, { value: state.rulesIssue, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("observedPolicy") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dl", { className: "dsmm-child-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("profileOverrideState") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t("profileOverrideUnknown") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("runtime") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: value === null ? t("unknown") : t(value.runtime.state) }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: t("mounted") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: value === null ? t("unknown") : t(value.runtime.mounted ? "on" : "off") })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dl", { className: "dsmm-child-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("runtime") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: value2 === null ? t("unknown") : t(value2.runtime.state) }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: t("mounted") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: value2 === null ? t("unknown") : t(value2.runtime.mounted ? "on" : "off") })
     ] }),
-    value?.runtime.restartRequired && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("restart") }),
-    disabled && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t(state.reading ? "reading" : "rulesUnavailable") }),
-    state.base !== null && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dl", { className: "dsmm-child-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: "permissionControl.enabled" }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("dd", { children: [
+    value2?.runtime.restartRequired && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("restart") }),
+    disabled && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t(state.reading ? "reading" : "rulesUnavailable") }),
+    state.base !== null && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dl", { className: "dsmm-child-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: "permissionControl.enabled" }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dd", { children: [
         t(state.base.policy.enabled ? "on" : "off"),
         " · ",
         t("coldHint")
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dt", { children: "permissionControl.nativeCommands.enabled" }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("dd", { children: t(state.base.policy.nativeCommands.enabled ? "on" : "off") })
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: "permissionControl.nativeCommands.enabled" }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dd", { children: t(state.base.policy.nativeCommands.enabled ? "on" : "off") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(PermissionCoverage, { state, t }),
-    draft2 !== null && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-outside`, children: t("outsideReads") }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(ActionSelect, { id: `${id2}-outside`, value: draft2.outsideReads, disabled, t, onChange: (outsideReads) => controller.edit(state.generation, { outsideReads }) })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(PermissionCoverage, { state, t }),
+    draft2 !== null && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { htmlFor: `${id3}-outside`, children: t("outsideReads") }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(ActionSelect, { id: `${id3}-outside`, value: draft2.outsideReads, disabled, t, onChange: (outsideReads) => controller.edit(state.generation, { outsideReads }) })
       ] }),
-      ["webSearch", "webFetch"].map((key) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("fieldset", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("legend", { children: t(key) }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("label", { className: "dsmm-actions", htmlFor: `${id2}-${key}-enabled`, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("input", { type: "checkbox", id: `${id2}-${key}-enabled`, checked: draft2[key].enabled, disabled, onChange: (event) => controller.edit(state.generation, { [key]: { ...draft2[key], enabled: event.currentTarget.checked } }) }),
+      ["webSearch", "webFetch"].map((key) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("fieldset", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("legend", { children: t(key) }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("label", { className: "dsmm-actions", htmlFor: `${id3}-${key}-enabled`, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("input", { type: "checkbox", id: `${id3}-${key}-enabled`, checked: draft2[key].enabled, disabled, onChange: (event) => controller.edit(state.generation, { [key]: { ...draft2[key], enabled: event.currentTarget.checked } }) }),
           t("enabled")
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("label", { htmlFor: `${id2}-${key}-rule`, children: t("rule") }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(ActionSelect, { id: `${id2}-${key}-rule`, value: draft2[key].rule, disabled, t, onChange: (rule) => controller.edit(state.generation, { [key]: { ...draft2[key], rule } }) })
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { htmlFor: `${id3}-${key}-rule`, children: t("rule") }),
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(ActionSelect, { id: `${id3}-${key}-rule`, value: draft2[key].rule, disabled, t, onChange: (rule) => controller.edit(state.generation, { [key]: { ...draft2[key], rule } }) })
         ] })
       ] }, key)),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled: disabled || draft2.editor !== null, onClick: () => controller.edit(state.generation, { editor: { id: "", action: "ask", match: newMatch("outside-read") } }), children: t("newRule") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RuleEditor, { controller, state, t }),
-      (draft2.upsert.length > 0 || draft2.revoke.length > 0) && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-structured", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { children: t("staged") }),
-        draft2.upsert.map((row) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { children: [
-            row.id,
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled: disabled || draft2.editor !== null, onClick: () => controller.edit(state.generation, { editor: { id: "", action: "ask", match: newMatch("outside-read") } }), children: t("newRule") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(RuleEditor, { controller, state, t }),
+      (draft2.upsert.length > 0 || draft2.revoke.length > 0) && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-structured", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h3", { children: t("staged") }),
+        draft2.upsert.map((row2) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+            row2.id,
             " · ",
-            t(`kind:${row.match.kind}`),
+            t(`kind:${row2.match.kind}`),
             " · ",
-            t(`action:${row.action}`)
+            t(`action:${row2.action}`)
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { upsert: draft2.upsert.filter((rule) => rule.id !== row.id) }), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { upsert: draft2.upsert.filter((rule) => rule.id !== row2.id) }), children: [
             t("unstage"),
             ": ",
-            row.id
+            row2.id
           ] })
-        ] }, row.id)),
-        draft2.revoke.map((ruleId) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-field", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("p", { children: [
+        ] }, row2.id)),
+        draft2.revoke.map((ruleId) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
             t("stageRevoke"),
             ": ",
             ruleId
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { revoke: draft2.revoke.filter((id3) => id3 !== ruleId) }), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled, onClick: () => controller.edit(state.generation, { revoke: draft2.revoke.filter((id4) => id4 !== ruleId) }), children: [
             t("unstage"),
             ": ",
             ruleId
@@ -6947,81 +7398,92 @@ function PermissionRulesEditor({ controller, state, t }) {
         ] }, ruleId))
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RuleRecords, { state, controller, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dsmm-actions", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "primary", disabled: !controller.canSave(state.generation), onClick: () => void controller.save(state.generation), children: t("save") }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_dsh_client_ui_primitives7.Button, { type: "button", variant: "outline", disabled: state.scope !== "root" || !state.connected || state.reading || state.busy !== null, onClick: () => void controller.refresh(state.generation, true), children: t("discard") })
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(RuleRecords, { state, controller, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-actions", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "primary", disabled: !controller.canSave(state.generation), onClick: () => void controller.save(state.generation), children: t("save") }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled: state.scope !== "root" || !state.connected || state.reading || state.busy !== null, onClick: () => void controller.refresh(state.generation, true), children: t("discard") })
     ] }),
-    state.dirty && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { children: t("dirty") })
+    state.dirty && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("dirty") })
   ] });
 }
-function PermissionsPanel({ controller, t, sessionId: sessionId2 }) {
-  const state = (0, import_react7.useSyncExternalStore)(controller.store.subscribe, controller.store.getSnapshot);
-  (0, import_react7.useEffect)(() => controller.watch(), [controller]);
-  if (sessionId2 !== void 0 && sessionId2 !== state.sessionId) return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", role: "status", children: t("rulesUnavailable") });
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("section", { className: "dsmm-profiles dsmm-children dsmm-permissions", "data-dsmm-permissions": true, "aria-label": t("title"), "aria-busy": state.reading || state.busy !== null, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { children: t("title") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(RootState, { state, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-hint", children: t("nativeApproval") }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.busy !== null ? t("busy") : state.reading ? t("reading") : state.notice === null ? "" : t(state.notice) }),
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(PermissionRulesEditor, { controller, state, t })
+function PermissionsPanel({ controller, t, sessionId: sessionId2, temporary }) {
+  const state = (0, import_react8.useSyncExternalStore)(controller.store.subscribe, controller.store.getSnapshot);
+  (0, import_react8.useEffect)(() => controller.watch(), [controller]);
+  if (sessionId2 !== void 0 && sessionId2 !== state.sessionId) return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", role: "status", children: t("rulesUnavailable") });
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-profiles dsmm-children dsmm-permissions", "data-dsmm-permissions": true, "aria-label": t("title"), "aria-busy": state.reading || state.busy !== null, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h2", { children: t("title") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(RootState, { state, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("nativeApproval") }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.busy !== null ? t("busy") : state.reading ? t("reading") : state.notice === null ? "" : t(state.notice) }),
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(PermissionRulesEditor, { controller, state, t }),
+    temporary && sessionId2 && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(TemporaryGrants, { remote: temporary, sessionId: sessionId2, t }, sessionId2)
   ] });
 }
 
+// src/client/PermissionPanelEntry.tsx
+var import_jsx_runtime11 = require("react/jsx-runtime");
+var absent = { getSnapshot: () => void 0, subscribe: () => () => {
+} };
+function PermissionPanelEntry({ controller, temporary, t }) {
+  const scope = (0, import_react9.useSyncExternalStore)(controller.store.subscribe, controller.store.getSnapshot);
+  const source = temporary ?? absent;
+  const remote = (0, import_react9.useSyncExternalStore)(source.subscribe, source.getSnapshot);
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(PermissionsPanel, { controller, sessionId: scope.sessionId ?? void 0, temporary: remote, t });
+}
+
 // src/client/DeploymentPage.tsx
-var import_jsx_runtime10 = require("react/jsx-runtime");
+var import_jsx_runtime12 = require("react/jsx-runtime");
 function ScopeSave({ controller, workspace, refreshOnly = false, t }) {
-  const state = (0, import_react8.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
+  const state = (0, import_react10.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
   const pending = [...new Set(controller.pendingPaths().map(moduleFor))];
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-scope-save", "aria-label": t(refreshOnly ? "refresh" : "saveScope"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: refreshOnly ? state.busy ? t("loading") : "" : state.busy ? t("saving") : state.refreshRequired ? t("savedRefreshRequired") : state.saved ? t("saved") : state.dirty ? t("dirty") : "" }),
-    !refreshOnly && pending.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-scope-save", "aria-label": t(refreshOnly ? "refresh" : "saveScope"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: refreshOnly ? state.busy ? t("loading") : "" : state.busy ? t("saving") : state.refreshRequired ? t("savedRefreshRequired") : state.saved ? t("saved") : state.dirty ? t("dirty") : "" }),
+    !refreshOnly && pending.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
       t("pendingModules"),
       ": ",
       pending.map((module2) => t(moduleTitle(module2))).join(" · ")
     ] }),
-    state.issue !== null && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-issue", role: "alert", children: t(state.issue) }),
-    !refreshOnly && state.invalidFields.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-issue", role: "alert", children: t("invalid") }),
-    controller.layer === "profile" && !controller.canWriteProfile() && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-actions", children: [
-      !refreshOnly && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "primary", disabled: !controller.canSave(), onClick: () => void (workspace?.save() ?? controller.save()), children: t(controller.layer === "global" ? "saveGlobal" : "saveProfile") }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => void controller.refresh(), children: t("refresh") }),
-      !refreshOnly && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled: state.busy || !state.dirty && state.issue === null && !state.refreshRequired, onClick: () => void controller.refresh(true), children: t("discard") })
+    state.issue !== null && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-issue", role: "alert", children: t(state.issue) }),
+    !refreshOnly && state.invalidFields.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-issue", role: "alert", children: t("invalid") }),
+    controller.layer === "profile" && !controller.canWriteProfile() && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-actions", children: [
+      !refreshOnly && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives9.Button, { type: "button", variant: "primary", disabled: !controller.canSave(), onClick: () => void (workspace?.save() ?? controller.save()), children: t(controller.layer === "global" ? "saveGlobal" : "saveProfile") }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives9.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => void controller.refresh(), children: t("refresh") }),
+      !refreshOnly && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives9.Button, { type: "button", variant: "outline", disabled: state.busy || !state.dirty && state.issue === null && !state.refreshRequired, onClick: () => void controller.refresh(true), children: t("discard") })
     ] })
   ] });
 }
-function NativeRuntimeState({ value, t }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-availability", "aria-label": t("nativeRuntimeState"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h3", { children: t("nativeRuntimeState") }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+function NativeRuntimeState({ value: value2, t }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("details", { className: "dsmm-availability", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("summary", { children: t("nativeRuntimeState") }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
       t("nativeRuntimeBinding"),
       ": ",
-      t(value?.binding === "stock" ? "nativeRuntimeStock" : value?.binding === "unavailable" ? "nativeRuntimeUnavailable" : "unknown")
+      t(value2?.binding === "stock" ? "nativeRuntimeStock" : value2?.binding === "unavailable" ? "nativeRuntimeUnavailable" : "unknown")
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
       t("nativeRuntimeFence"),
       ": ",
-      value === void 0 ? t("unknown") : t(value.deliveryFenceReady ? "on" : "off"),
+      value2 === void 0 ? t("unknown") : t(value2.deliveryFenceReady ? "on" : "off"),
       " · ",
       t("nativeRuntimeRestart"),
       ": ",
-      value === void 0 ? t("unknown") : t(value.restartRequired ? "on" : "off")
+      value2 === void 0 ? t("unknown") : t(value2.restartRequired ? "on" : "off")
     ] }),
-    value?.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t(`nativeRuntimeReason-${value.reason}`) }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("nativeRuntimeReadinessHint") })
+    value2?.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t(`nativeRuntimeReason-${value2.reason}`) })
   ] });
 }
 function StateInspector({ controller, t }) {
-  const { snapshot: snapshot4, session, dirty, issue } = (0, import_react8.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
-  if (snapshot4 === null) return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("unavailable") });
+  const { snapshot: snapshot4, session, dirty, issue } = (0, import_react10.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
+  if (snapshot4 === null) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("unavailable") });
   const admitted = session?.configuration ?? null;
-  const source = (value2) => t(value2 === "profile" ? "profileSource" : value2 === "global" ? "globalSource" : value2 === "defaults" ? "defaultsSource" : value2 === "named-session" ? "namedSource" : value2 === "startup" ? "startupSource" : value2 === "deployment" ? "deploymentCapture" : value2 === "mixed" ? "mixedSource" : "unknown");
-  const value = (layer, path) => layer === void 0 ? t("unknown") : at(layer, path.split(".")) === void 0 ? t("absent") : displayValue(at(layer, path.split(".")), t);
+  const source = (value3) => t(value3 === "profile" ? "profileSource" : value3 === "global" ? "globalSource" : value3 === "defaults" ? "defaultsSource" : value3 === "named-session" ? "namedSource" : value3 === "startup" ? "startupSource" : value3 === "deployment" ? "deploymentCapture" : value3 === "mixed" ? "mixedSource" : "unknown");
+  const value2 = (layer, path) => layer === void 0 ? t("unknown") : at(layer, path.split(".")) === void 0 ? t("absent") : displayValue(at(layer, path.split(".")), t);
   const restart = (snapshot4.nextRoot?.restartRequired ?? []).filter((path) => visibleDeploymentPath(path.split(".")));
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-structured", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { role: "status", children: session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : t("sessionObserved") }),
-    (dirty || issue !== null) && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("inspectorStale") }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-structured", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { role: "status", children: session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : t("sessionObserved") }),
+    (dirty || issue !== null) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("inspectorStale") }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
       t("globalSource"),
       ": ",
       t(configurationVersionState(snapshot4.globalRevision)),
@@ -7030,60 +7492,60 @@ function StateInspector({ controller, t }) {
       ": ",
       t(configurationVersionState(snapshot4.nativeRevision))
     ] }),
-    snapshot4.subagentRuntime !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(NativeRuntimeState, { value: snapshot4.subagentRuntime, t }),
-    snapshot4.modules.map((module2) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-zone", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h3", { children: module2.descriptor.label }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+    snapshot4.subagentRuntime !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(NativeRuntimeState, { value: snapshot4.subagentRuntime, t }),
+    snapshot4.modules.map((module2) => /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-zone", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("h3", { children: module2.descriptor.label }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
         t("desired"),
         ": ",
         t(module2.desired.enabled ? "on" : "off"),
         " · ",
         source(module2.desired.source)
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
         t("startup"),
         ": ",
         module2.startupMounted == null ? t("unknown") : t(module2.startupMounted ? "on" : "off")
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
         t("next"),
         ": ",
         module2.nextRoot.admitted == null ? t("unknown") : t(module2.nextRoot.admitted ? "on" : "off")
       ] }),
-      module2.pending && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("pending") })
+      module2.pending && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("pending") })
     ] }, module2.descriptor.id)),
-    inspectorPaths(snapshot4, admitted).map((path) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dl", { className: "dsmm-deployment-state", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("dt", { children: path }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dd", { children: [
+    inspectorPaths(snapshot4, admitted).map((path) => /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dl", { className: "dsmm-deployment-state", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: path }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
         t("desired"),
         ": ",
-        value(snapshot4.desired, path),
+        value2(snapshot4.desired, path),
         " · ",
         source(snapshot4.sources[path])
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dd", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
         t("startup"),
         ": ",
-        value(snapshot4.startup, path),
+        value2(snapshot4.startup, path),
         " · ",
         source(snapshot4.startupSources?.[path])
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dd", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
         t("next"),
         ": ",
-        value(snapshot4.nextRoot?.settings, path),
+        value2(snapshot4.nextRoot?.settings, path),
         " · ",
         source(snapshot4.nextRoot?.sources[path])
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("dd", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
         t("session"),
         ": ",
-        value(admitted?.settings, path),
+        value2(admitted?.settings, path),
         " · ",
         source(admitted?.sources[path])
       ] })
     ] }, path)),
-    restart.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("p", { children: [
+    restart.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
       t("pending"),
       ": ",
       restart.join(", ")
@@ -7092,26 +7554,27 @@ function StateInspector({ controller, t }) {
 }
 function DeploymentPage(props) {
   const workspace = props.workspace ?? deploymentWorkspace(props.core, props.permissions);
-  const navigation = (0, import_react8.useSyncExternalStore)(workspace.subscribe, workspace.getSnapshot);
-  const core = (0, import_react8.useSyncExternalStore)(props.core.subscribe, props.core.getSnapshot);
+  const navigation = (0, import_react10.useSyncExternalStore)(workspace.subscribe, workspace.getSnapshot);
+  const core = (0, import_react10.useSyncExternalStore)(props.core.subscribe, props.core.getSnapshot);
   const controller = workspace.controller() ?? props.core;
-  const state = (0, import_react8.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
-  const id2 = (0, import_react8.useId)(), heading = (0, import_react8.useRef)(null), triggers = (0, import_react8.useRef)(/* @__PURE__ */ new Map()), previous = (0, import_react8.useRef)(null);
-  const scopeControl = (0, import_react8.useRef)(null), confirmation = (0, import_react8.useRef)(null);
-  const resume = (0, import_react8.useRef)(null);
+  const state = (0, import_react10.useSyncExternalStore)(controller.subscribe, controller.getSnapshot);
+  const id3 = (0, import_react10.useId)(), heading = (0, import_react10.useRef)(null), triggers = (0, import_react10.useRef)(/* @__PURE__ */ new Map()), previous = (0, import_react10.useRef)(null);
+  const scopeControl = (0, import_react10.useRef)(null), confirmation = (0, import_react10.useRef)(null);
+  const resume = (0, import_react10.useRef)(null);
+  const disclosures = (0, import_react10.useRef)({ global: /* @__PURE__ */ new Map(), profile: /* @__PURE__ */ new Map() });
   const { t } = props, snapshot4 = state.snapshot ?? core.snapshot, active = navigation.module;
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (props.view === "page") void props.core.refresh();
   }, [props.core, props.view]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (props.forms !== void 0) workspace.bindForms(props.forms);
   }, [workspace, props.forms]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (active !== null) heading.current?.focus();
     else if (previous.current !== null) triggers.current.get(previous.current)?.focus();
     previous.current = active;
   }, [active]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react10.useEffect)(() => {
     if (navigation.pending !== null) {
       resume.current = { element: document.activeElement, scope: navigation.scope, module: active };
       confirmation.current?.focus();
@@ -7124,30 +7587,29 @@ function DeploymentPage(props) {
       else if (from2.scope !== navigation.scope) scopeControl.current?.focus();
     }
   }, [navigation.pending, navigation.scope, active]);
-  if (props.view === "summary") return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { children: t("summary") });
+  if (props.view === "summary") return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { children: t("summary") });
   const fields = snapshot4 === null || active === null ? [] : moduleFields(scopeSchema(snapshot4, controller.layer), active, controller.layer);
   const modules = CONFIG_MODULES.filter((module2) => module2 === "state" || module2 === "permissions" || snapshot4 === null || moduleFields(snapshot4.schema, module2, "global").length + moduleFields(scopeSchema(snapshot4, "profile"), module2, "profile").length > 0);
-  const scopeActions = /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(ScopeSave, { controller: active === "state" ? props.core : controller, workspace, refreshOnly: active === "state" || workspace.controller() === null, t });
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-profiles dsmm-deployment", "data-dsmm-page": true, "aria-label": t("title"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("description") }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("boundaries") }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { htmlFor: `${id2}-scope`, children: t("scope") }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("select", { ref: scopeControl, id: `${id2}-scope`, value: navigation.scope, disabled: state.busy || navigation.pending !== null, onChange: (event) => {
+  const scopeActions = /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ScopeSave, { controller: active === "state" ? props.core : controller, workspace, refreshOnly: active === "state" || workspace.controller() === null, t });
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-profiles dsmm-deployment", "data-dsmm-page": true, "aria-label": t("title"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("boundaries") }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("label", { htmlFor: `${id3}-scope`, children: t("scope") }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("select", { ref: scopeControl, id: `${id3}-scope`, value: navigation.scope, disabled: state.busy || navigation.pending !== null, onChange: (event) => {
         const scope = event.currentTarget.value;
         if (scope === "global" || scope === "profile") workspace.request({ scope, module: active });
       }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: "global", children: t("global") }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: "profile", children: t("profile") })
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "global", children: t("global") }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "profile", children: t("profile") })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t(navigation.scope === "global" ? "globalHint" : "profileHint") }),
-    navigation.scope === "profile" && (navigation.native === null || !navigation.native.canWriteProfile()) && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-deployment-frame", "data-drawer-open": active !== null, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("nav", { className: "dsmm-module-list", "aria-label": t("modules"), children: modules.map((module2) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { ref: (element) => {
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t(navigation.scope === "global" ? "globalHint" : "profileHint") }),
+    navigation.scope === "profile" && (navigation.native === null || !navigation.native.canWriteProfile()) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("unavailableForm") }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-deployment-frame", "data-drawer-open": active !== null, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("nav", { className: "dsmm-module-list", "aria-label": t("modules"), children: modules.map((module2) => /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives9.Button, { ref: (element) => {
         if (element !== null) triggers.current.set(module2, element);
-      }, type: "button", variant: "outline", disabled: navigation.pending !== null, "aria-expanded": active === module2, "aria-controls": `${id2}-drawer`, onClick: () => workspace.request({ scope: navigation.scope, module: module2 }), children: t(moduleTitle(module2)) }, module2)) }),
-      active !== null && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("aside", { id: `${id2}-drawer`, className: "dsmm-module-drawer", "aria-labelledby": `${id2}-heading`, "data-dsmm-module": active, onKeyDown: (event) => {
+      }, type: "button", variant: "outline", disabled: navigation.pending !== null, "aria-expanded": active === module2, "aria-controls": `${id3}-drawer`, onClick: () => workspace.request({ scope: navigation.scope, module: module2 }), children: t(moduleTitle(module2)) }, module2)) }),
+      active !== null && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("aside", { id: `${id3}-drawer`, className: "dsmm-module-drawer", "aria-labelledby": `${id3}-heading`, "data-dsmm-module": active, onKeyDown: (event) => {
         if (event.key !== "Escape" || event.defaultPrevented) return;
         const target = event.target;
         if (target.tagName === "SELECT" && (!globalThis.CSS?.supports("selector(select:open)") || target.matches("select:open"))) return;
@@ -7155,39 +7617,39 @@ function DeploymentPage(props) {
         if (navigation.pending !== null) workspace.continueEditing();
         else workspace.request({ scope: navigation.scope, module: null });
       }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-drawer-heading", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h2", { id: `${id2}-heading`, ref: heading, tabIndex: -1, children: t(moduleTitle(active)) }),
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => workspace.request({ scope: navigation.scope, module: null }), children: t("close") })
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-drawer-heading", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("h2", { id: `${id3}-heading`, ref: heading, tabIndex: -1, children: t(moduleTitle(active)) }),
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives9.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => workspace.request({ scope: navigation.scope, module: null }), children: t("close") })
         ] }),
-        active === "state" ? /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(StateInspector, { controller: props.core, t }),
+        active === "state" ? /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(StateInspector, { controller: props.core, t }),
           scopeActions
-        ] }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
-          navigation.scope === "profile" && navigation.native === null ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("unavailableForm") }) : state.snapshot === null ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t(state.busy ? "loading" : "unavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { "data-dsmm-layer": controller.layer, "aria-busy": state.busy, className: "dsmm-structured", children: [
-            fields.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("noModuleFields") }),
-            fields.map(([key, schema]) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(Field, { schema, path: [key], controller, t }, key)),
-            active === "run" && controller.layer === "profile" && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(NativeRuntimeState, { value: state.snapshot.subagentRuntime, t })
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
+          navigation.scope === "profile" && navigation.native === null ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("unavailableForm") }) : state.snapshot === null ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t(state.busy ? "loading" : "unavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { "data-dsmm-layer": controller.layer, "aria-busy": state.busy, className: "dsmm-structured", children: [
+            fields.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("noModuleFields") }),
+            fields.map(([key, schema]) => /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(Field, { schema, path: [key], controller, initiallyOpen: fields.length === 1 && active !== "permissions", disclosures: disclosures.current[navigation.scope], t }, `${navigation.scope}:${key}`)),
+            active === "run" && controller.layer === "profile" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(NativeRuntimeState, { value: state.snapshot.subagentRuntime, t })
           ] }),
           scopeActions,
-          active === "permissions" && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-zone", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("h3", { children: t("rootRules") }),
-            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "dsmm-hint", children: t("rootRulesHint") }),
-            workspace.permissions === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("rootRulesUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(PermissionsPanel, { controller: workspace.permissions, t: (key) => Object.hasOwn(permissionEn, key) ? permissionText(t)(key) : key })
+          active === "permissions" && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-zone", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("h3", { children: t("rootRules") }),
+            /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("rootRulesHint") }),
+            workspace.permissions === void 0 ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("rootRulesUnavailable") }) : /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(PermissionPanelEntry, { controller: workspace.permissions, temporary: props.temporaryPermissions, t: props.permissionsT ?? ((key) => Object.hasOwn(permissionEn, key) ? permissionText(t)(key) : key) })
           ] })
         ] })
       ] })
     ] }),
-    navigation.pending !== null && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("section", { className: "dsmm-confirm", role: "group", "aria-label": t("leaveDraft"), onKeyDown: (event) => {
+    navigation.pending !== null && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-confirm", role: "group", "aria-label": t("leaveDraft"), onKeyDown: (event) => {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         workspace.continueEditing();
       }
     }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { children: t("leaveDraft") }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "dsmm-actions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { ref: confirmation, type: "button", variant: "primary", onClick: () => workspace.continueEditing(), children: t("continueEditing") }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", onClick: () => workspace.keepAndNavigate(), children: t("keepDraft") }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(import_dsh_client_ui_primitives8.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => void workspace.discardAndNavigate(), children: t("discardDraft") })
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("leaveDraft") }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-actions", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives9.Button, { ref: confirmation, type: "button", variant: "primary", onClick: () => workspace.continueEditing(), children: t("continueEditing") }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives9.Button, { type: "button", variant: "outline", onClick: () => workspace.keepAndNavigate(), children: t("keepDraft") }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives9.Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => void workspace.discardAndNavigate(), children: t("discardDraft") })
       ] })
     ] })
   ] });
@@ -7211,103 +7673,103 @@ var ROLE_CONTROL_ERROR_FIELDS = ["sessionId", "parentSessionId", "childSessionId
 function fail3() {
   throw new TypeError("Invalid Deepwork child control DTO.");
 }
-function json(value, depth2 = 0, active = /* @__PURE__ */ new Set()) {
+function json(value2, depth2 = 0, active = /* @__PURE__ */ new Set()) {
   if (depth2 > 24) fail3();
-  if (value === null || typeof value === "boolean" || typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "object" || value === null || active.has(value)) fail3();
-  const isArray = Array.isArray(value);
-  if (Object.getPrototypeOf(value) !== (isArray ? Array.prototype : Object.prototype) && (isArray || Object.getPrototypeOf(value) !== null)) fail3();
-  if (Object.getOwnPropertySymbols(value).length) fail3();
-  for (const [key, property2] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+  if (value2 === null || typeof value2 === "boolean" || typeof value2 === "string") return value2;
+  if (typeof value2 === "number" && Number.isFinite(value2)) return value2;
+  if (typeof value2 !== "object" || value2 === null || active.has(value2)) fail3();
+  const isArray = Array.isArray(value2);
+  if (Object.getPrototypeOf(value2) !== (isArray ? Array.prototype : Object.prototype) && (isArray || Object.getPrototypeOf(value2) !== null)) fail3();
+  if (Object.getOwnPropertySymbols(value2).length) fail3();
+  for (const [key, property2] of Object.entries(Object.getOwnPropertyDescriptors(value2))) {
     if (isArray && key === "length") continue;
     if (!Object.hasOwn(property2, "value") || !property2.enumerable || ["__proto__", "prototype", "constructor"].includes(key) || isArray && !/^(0|[1-9][0-9]*)$/u.test(key)) fail3();
   }
-  if (isArray && Object.keys(value).length !== value.length) fail3();
-  active.add(value);
-  const result = isArray ? value.map((child2) => json(child2, depth2 + 1, active)) : Object.fromEntries(Object.entries(value).map(([key, child2]) => [key, json(child2, depth2 + 1, active)]));
-  active.delete(value);
+  if (isArray && Object.keys(value2).length !== value2.length) fail3();
+  active.add(value2);
+  const result = isArray ? value2.map((child2) => json(child2, depth2 + 1, active)) : Object.fromEntries(Object.entries(value2).map(([key, child2]) => [key, json(child2, depth2 + 1, active)]));
+  active.delete(value2);
   return result;
 }
-function object2(value, required, optional2 = []) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) fail3();
-  const row = value;
-  if (required.some((key) => !Object.hasOwn(row, key)) || Object.keys(row).some((key) => !required.includes(key) && !optional2.includes(key))) fail3();
-  return row;
+function object2(value2, required, optional2 = []) {
+  if (typeof value2 !== "object" || value2 === null || Array.isArray(value2)) fail3();
+  const row2 = value2;
+  if (required.some((key) => !Object.hasOwn(row2, key)) || Object.keys(row2).some((key) => !required.includes(key) && !optional2.includes(key))) fail3();
+  return row2;
 }
-function choice(value, choices) {
-  if (!choices.includes(value)) fail3();
-  return value;
+function choice(value2, choices) {
+  if (!choices.includes(value2)) fail3();
+  return value2;
 }
-function text3(value, max) {
-  if (typeof value !== "string" || value.length > max || /[\u0000-\u001f\u007f]/u.test(value) || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(value)) !== value) fail3();
-  return value;
+function text3(value2, max) {
+  if (typeof value2 !== "string" || value2.length > max || /[\u0000-\u001f\u007f]/u.test(value2) || new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(value2)) !== value2) fail3();
+  return value2;
 }
-function identity(value) {
-  if (!isNativeSessionId(value)) fail3();
-  return value;
+function identity(value2) {
+  if (!isNativeSessionId(value2)) fail3();
+  return value2;
 }
-function epoch2(value) {
-  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) fail3();
-  return value;
+function epoch2(value2) {
+  if (typeof value2 !== "string" || !/^[a-f0-9]{64}$/u.test(value2)) fail3();
+  return value2;
 }
-function array(value, max = 4096) {
-  if (!Array.isArray(value) || value.length > max) fail3();
-  return value;
+function array(value2, max = 4096) {
+  if (!Array.isArray(value2) || value2.length > max) fail3();
+  return value2;
 }
-function bool(value) {
-  if (typeof value !== "boolean") fail3();
-  return value;
+function bool(value2) {
+  if (typeof value2 !== "boolean") fail3();
+  return value2;
 }
-function depth(value) {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > 4096) fail3();
-  return value;
+function depth(value2) {
+  if (typeof value2 !== "number" || !Number.isSafeInteger(value2) || value2 < 1 || value2 > 4096) fail3();
+  return value2;
 }
-function availability(value) {
-  const row = object2(value, ["enabled"], ["reason"]);
-  if (row.enabled === true && !Object.hasOwn(row, "reason")) return { enabled: true };
-  if (row.enabled !== false) fail3();
-  return { enabled: false, reason: choice(row.reason, ROLE_CONTROL_DISABLED_REASONS) };
+function availability(value2) {
+  const row2 = object2(value2, ["enabled"], ["reason"]);
+  if (row2.enabled === true && !Object.hasOwn(row2, "reason")) return { enabled: true };
+  if (row2.enabled !== false) fail3();
+  return { enabled: false, reason: choice(row2.reason, ROLE_CONTROL_DISABLED_REASONS) };
 }
-function capabilities(value) {
-  const row = object2(value, ["prompt", "interrupt", "images", "runtime"]);
-  return { prompt: availability(row.prompt), interrupt: availability(row.interrupt), images: availability(row.images), runtime: parseSubagentRuntimeAdmissionView(row.runtime) };
+function capabilities(value2) {
+  const row2 = object2(value2, ["prompt", "interrupt", "images", "runtime"]);
+  return { prompt: availability(row2.prompt), interrupt: availability(row2.interrupt), images: availability(row2.images), runtime: parseSubagentRuntimeAdmissionView(row2.runtime) };
 }
-function child(value) {
-  const row = object2(value, ["id", "parentSessionId", "mode", "activity", "readonly", "controls"], ["label", "invocation", "routeComparison"]);
-  const controls = object2(row.controls, ["prompt", "interrupt"]);
-  const mode = choice(row.mode, ["one-shot", "continuable", "unknown"]);
+function child(value2) {
+  const row2 = object2(value2, ["id", "parentSessionId", "mode", "activity", "readonly", "controls"], ["label", "invocation", "routeComparison"]);
+  const controls = object2(row2.controls, ["prompt", "interrupt"]);
+  const mode = choice(row2.mode, ["one-shot", "continuable", "unknown"]);
   const prompt = availability(controls.prompt), interrupt = availability(controls.interrupt);
-  const readonly = bool(row.readonly);
+  const readonly = bool(row2.readonly);
   if (readonly !== (!prompt.enabled && !interrupt.enabled) || mode !== "continuable" && (prompt.enabled || interrupt.enabled)) fail3();
-  const invocation = Object.hasOwn(row, "invocation") ? parseDsmmInvocationView(row.invocation) : void 0;
-  const routeComparison = Object.hasOwn(row, "routeComparison") ? parseDsmmRoleRouteComparison(row.routeComparison) : void 0;
-  const id2 = identity(row.id);
-  if (invocation !== void 0 && (invocation.childId !== id2 || invocation.mode !== mode)) fail3();
-  if (routeComparison !== void 0 && routeComparison.childId !== id2) fail3();
+  const invocation = Object.hasOwn(row2, "invocation") ? parseDsmmInvocationView(row2.invocation) : void 0;
+  const routeComparison = Object.hasOwn(row2, "routeComparison") ? parseDsmmRoleRouteComparison(row2.routeComparison) : void 0;
+  const id3 = identity(row2.id);
+  if (invocation !== void 0 && (invocation.childId !== id3 || invocation.mode !== mode)) fail3();
+  if (routeComparison !== void 0 && routeComparison.childId !== id3) fail3();
   return {
-    id: id2,
-    parentSessionId: identity(row.parentSessionId),
+    id: id3,
+    parentSessionId: identity(row2.parentSessionId),
     mode,
-    activity: choice(row.activity, ["running", "inactive"]),
+    activity: choice(row2.activity, ["running", "inactive"]),
     readonly,
     controls: { prompt, interrupt },
-    ...Object.hasOwn(row, "label") ? { label: text3(row.label, 120) } : {},
+    ...Object.hasOwn(row2, "label") ? { label: text3(row2.label, 120) } : {},
     ...invocation === void 0 ? {} : { invocation },
     ...routeComparison === void 0 ? {} : { routeComparison }
   };
 }
-function snapshot3(value) {
-  const row = object2(value, ["sessionId", "admissionEpoch", "children", "capabilities"]);
-  const sessionId2 = identity(row.sessionId), admissionEpoch = epoch2(row.admissionEpoch), children = array(row.children).map(child);
+function snapshot3(value2) {
+  const row2 = object2(value2, ["sessionId", "admissionEpoch", "children", "capabilities"]);
+  const sessionId2 = identity(row2.sessionId), admissionEpoch = epoch2(row2.admissionEpoch), children = array(row2.children).map(child);
   if (children.some((child2) => child2.parentSessionId !== sessionId2)) fail3();
-  return { sessionId: sessionId2, admissionEpoch, children, capabilities: capabilities(row.capabilities) };
+  return { sessionId: sessionId2, admissionEpoch, children, capabilities: capabilities(row2.capabilities) };
 }
-function descendants(value) {
-  const row = object2(value, ["sessionId", "admissionEpoch", "descendants"]);
-  const sessionId2 = identity(row.sessionId), admissionEpoch = epoch2(row.admissionEpoch);
-  const entries = array(row.descendants).map((value2) => {
-    const entry = object2(value2, ["kind", "depth"], ["child", "hasChildren", "id", "parentSessionId", "reason"]);
+function descendants(value2) {
+  const row2 = object2(value2, ["sessionId", "admissionEpoch", "descendants"]);
+  const sessionId2 = identity(row2.sessionId), admissionEpoch = epoch2(row2.admissionEpoch);
+  const entries = array(row2.descendants).map((value3) => {
+    const entry = object2(value3, ["kind", "depth"], ["child", "hasChildren", "id", "parentSessionId", "reason"]);
     if (entry.kind === "child") {
       object2(entry, ["kind", "depth", "child", "hasChildren"]);
       const projected = child(entry.child);
@@ -7324,11 +7786,11 @@ function descendants(value) {
   }
   return { sessionId: sessionId2, admissionEpoch, descendants: entries };
 }
-function promptRequest(value) {
-  const row = object2(value, ["requestId", "parentSessionId", "childSessionId", "mode", "delivery", "content"], ["clientTimeZone"]);
-  if (row.mode !== "continuable") fail3();
-  const content2 = array(row.content, Number.MAX_SAFE_INTEGER).map((value2) => {
-    const part = object2(value2, ["type"], ["text", "mediaType", "data", "name"]);
+function promptRequest(value2) {
+  const row2 = object2(value2, ["requestId", "parentSessionId", "childSessionId", "mode", "delivery", "content"], ["clientTimeZone"]);
+  if (row2.mode !== "continuable") fail3();
+  const content2 = array(row2.content, Number.MAX_SAFE_INTEGER).map((value3) => {
+    const part = object2(value3, ["type"], ["text", "mediaType", "data", "name"]);
     if (part.type === "text") {
       object2(part, ["type", "text"]);
       if (typeof part.text !== "string") fail3();
@@ -7345,45 +7807,45 @@ function promptRequest(value) {
   });
   if (content2.length === 0) fail3();
   return {
-    requestId: identity(row.requestId),
-    parentSessionId: identity(row.parentSessionId),
-    childSessionId: identity(row.childSessionId),
+    requestId: identity(row2.requestId),
+    parentSessionId: identity(row2.parentSessionId),
+    childSessionId: identity(row2.childSessionId),
     mode: "continuable",
-    delivery: choice(row.delivery, ["queue", "steer"]),
+    delivery: choice(row2.delivery, ["queue", "steer"]),
     content: content2,
-    ...Object.hasOwn(row, "clientTimeZone") ? { clientTimeZone: text3(row.clientTimeZone, 128) } : {}
+    ...Object.hasOwn(row2, "clientTimeZone") ? { clientTimeZone: text3(row2.clientTimeZone, 128) } : {}
   };
 }
-function interruptRequest(value) {
-  const row = object2(value, ["parentSessionId", "childSessionId", "mode"]);
-  if (row.mode !== "continuable") fail3();
-  return { parentSessionId: identity(row.parentSessionId), childSessionId: identity(row.childSessionId), mode: "continuable" };
+function interruptRequest(value2) {
+  const row2 = object2(value2, ["parentSessionId", "childSessionId", "mode"]);
+  if (row2.mode !== "continuable") fail3();
+  return { parentSessionId: identity(row2.parentSessionId), childSessionId: identity(row2.childSessionId), mode: "continuable" };
 }
-function promptReceipt(value) {
-  const row = object2(value, ["messageId"]);
-  return { messageId: identity(row.messageId) };
+function promptReceipt(value2) {
+  const row2 = object2(value2, ["messageId"]);
+  return { messageId: identity(row2.messageId) };
 }
-function interruptReceipt(value) {
-  const row = object2(value, ["accepted"]);
-  if (row.accepted !== true) fail3();
+function interruptReceipt(value2) {
+  const row2 = object2(value2, ["accepted"]);
+  if (row2.accepted !== true) fail3();
   return { accepted: true };
 }
-function errorInfo2(value) {
-  const row = object2(value, ["code"], ["field", "reason"]);
+function errorInfo2(value2) {
+  const row2 = object2(value2, ["code"], ["field", "reason"]);
   return {
-    code: choice(row.code, ROLE_CONTROL_ERROR_CODES),
-    ...Object.hasOwn(row, "field") ? { field: choice(row.field, ROLE_CONTROL_ERROR_FIELDS) } : {},
-    ...Object.hasOwn(row, "reason") ? { reason: choice(row.reason, ROLE_CONTROL_DISABLED_REASONS) } : {}
+    code: choice(row2.code, ROLE_CONTROL_ERROR_CODES),
+    ...Object.hasOwn(row2, "field") ? { field: choice(row2.field, ROLE_CONTROL_ERROR_FIELDS) } : {},
+    ...Object.hasOwn(row2, "reason") ? { reason: choice(row2.reason, ROLE_CONTROL_DISABLED_REASONS) } : {}
   };
 }
-var parseRoleControlErrorInfo = (value) => errorInfo2(json(value));
-var parseChildSessionSnapshot = (value) => snapshot3(json(value));
-var parseRoleControlDescendants = (value) => descendants(json(value));
-var parseRoleControlPromptRequest = (value) => promptRequest(json(value));
-function codec2(symbol, parse3) {
-  return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse: (value) => parse3(json(value)) }) };
+var parseRoleControlErrorInfo = (value2) => errorInfo2(json(value2));
+var parseChildSessionSnapshot = (value2) => snapshot3(json(value2));
+var parseRoleControlDescendants = (value2) => descendants(json(value2));
+var parseRoleControlPromptRequest = (value2) => promptRequest(json(value2));
+function codec3(symbol, parse3) {
+  return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse: (value2) => parse3(json(value2)) }) };
 }
-function descriptor2(method, result, request) {
+function descriptor3(method, result, request2) {
   return {
     id: `@dsmm/dsmm-children#dsmmChildren/${method}`,
     service: "dsmmChildren",
@@ -7391,17 +7853,17 @@ function descriptor2(method, result, request) {
     method,
     invocation: { kind: "direct" },
     parameters: [
-      { name: "sessionId", wire: "sessionId", source: "json", codec: codec2("ChildControlSessionId", identity) },
-      ...request === void 0 ? [] : [{ name: "request", wire: "request", source: "json", codec: request }]
+      { name: "sessionId", wire: "sessionId", source: "json", codec: codec3("ChildControlSessionId", identity) },
+      ...request2 === void 0 ? [] : [{ name: "request", wire: "request", source: "json", codec: request2 }]
     ],
     result
   };
 }
 var ROLE_CONTROL_REMOTE = { package: "@dsmm/dsmm-children", descriptors: [
-  descriptor2("describe", codec2("ChildSessionSnapshot", snapshot3)),
-  descriptor2("descendants", codec2("RoleControlDescendantsSnapshot", descendants)),
-  descriptor2("prompt", codec2("SubagentPromptReceipt", promptReceipt), codec2("SubagentPromptRequest", promptRequest)),
-  descriptor2("interrupt", codec2("SubagentInterruptReceipt", interruptReceipt), codec2("RoleControlInterruptRequest", interruptRequest))
+  descriptor3("describe", codec3("ChildSessionSnapshot", snapshot3)),
+  descriptor3("descendants", codec3("RoleControlDescendantsSnapshot", descendants)),
+  descriptor3("prompt", codec3("SubagentPromptReceipt", promptReceipt), codec3("SubagentPromptRequest", promptRequest)),
+  descriptor3("interrupt", codec3("SubagentInterruptReceipt", interruptReceipt), codec3("RoleControlInterruptRequest", interruptRequest))
 ] };
 var ROLE_CONTROL_HOST = { package: ROLE_CONTROL_REMOTE.package, face: "host", schemas: [], model: { services: [], events: [], objects: [] }, invocations: ROLE_CONTROL_REMOTE.descriptors };
 
@@ -7409,27 +7871,27 @@ var ROLE_CONTROL_HOST = { package: ROLE_CONTROL_REMOTE.package, face: "host", sc
 function fail4() {
   throw new TypeError("Invalid permission DTO.");
 }
-function text4(value, max = 512) {
-  if (typeof value !== "string" || value.length === 0 || value.length > max || /[\u0000-\u001f\u007f]/u.test(value)) fail4();
-  return value;
+function text4(value2, max = 512) {
+  if (typeof value2 !== "string" || value2.length === 0 || value2.length > max || /[\u0000-\u001f\u007f]/u.test(value2)) fail4();
+  return value2;
 }
-function parsePermissionSessionId(value) {
-  return text4(value, 256);
+function parsePermissionSessionId(value2) {
+  return text4(value2, 256);
 }
-function parseRuntime(value) {
-  const runtime = permissionRuleRow(value, ["savedRevision", "runtimeRevision", "state", "mounted", "restartRequired"]);
+function parseRuntime(value2) {
+  const runtime = permissionRuleRow(value2, ["savedRevision", "runtimeRevision", "state", "mounted", "restartRequired"]);
   if (!["synced", "updating", "unsynced"].includes(runtime.state) || typeof runtime.mounted !== "boolean" || typeof runtime.restartRequired !== "boolean") fail4();
   return { savedRevision: permissionRevision(runtime.savedRevision), runtimeRevision: permissionRevision(runtime.runtimeRevision), state: runtime.state, mounted: runtime.mounted, restartRequired: runtime.restartRequired };
 }
-function parseCapabilities(value) {
-  const input = permissionRuleRow(value, ["limits", "runtime", "tools"]);
+function parseCapabilities(value2) {
+  const input = permissionRuleRow(value2, ["limits", "runtime", "tools"]);
   const limits = permissionRuleRow(input.limits, ["outsideReads", "finalInode", "scopedMemory", "webFetch", "webSearchDestinations", "proxyAddressBinding", "shellSockets", "providerAuthMcp"]);
   if (limits.outsideReads !== "tool-call-boundary" || limits.finalInode !== false || limits.scopedMemory !== "not-provided-by-native-rules" || limits.webFetch !== "native-public-only" || limits.webSearchDestinations !== "unsupported" || limits.proxyAddressBinding !== "native-proxy-dependent" || limits.shellSockets !== "native-executor-dependent" || limits.providerAuthMcp !== "not-covered") fail4();
   if (!Array.isArray(input.tools) || input.tools.length > 1024) fail4();
   const tools = [];
   const names = /* @__PURE__ */ new Set();
-  for (const value2 of input.tools) {
-    const tool = permissionRuleRow(value2, ["name", "kind", "approval", "scopedMemory"]), name = text4(tool.name);
+  for (const value3 of input.tools) {
+    const tool = permissionRuleRow(value3, ["name", "kind", "approval", "scopedMemory"]), name = text4(tool.name);
     if (!["read", "glob", "grep", "shell", "webSearch", "webFetch"].includes(tool.kind) || tool.approval !== "native-once" || tool.scopedMemory !== false || names.has(name)) fail4();
     names.add(name);
     tools.push({ name, kind: tool.kind, approval: "native-once", scopedMemory: false });
@@ -7445,16 +7907,16 @@ function parseCapabilities(value) {
     providerAuthMcp: "not-covered"
   }, runtime: parseRuntime(input.runtime), tools };
 }
-function parsePermissionRulesResult(value) {
-  const input = permissionRuleRow(value, ["snapshot", "runtime"], ["capabilities"]), snapshot4 = permissionRuleRow(input.snapshot, ["revision", "policy"]);
+function parsePermissionRulesResult(value2) {
+  const input = permissionRuleRow(value2, ["snapshot", "runtime"], ["capabilities"]), snapshot4 = permissionRuleRow(input.snapshot, ["revision", "policy"]);
   return {
     snapshot: { revision: permissionRevision(snapshot4.revision), policy: resolvePermissionControl(snapshot4.policy) },
     runtime: parseRuntime(input.runtime),
     ...Object.hasOwn(input, "capabilities") ? { capabilities: parseCapabilities(input.capabilities) } : {}
   };
 }
-var codec3 = (name, parse3) => ({ mode: "strict", typeSymbol: `@dsmm/dsmm#${name}`, create: () => ({ parse: parse3 }) });
-function descriptor3(method, result, request) {
+var codec4 = (name, parse3) => ({ mode: "strict", typeSymbol: `@dsmm/dsmm#${name}`, create: () => ({ parse: parse3 }) });
+function descriptor4(method, result, request2) {
   return {
     id: `@dsmm/dsmm-permissions#dsmmPermissions/${method}`,
     service: "dsmmPermissions",
@@ -7462,31 +7924,31 @@ function descriptor3(method, result, request) {
     method,
     invocation: { kind: "direct" },
     parameters: [
-      { name: "sessionId", wire: "sessionId", source: "json", codec: codec3("PermissionSessionId", parsePermissionSessionId) },
-      ...request === void 0 ? [] : [{ name: "request", wire: "request", source: "json", codec: request }]
+      { name: "sessionId", wire: "sessionId", source: "json", codec: codec4("PermissionSessionId", parsePermissionSessionId) },
+      ...request2 === void 0 ? [] : [{ name: "request", wire: "request", source: "json", codec: request2 }]
     ],
     result
   };
 }
 var PERMISSION_REMOTE = { package: "@dsmm/dsmm-permissions", descriptors: [
-  descriptor3("describeRules", codec3("PermissionRulesResult", parsePermissionRulesResult)),
-  descriptor3("saveRules", codec3("PermissionRulesResult", parsePermissionRulesResult), codec3("PermissionRulesSaveRequest", parsePermissionRulesSave))
+  descriptor4("describeRules", codec4("PermissionRulesResult", parsePermissionRulesResult)),
+  descriptor4("saveRules", codec4("PermissionRulesResult", parsePermissionRulesResult), codec4("PermissionRulesSaveRequest", parsePermissionRulesSave))
 ] };
 var PERMISSION_HOST = { package: PERMISSION_REMOTE.package, face: "host", schemas: [], model: { services: [], events: [], objects: [] }, invocations: PERMISSION_REMOTE.descriptors };
 
 // src/client/permission-client.ts
 var PermissionClientError = class extends Error {
-  constructor(code) {
+  constructor(code2) {
     super("Permission operation unavailable.");
-    this.code = code;
+    this.code = code2;
   }
 };
 var codes = /* @__PURE__ */ new Set(["not-owned", "stale", "cancelled", "unavailable", "validation", "not-found", "scope-unavailable", "replayed", "denied"]);
 function permissionClient(connection) {
   return async (method, args, signal) => {
-    const descriptor4 = PERMISSION_REMOTE.descriptors.find((item) => item.method === method);
+    const descriptor6 = PERMISSION_REMOTE.descriptors.find((item) => item.method === method);
     const payload = {};
-    descriptor4.parameters.forEach((parameter, index) => {
+    descriptor6.parameters.forEach((parameter, index) => {
       payload[parameter.wire] = args[index];
     });
     let result;
@@ -7496,13 +7958,13 @@ function permissionClient(connection) {
       throw new PermissionClientError(signal.aborted ? "cancelled" : "transport");
     }
     if (!result.ok) {
-      const code = Reflect.get(result.error.details, "code");
-      throw new PermissionClientError(result.error.code === "dsmm-permissions/refused" && codes.has(code) ? code : "unavailable");
+      const code2 = Reflect.get(result.error.details, "code");
+      throw new PermissionClientError(result.error.code === "dsmm-permissions/refused" && codes.has(code2) ? code2 : "unavailable");
     }
     signal.throwIfAborted();
     try {
-      if (descriptor4.result.mode !== "strict") throw new Error("Strict permission codec required.");
-      return descriptor4.result.create().parse(result.value);
+      if (descriptor6.result.mode !== "strict") throw new Error("Strict permission codec required.");
+      return descriptor6.result.create().parse(result.value);
     } catch {
       throw new PermissionClientError("protocol");
     }
@@ -7623,8 +8085,8 @@ var PermissionController = class {
     return error instanceof PermissionClientError ? error.code : "transport";
   }
   synchronized() {
-    const value = this.state.rules;
-    return value !== null && value.runtime.state === "synced" && value.runtime.savedRevision === value.snapshot.revision && value.runtime.runtimeRevision === value.snapshot.revision;
+    const value2 = this.state.rules;
+    return value2 !== null && value2.runtime.state === "synced" && value2.runtime.savedRevision === value2.snapshot.revision && value2.runtime.runtimeRevision === value2.snapshot.revision;
   }
   canEdit(generation) {
     return this.live(generation) && this.state.rulesIssue === null && this.synchronized() && this.state.busy === null;
@@ -7634,20 +8096,20 @@ var PermissionController = class {
   }
   async refresh(generation, discard = false) {
     if (!this.live(generation) || this.state.reading || this.state.busy !== null) return;
-    const sequence = ++this.requestSequence, signal = this.request.signal, id2 = this.state.sessionId;
+    const sequence = ++this.requestSequence, signal = this.request.signal, id3 = this.state.sessionId;
     this.publish({ reading: true });
-    const [rules] = await Promise.allSettled([this.invoke("describeRules", [id2], signal)]);
+    const [rules] = await Promise.allSettled([this.invoke("describeRules", [id3], signal)]);
     if (!this.live(generation) || signal.aborted || sequence !== this.requestSequence) return;
     if (rules.status === "rejected") {
       this.publish({ rules: null, rulesIssue: this.issue(rules.reason), reading: false });
     } else {
-      const value = rules.value;
+      const value2 = rules.value;
       const retain = this.state.dirty && !discard;
       this.publish({
-        rules: value,
-        rulesIssue: retain && this.state.base?.revision !== value.snapshot.revision ? "stale" : null,
+        rules: value2,
+        rulesIssue: retain && this.state.base?.revision !== value2.snapshot.revision ? "stale" : null,
         reading: false,
-        ...retain ? {} : { base: value.snapshot, draft: draftOf(value.snapshot.policy), dirty: false }
+        ...retain ? {} : { base: value2.snapshot, draft: draftOf(value2.snapshot.policy), dirty: false }
       });
     }
     this.schedule();
@@ -7663,12 +8125,12 @@ var PermissionController = class {
     if (editor == null || !editor.id || editor.id.length > 256 || editor.id.includes("\0")) return;
     const match = editor.match;
     if (match.kind === "outside-read" && !match.path || match.kind === "shell" && (!match.executable || !match.command || !match.workingDirectory)) return;
-    this.edit(generation, { upsert: [...draft2.upsert.filter((row) => row.id !== editor.id), structuredClone(editor)], revoke: draft2.revoke.filter((id2) => id2 !== editor.id), editor: null });
+    this.edit(generation, { upsert: [...draft2.upsert.filter((row2) => row2.id !== editor.id), structuredClone(editor)], revoke: draft2.revoke.filter((id3) => id3 !== editor.id), editor: null });
   }
-  stageRevoke(generation, id2) {
+  stageRevoke(generation, id3) {
     const draft2 = this.state.draft;
-    if (draft2 === null || !this.state.base?.policy.rules.some((rule) => rule.id === id2)) return;
-    this.edit(generation, { upsert: draft2.upsert.filter((row) => row.id !== id2), revoke: [.../* @__PURE__ */ new Set([...draft2.revoke, id2])], editor: draft2.editor?.id === id2 ? null : draft2.editor });
+    if (draft2 === null || !this.state.base?.policy.rules.some((rule) => rule.id === id3)) return;
+    this.edit(generation, { upsert: draft2.upsert.filter((row2) => row2.id !== id3), revoke: [.../* @__PURE__ */ new Set([...draft2.revoke, id3])], editor: draft2.editor?.id === id3 ? null : draft2.editor });
   }
   begin(busy) {
     this.cancel();
@@ -7676,11 +8138,11 @@ var PermissionController = class {
     return { signal: this.request.signal, id: this.state.sessionId };
   }
   async save(generation) {
-    const request = permissionChanges(this.state);
-    if (!this.canSave(generation) || request === null) return;
-    const current = this.begin("save");
+    const request2 = permissionChanges(this.state);
+    if (!this.canSave(generation) || request2 === null) return;
+    const current2 = this.begin("save");
     try {
-      const result = await this.invoke("saveRules", [current.id, request], current.signal);
+      const result = await this.invoke("saveRules", [current2.id, request2], current2.signal);
       if (this.live(generation)) this.publish({ rules: result, base: result.snapshot, draft: draftOf(result.snapshot.policy), dirty: false, rulesIssue: null, notice: "saved" });
     } catch (error) {
       if (this.live(generation)) this.publish({ rules: null, rulesIssue: this.issue(error) });
@@ -7694,7 +8156,7 @@ var PermissionController = class {
 };
 
 // src/client/RoleToolView.tsx
-var import_dsh_client_ui_primitives9 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_dsh_client_ui_primitives10 = require("@deepseek-ai/dsh-client-ui-primitives");
 
 // src/client/RoleToolView-data.ts
 var roleToolKeys = {
@@ -7713,8 +8175,8 @@ var categories = /* @__PURE__ */ new Set(["dsmm-creative", "dsmm-frontend", "dsm
 var roles = new Set(Object.values(roleToolKeys));
 function roleToolArguments(raw) {
   try {
-    const value = JSON.parse(raw);
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+    const value2 = JSON.parse(raw);
+    return value2 !== null && typeof value2 === "object" && !Array.isArray(value2) ? value2 : void 0;
   } catch {
     return void 0;
   }
@@ -7722,15 +8184,15 @@ function roleToolArguments(raw) {
 function requestedRoleTool(toolName, raw) {
   const args = roleToolArguments(raw), kind = toolName === "dsmm_category" ? "category" : "role";
   const fixed = Object.hasOwn(roleToolKeys, toolName) ? roleToolKeys[toolName] : void 0;
-  const candidate = fixed ?? args?.[kind];
-  const target = typeof candidate === "string" && (kind === "category" ? categories : roles).has(candidate) ? candidate : void 0;
+  const candidate2 = fixed ?? args?.[kind];
+  const target = typeof candidate2 === "string" && (kind === "category" ? categories : roles).has(candidate2) ? candidate2 : void 0;
   const level2 = typeof args?.level === "string" && ["normal", "low", "high", "max"].includes(args.level) ? args.level : void 0;
   return { kind, target, level: level2, description: typeof args?.description === "string" ? args.description : void 0 };
 }
 function preparingRoleTool(toolName, args) {
   const received = Object.fromEntries(args.keys().flatMap((key) => {
-    const value = args.text(key) ?? args.value(key);
-    return value === void 0 ? [] : [[key, value]];
+    const value2 = args.text(key) ?? args.value(key);
+    return value2 === void 0 ? [] : [[key, value2]];
   }));
   const complete = Object.fromEntries(Object.entries(received).filter(([key]) => args.complete(key)));
   return {
@@ -7741,8 +8203,8 @@ function preparingRoleTool(toolName, args) {
 function actualRoleTool(toolName, meta, failed) {
   if (failed) return void 0;
   try {
-    const value = parseDsmmInvocationView(meta);
-    return (toolName === "dsmm_category" ? categories : roles).has(value.role) ? value : void 0;
+    const value2 = parseDsmmInvocationView(meta);
+    return (toolName === "dsmm_category" ? categories : roles).has(value2.role) ? value2 : void 0;
   } catch {
     return void 0;
   }
@@ -7811,7 +8273,7 @@ var roleToolZh = {
 };
 
 // src/client/RoleToolView.tsx
-var import_jsx_runtime11 = require("react/jsx-runtime");
+var import_jsx_runtime13 = require("react/jsx-runtime");
 var styles = `
 .dsmm-role-tool{min-width:0;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:14px;line-height:22px}
 .dsmm-role-tool .dsmm-role-heading{color:var(--dsw-alias-label-primary);height:auto;min-height:32px}
@@ -7835,36 +8297,36 @@ function RoleToolView(props) {
   const target = actual?.role ?? requested.target;
   const title = `${t("call")} ${target === void 0 ? t("unknownTarget") : roleToolDisplay(target)}${(actual?.level ?? requested.level) === void 0 ? "" : ` · ${actual?.level ?? requested.level}`}`;
   const state = result?.error?.code === "interrupted" ? "stopped" : failed ? "error" : result === void 0 ? props.phase === "preparing" ? "preparing" : "running" : actual?.jobId !== void 0 || actual?.mode === "continuable" ? "background" : "result";
-  const code = (value) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(import_dsh_client_ui_primitives9.CodeBlock, { code: value, copyLabel: t("copy"), copiedLabel: t("copied") });
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "dsmm-role-tool", "data-dsmm-role-tool": props.toolName, "data-identity": actual === void 0 ? "requested" : "actual", "data-state": state, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
-      import_dsh_client_ui_primitives9.DisclosureRow,
+  const code2 = (value2) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(import_dsh_client_ui_primitives10.CodeBlock, { code: value2, copyLabel: t("copy"), copiedLabel: t("copied") });
+  return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "dsmm-role-tool", "data-dsmm-role-tool": props.toolName, "data-identity": actual === void 0 ? "requested" : "actual", "data-state": state, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+      import_dsh_client_ui_primitives10.DisclosureRow,
       {
         title,
         titleClassName: "dsmm-role-title",
         rowClassName: "dsmm-role-heading",
         contentClassName: "dsmm-role-text",
-        icon: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(import_dsh_client_ui_primitives9.StateDot, { state: state === "error" ? "error" : state === "stopped" ? "warning" : result === void 0 ? "ongoing" : state === "background" ? "idle" : "done" }),
+        icon: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(import_dsh_client_ui_primitives10.StateDot, { state: state === "error" ? "error" : state === "stopped" ? "warning" : result === void 0 ? "ongoing" : state === "background" ? "idle" : "done" }),
         open: expanded,
         expandable: true,
         onToggle: toggle,
         expandOnRowClick: true,
-        children: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "dsmm-role-body", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("p", { children: [
+        children: /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "dsmm-role-body", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("p", { children: [
             props.toolName,
             " · ",
             props.callId
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("p", { className: "dsmm-role-status", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("p", { className: "dsmm-role-status", children: [
             t("requested"),
             " ",
             t(requested.kind),
             ": ",
             requested.target === void 0 ? t("unknown") : roleToolDisplay(requested.target)
           ] }),
-          requested.description !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "dsmm-role-status", children: requested.description }),
-          actual !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("p", { children: [
+          requested.description !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "dsmm-role-status", children: requested.description }),
+          actual !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("p", { children: [
               t("actual"),
               " ",
               t(requested.kind),
@@ -7875,7 +8337,7 @@ function RoleToolView(props) {
               ": ",
               actual.level
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("p", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("p", { children: [
               t("routeSource"),
               ": ",
               actual.routeSource,
@@ -7885,31 +8347,31 @@ function RoleToolView(props) {
               actual.route === void 0 ? t("unknown") : `${actual.route.provider}/${actual.route.model}${actual.route.reasoningEffort === void 0 ? "" : ` · ${actual.route.reasoningEffort}`}`
             ] })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { children: t(props.phase === "preparing" ? "preparingArgs" : "args") }),
-            raw === "" ? /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { children: t("emptyArgs") }) : code(raw)
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: t(props.phase === "preparing" ? "preparingArgs" : "args") }),
+            raw === "" ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: t("emptyArgs") }) : code2(raw)
           ] }),
-          result !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
-            actual === void 0 && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { children: t("unavailable") }),
-            /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { children: t("output") }),
-              code(JSON.stringify(result.content, null, 2))
+          result !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
+            actual === void 0 && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: t("unavailable") }),
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: t("output") }),
+              code2(JSON.stringify(result.content, null, 2))
             ] }),
-            result.error != null && /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { children: t("failure") }),
-              code(JSON.stringify(result.error, null, 2))
+            result.error != null && /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: t("failure") }),
+              code2(JSON.stringify(result.error, null, 2))
             ] }),
-            result.meta != null && /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { children: t("metadata") }),
-              code(JSON.stringify(result.meta, null, 2))
+            result.meta != null && /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: t("metadata") }),
+              code2(JSON.stringify(result.meta, null, 2))
             ] })
           ] })
         ] })
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "dsmm-role-actions", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "dsmm-role-status", role: "status", children: t(state) }),
-      props.inspect !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(import_dsh_client_ui_primitives9.Button, { variant: "ghost", size: "sm", onClick: props.inspect, children: t("inspect") })
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "dsmm-role-actions", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "dsmm-role-status", role: "status", children: t(state) }),
+      props.inspect !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(import_dsh_client_ui_primitives10.Button, { variant: "ghost", size: "sm", onClick: props.inspect, children: t("inspect") })
     ] })
   ] });
 }
@@ -7928,6 +8390,1433 @@ function registerRoleToolViews(ctx) {
       for (const dispose of disposers.reverse()) dispose();
     };
   });
+}
+
+// src/history-codec.ts
+var codes2 = ["validation", "not-owned", "not-found", "unsupported-host", "unsupported-backend", "unavailable", "busy", "stale", "cancelled", "authorization-required", "child-owner-required", "format-unavailable", "initialization-failed"];
+function invalid2() {
+  throw new TypeError("Invalid history continuation request or response");
+}
+function object3(input, required, optional2 = []) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || ![Object.prototype, null].includes(Object.getPrototypeOf(input)) || Object.getOwnPropertySymbols(input).length || Object.values(Object.getOwnPropertyDescriptors(input)).some((row3) => !Object.hasOwn(row3, "value") || !row3.enumerable)) invalid2();
+  const row2 = input;
+  if (required.some((key) => !Object.hasOwn(row2, key)) || Object.keys(row2).some((key) => !required.includes(key) && !optional2.includes(key))) invalid2();
+  return row2;
+}
+function text5(input, maximum = 4096) {
+  if (typeof input !== "string" || input.length > maximum) invalid2();
+  return input;
+}
+function bool2(input) {
+  if (typeof input !== "boolean") invalid2();
+  return input;
+}
+function list(input, parse3) {
+  if (!Array.isArray(input)) invalid2();
+  return input.map((value2) => parse3(value2));
+}
+function code(input) {
+  if (!codes2.includes(input)) invalid2();
+  return input;
+}
+function historySessionId(input) {
+  if (!isNativeSessionId(input)) invalid2();
+  return input;
+}
+function intentId(input) {
+  const id3 = text5(input, 36);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id3)) invalid2();
+  return id3;
+}
+function profileId(input) {
+  if (input === null) return null;
+  if (!isProfileId(input)) invalid2();
+  return input;
+}
+function presetId(input) {
+  return historySessionId(input);
+}
+function choice2(input) {
+  const row2 = object3(input, ["id", "label"]);
+  return { id: text5(row2.id, 256), label: text5(row2.label, 120) };
+}
+function historyJson(input, depth2 = 0, active = /* @__PURE__ */ new Set()) {
+  if (depth2 > 32) invalid2();
+  if (input === null || typeof input === "boolean" || typeof input === "string") return input;
+  if (typeof input === "number") {
+    if (!Number.isFinite(input)) invalid2();
+    return input;
+  }
+  if (!input || typeof input !== "object") invalid2();
+  if (active.has(input)) invalid2();
+  active.add(input);
+  try {
+    if (Array.isArray(input)) {
+      if (Object.getOwnPropertySymbols(input).length || Object.entries(Object.getOwnPropertyDescriptors(input)).some(([key, property2]) => key !== "length" && (!/^(0|[1-9][0-9]*)$/u.test(key) || !Object.hasOwn(property2, "value") || !property2.enumerable))) invalid2();
+      return input.map((value2) => historyJson(value2, depth2 + 1, active));
+    }
+    const row2 = object3(input, Object.keys(input));
+    return Object.fromEntries(Object.entries(row2).map(([key, value2]) => [key, historyJson(value2, depth2 + 1, active)]));
+  } finally {
+    active.delete(input);
+  }
+}
+function parseHistoryFailure(input) {
+  const row2 = object3(input, ["code", "storageEffects"]);
+  if (row2.storageEffects !== "none" && row2.storageEffects !== "may-have-committed") invalid2();
+  return { code: code(row2.code), storageEffects: row2.storageEffects };
+}
+function parseHistoryStatus(input) {
+  const row2 = object3(input, ["sessionId", "readable", "execution", "compatibleHost"], ["reason"]);
+  if (row2.readable !== "readable" && row2.readable !== "unavailable") invalid2();
+  if (!["authorization-required", "activating", "active", "unavailable"].includes(String(row2.execution))) invalid2();
+  return { sessionId: historySessionId(row2.sessionId), readable: row2.readable, execution: row2.execution, compatibleHost: bool2(row2.compatibleHost), ...row2.reason === void 0 ? {} : { reason: code(row2.reason) } };
+}
+function parseHistoryChoices(input) {
+  const row2 = object3(input, ["presets", "profiles"]);
+  return { presets: list(row2.presets, (value2) => {
+    const result = choice2(value2);
+    presetId(result.id);
+    return result;
+  }), profiles: list(row2.profiles, (value2) => {
+    const result = choice2(value2);
+    profileId(result.id);
+    return result;
+  }) };
+}
+function parseHistoryPreviewRequest(input) {
+  const row2 = object3(input, ["sessionId", "preset", "profileId"]);
+  return { sessionId: historySessionId(row2.sessionId), preset: presetId(row2.preset), profileId: profileId(row2.profileId) };
+}
+function parseHistoryConfirmRequest(input) {
+  const row2 = object3(input, ["sessionId", "intentId", "processPending", "acceptMigration"]);
+  return { sessionId: historySessionId(row2.sessionId), intentId: intentId(row2.intentId), processPending: bool2(row2.processPending), acceptMigration: bool2(row2.acceptMigration) };
+}
+function candidate(input) {
+  const row2 = object3(input, ["preset", "profile", "model", "roles", "restrictions", "differences"]);
+  const model = object3(row2.model, ["provider", "model"], ["reasoningEffort"]);
+  return {
+    preset: choice2(row2.preset),
+    profile: row2.profile === null ? null : choice2(row2.profile),
+    model: { provider: text5(model.provider, 256), model: text5(model.model, 256), ...model.reasoningEffort === void 0 ? {} : { reasoningEffort: text5(model.reasoningEffort, 128) } },
+    roles: list(row2.roles, choice2),
+    restrictions: list(row2.restrictions, (value2) => text5(value2)),
+    differences: list(row2.differences, (value2) => text5(value2))
+  };
+}
+function parseHistoryPreview(input) {
+  const row2 = object3(input, ["sessionId", "intentId", "cwd", "candidate", "migrationRequired", "pending"]), pending = object3(row2.pending, ["nextTurn", "nextStep"]);
+  return { sessionId: historySessionId(row2.sessionId), intentId: intentId(row2.intentId), cwd: text5(row2.cwd), candidate: candidate(row2.candidate), migrationRequired: bool2(row2.migrationRequired), pending: { nextTurn: list(pending.nextTurn, historyJson), nextStep: list(pending.nextStep, historyJson) } };
+}
+function parseHistoryResult(input) {
+  const row2 = object3(input, ["sessionId", "execution"]);
+  if (row2.execution !== "active") invalid2();
+  return { sessionId: historySessionId(row2.sessionId), execution: "active" };
+}
+
+// src/history-remote.ts
+function codec5(name, parse3) {
+  return { mode: "strict", typeSymbol: `@dsmm/dsmm#${name}`, create: () => ({ parse: (value2) => parse3(historyJson(value2)) }) };
+}
+function descriptor5(method, result, request2, session = true) {
+  return {
+    id: `@dsmm/dsmm-history#dsmmHistory/${method}`,
+    service: "dsmmHistory",
+    namespace: "dsmmHistory",
+    method,
+    invocation: { kind: "direct" },
+    parameters: [...session ? [{ name: "sessionId", wire: "sessionId", source: "json", codec: codec5("HistorySessionId", historySessionId) }] : [], ...request2 ? [{ name: "request", wire: "request", source: "json", codec: request2 }] : []],
+    result
+  };
+}
+var HISTORY_REMOTE = { package: "@dsmm/dsmm-history", descriptors: [
+  descriptor5("describe", codec5("HistoryStatus", parseHistoryStatus)),
+  descriptor5("choices", codec5("HistoryChoices", parseHistoryChoices), void 0, false),
+  descriptor5("preview", codec5("HistoryPreview", parseHistoryPreview), codec5("HistoryPreviewRequest", parseHistoryPreviewRequest)),
+  descriptor5("confirm", codec5("HistoryContinuationResult", parseHistoryResult), codec5("HistoryConfirmRequest", parseHistoryConfirmRequest))
+] };
+var HISTORY_HOST = { package: HISTORY_REMOTE.package, face: "host", schemas: [], model: { services: [], events: [], objects: [] }, invocations: HISTORY_REMOTE.descriptors };
+
+// src/client/history-entry.tsx
+var import_react12 = require("react");
+
+// src/client/HistoryContinuation.tsx
+var import_react11 = require("react");
+var import_dsh_client_ui_primitives11 = require("@deepseek-ai/dsh-client-ui-primitives");
+
+// src/client/history-locales.ts
+var en2 = {
+  title: "Continue this session",
+  preset: "Current agent preset",
+  profile: "Session configuration",
+  baseline: "Use deployment defaults",
+  choose: "Choose a current preset",
+  preview: "Review continuation",
+  confirm: "Continue this session",
+  refresh: "Refresh status",
+  loading: "Loading current configuration…",
+  preparing: "Preparing confirmation…",
+  confirming: "Activating session…",
+  active: "This session is active. Continue using the native conversation.",
+  browsing: "History remains available without continuing execution.",
+  unknown: "The result is not confirmed. Refresh status before taking another action.",
+  pending: "Pending input",
+  pendingWarning: "These stored inputs are untrusted. Continuing processes this exact pending set under current permissions; it does not restore old approvals.",
+  consent: "Process the pending inputs shown above",
+  migration: "Publish the required native format migration and recovery entries",
+  effects: "Native recovery entries or a migration may already have been committed. History and pending input are not rolled back.",
+  model: "Current model",
+  roles: "Current roles",
+  permissions: "Current restrictions",
+  differences: "Changes to execution",
+  project: "Project",
+  noPending: "No pending inputs.",
+  nextTurn: "Next turn",
+  nextStep: "Next step",
+  candidate: "Configuration to be used",
+  disconnected: "Connect to the local Host to review continuation.",
+  reasons: {
+    validation: "The request is invalid. Refresh and review the selection.",
+    "not-owned": "Use the current local Host operator connection.",
+    "not-found": "The stored session is unavailable.",
+    "unsupported-host": "A compatible Host with read-only history following is required. The original Desktop has not been patched by this plugin.",
+    "unsupported-backend": "This storage backend cannot validate continuation before writing.",
+    unavailable: "Current execution services are unavailable. History can still be inspected.",
+    busy: "An activation or other owner is already using this session. Refresh its status.",
+    stale: "The session or current configuration changed. Review a new confirmation.",
+    cancelled: "Continuation was cancelled. Refresh before trying again.",
+    "authorization-required": "Review the current configuration and explicitly confirm continuation.",
+    "child-owner-required": "This child can be browsed here. Continuing requires its exact live parent owner.",
+    "format-unavailable": "The native reader could not load this format. Keep the existing history view and inspect its diagnostic.",
+    "initialization-failed": "Execution initialization failed. Refresh status; do not replay the request."
+  }
+};
+var historyLocales = { en: en2, zh: {
+  title: "继续此会话",
+  preset: "当前 Agent 预设",
+  profile: "本次会话配置",
+  baseline: "使用部署默认配置",
+  choose: "选择当前可用的预设",
+  preview: "查看继续方案",
+  confirm: "继续此会话",
+  refresh: "刷新状态",
+  loading: "正在读取当前配置…",
+  preparing: "正在准备确认信息…",
+  confirming: "正在激活会话…",
+  active: "此会话已激活，可继续使用原生对话界面。",
+  browsing: "不继续执行也可以浏览历史。",
+  unknown: "结果待确认。请先刷新状态，不要重复执行。",
+  pending: "待处理输入",
+  pendingWarning: "以下历史输入是不可信内容。继续后将按当前权限处理这一组输入，不恢复旧审批。",
+  consent: "处理上方列出的待处理输入",
+  migration: "允许发布所需的原生格式迁移和恢复记录",
+  effects: "原生恢复记录或迁移可能已经提交，不承诺回滚历史或待处理输入。",
+  model: "当前模型",
+  roles: "当前角色",
+  permissions: "当前限制",
+  differences: "执行变化",
+  project: "项目",
+  noPending: "没有待处理输入。",
+  nextTurn: "下一轮",
+  nextStep: "下一步",
+  candidate: "将采用的配置",
+  disconnected: "连接本地 Host 后可查看继续方案。",
+  reasons: {
+    validation: "请求无效，请刷新后重新查看选择。",
+    "not-owned": "请使用当前本地 Host 的操作者连接。",
+    "not-found": "找不到该持久化会话。",
+    "unsupported-host": "需要支持只读历史跟随的兼容 Host。仅安装插件不会修补原版 Desktop。",
+    "unsupported-backend": "当前存储后端不能在写入前校验继续权限。",
+    unavailable: "当前执行服务不可用，仍可查看历史。",
+    busy: "该会话正被其他执行者或激活操作使用，请刷新状态。",
+    stale: "会话或当前配置已变化，请重新查看确认信息。",
+    cancelled: "继续操作已取消，请刷新后再试。",
+    "authorization-required": "请查看当前配置并明确确认继续。",
+    "child-owner-required": "此处可浏览子会话，继续执行需要其真实存活的父级所有者。",
+    "format-unavailable": "原生读取器无法加载此格式。请保留现有历史视图并查看诊断。",
+    "initialization-failed": "执行初始化失败，请刷新状态，不要重放请求。"
+  }
+} };
+
+// src/client/HistoryContinuation.tsx
+var import_jsx_runtime14 = require("react/jsx-runtime");
+function HistoryContinuation({ controller, locale = "en" }) {
+  const state = (0, import_react11.useSyncExternalStore)(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const t = historyLocales[locale], id3 = (0, import_react11.useId)();
+  const [preset, setPreset] = (0, import_react11.useState)(""), [profile, setProfile] = (0, import_react11.useState)("");
+  const proposal = state.preview;
+  const [consent, setConsent] = (0, import_react11.useState)({ proposal: null, pending: false, migration: false });
+  const pending = consent.proposal === proposal && consent.pending, migration = consent.proposal === proposal && consent.migration;
+  (0, import_react11.useEffect)(() => {
+    setPreset("");
+    setProfile("");
+  }, [state.sessionId, controller]);
+  const busy = ["loading", "previewing", "confirming"].includes(state.phase);
+  const selectable = state.phase === "ready" && state.status?.execution === "authorization-required" && state.status.compatibleHost && state.choices !== null;
+  const selectedMatches = proposal?.candidate.preset.id === preset && (proposal?.candidate.profile?.id ?? "") === profile;
+  const reason = state.issue?.code ?? (state.status?.compatibleHost === false ? "unsupported-host" : state.status?.reason);
+  const notice = state.phase === "disconnected" ? t.disconnected : state.phase === "loading" ? t.loading : state.phase === "previewing" ? t.preparing : state.phase === "confirming" || state.status?.execution === "activating" ? t.confirming : state.phase === "unknown" ? t.unknown : state.status?.execution === "active" ? t.active : t.browsing;
+  return /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("section", { className: "dsmm-profiles", "aria-labelledby": `${id3}-heading`, "aria-busy": busy, "data-dsmm-history-continuation": true, children: /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "dsmm-session-scope", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("h3", { id: `${id3}-heading`, children: t.title }),
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { role: "status", children: notice }),
+    reason && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { role: "alert", children: t.reasons[reason] }),
+    state.issue?.storageEffects === "may-have-committed" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { children: t.effects }),
+    selectable && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("label", { htmlFor: `${id3}-preset`, children: t.preset }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("select", { id: `${id3}-preset`, value: preset, onChange: (event) => setPreset(event.currentTarget.value), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: "", children: t.choose }),
+          state.choices.presets.map((row2) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: row2.id, children: row2.label || row2.id }, row2.id))
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("label", { htmlFor: `${id3}-profile`, children: t.profile }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("select", { id: `${id3}-profile`, value: profile, onChange: (event) => setProfile(event.currentTarget.value), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: "", children: t.baseline }),
+          state.choices.profiles.map((row2) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("option", { value: row2.id, children: row2.label || row2.id }, row2.id))
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "dsmm-actions", children: /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(import_dsh_client_ui_primitives11.Button, { type: "button", variant: "outline", disabled: !preset || !state.choices.presets.some((row2) => row2.id === preset), onClick: () => {
+        void controller.preview(state, preset, profile || null);
+      }, children: t.preview }) })
+    ] }),
+    proposal && selectedMatches && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "dsmm-session-scope", "aria-labelledby": `${id3}-proposal`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("h4", { id: `${id3}-proposal`, children: t.candidate }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("p", { children: [
+        proposal.candidate.preset.label || proposal.candidate.preset.id,
+        " · ",
+        proposal.candidate.profile?.label || proposal.candidate.profile?.id || t.baseline
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("p", { children: [
+        t.project,
+        ": ",
+        proposal.cwd
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("p", { children: [
+        t.model,
+        ": ",
+        proposal.candidate.model.provider,
+        "/",
+        proposal.candidate.model.model,
+        proposal.candidate.model.reasoningEffort ? ` (${proposal.candidate.model.reasoningEffort})` : ""
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("p", { children: [
+        t.roles,
+        ": ",
+        proposal.candidate.roles.map((row2) => row2.label || row2.id).join(", ")
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("h4", { children: t.permissions }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("ul", { children: proposal.candidate.restrictions.map((text6, index) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("li", { children: text6 }, index)) })
+      ] }),
+      proposal.candidate.differences.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("h4", { children: t.differences }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("ul", { children: proposal.candidate.differences.map((text6, index) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("li", { children: text6 }, index)) })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "dsmm-field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("h4", { children: t.pending }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { id: `${id3}-pending-hint`, children: t.pendingWarning }),
+        proposal.pending.nextTurn.length === 0 && proposal.pending.nextStep.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { children: t.noPending }) : /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("label", { htmlFor: `${id3}-next-turn`, children: t.nextTurn }),
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("textarea", { id: `${id3}-next-turn`, rows: 5, readOnly: true, value: JSON.stringify(proposal.pending.nextTurn, null, 2) }),
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("label", { htmlFor: `${id3}-next-step`, children: t.nextStep }),
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("textarea", { id: `${id3}-next-step`, rows: 5, readOnly: true, value: JSON.stringify(proposal.pending.nextStep, null, 2) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("label", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("input", { type: "checkbox", checked: pending, disabled: busy, "aria-describedby": `${id3}-pending-hint`, onChange: (event) => setConsent({ proposal, pending: event.currentTarget.checked, migration }) }),
+          " ",
+          t.consent
+        ] }),
+        proposal.migrationRequired && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("label", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("input", { type: "checkbox", checked: migration, disabled: busy, onChange: (event) => setConsent({ proposal, pending, migration: event.currentTarget.checked }) }),
+          " ",
+          t.migration
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "dsmm-actions", children: /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(import_dsh_client_ui_primitives11.Button, { type: "button", disabled: busy || state.phase !== "ready" || !pending || proposal.migrationRequired && !migration, onClick: () => {
+        void controller.confirm(state, pending, migration);
+      }, children: t.confirm }) })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "dsmm-actions", children: /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(import_dsh_client_ui_primitives11.Button, { type: "button", variant: "outline", disabled: busy || state.phase === "disconnected", onClick: () => {
+      void controller.refresh(state);
+    }, children: t.refresh }) })
+  ] }) });
+}
+
+// src/client/history-controller.ts
+function initial(sessionId2 = null) {
+  return { sessionId: sessionId2, phase: sessionId2 === null ? "disconnected" : "loading", status: null, choices: null, preview: null, issue: null };
+}
+function value(result, parse3) {
+  if (result.ok) return parse3(result.value);
+  throw result.error;
+}
+function failure(error, confirming = false) {
+  if (error && typeof error === "object" && Reflect.get(error, "code") === "dsmm-history/refused") {
+    try {
+      return parseHistoryFailure(Reflect.get(error, "details"));
+    } catch {
+    }
+  }
+  return { code: "unavailable", storageEffects: confirming ? "may-have-committed" : "none" };
+}
+var HistoryContinuationController = class {
+  scope;
+  state = initial();
+  request;
+  disposed = false;
+  listeners = /* @__PURE__ */ new Set();
+  getSnapshot = () => this.state;
+  subscribe = (listener) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+  publish(next) {
+    this.state = next;
+    for (const listener of this.listeners) listener();
+  }
+  bind(remote, connection, sessionId2, owner) {
+    if (this.disposed) return;
+    if (this.scope?.remote === remote && this.scope?.connection === connection && this.scope?.sessionId === sessionId2 && this.scope?.owner === owner) return;
+    if (!this.scope && (!remote || !connection || !sessionId2) && this.state.sessionId === sessionId2 && this.state.phase === "disconnected") return;
+    this.scope = remote && connection && sessionId2 ? { remote, connection, sessionId: sessionId2, owner } : void 0;
+    const scope = this.scope;
+    this.request = void 0;
+    this.publish({ ...initial(sessionId2), phase: this.scope ? "loading" : "disconnected" });
+    if (scope && this.scope === scope) void this.refresh(this.state);
+  }
+  /** Observed compatibility only, never a pre-follow navigation or write-admission guard. */
+  get historyBrowsingAllowed() {
+    return this.state.status?.compatibleHost === true;
+  }
+  dispose() {
+    this.scope = void 0;
+    this.request = void 0;
+    this.disposed = true;
+    this.listeners.clear();
+  }
+  async refresh(expected) {
+    const scope = this.scope;
+    if (!scope || this.state !== expected || this.state.phase === "confirming") return;
+    const request2 = this.request = {};
+    this.publish({ ...this.state, phase: "loading", preview: null, issue: null });
+    if (this.scope !== scope || this.request !== request2) return;
+    try {
+      const status = value(await scope.remote.describe(scope.sessionId), parseHistoryStatus);
+      if (this.scope !== scope || this.request !== request2) return;
+      if (status.sessionId !== scope.sessionId) throw new TypeError("Mismatched history response");
+      const choices = status.execution === "authorization-required" ? value(await scope.remote.choices(), parseHistoryChoices) : null;
+      if (this.scope !== scope || this.request !== request2) return;
+      this.publish({ sessionId: scope.sessionId, phase: "ready", status, choices, preview: null, issue: null });
+    } catch (error) {
+      if (this.scope === scope && this.request === request2) this.publish({ ...this.state, phase: "ready", issue: failure(error), preview: null });
+    }
+  }
+  async preview(expected, preset, profileId2) {
+    const scope = this.scope;
+    if (!scope || this.state !== expected || expected.phase !== "ready" || expected.status?.execution !== "authorization-required" || !expected.status.compatibleHost) return;
+    const request2 = this.request = {};
+    this.publish({ ...this.state, phase: "previewing", preview: null, issue: null });
+    if (this.scope !== scope || this.request !== request2) return;
+    try {
+      const preview = value(await scope.remote.preview(scope.sessionId, { sessionId: scope.sessionId, preset, profileId: profileId2 }), parseHistoryPreview);
+      if (this.scope !== scope || this.request !== request2) return;
+      if (preview.sessionId !== scope.sessionId || preview.candidate.preset.id !== preset || (preview.candidate.profile?.id ?? null) !== profileId2) throw new TypeError("Mismatched continuation proposal");
+      this.publish({ ...this.state, phase: "ready", preview });
+    } catch (error) {
+      if (this.scope === scope && this.request === request2) this.publish({ ...this.state, phase: "ready", issue: failure(error), preview: null });
+    }
+  }
+  async confirm(expected, processPending, acceptMigration) {
+    const scope = this.scope, preview = expected.preview;
+    if (!scope || this.state !== expected || expected.phase !== "ready" || !preview || !processPending || preview.migrationRequired && !acceptMigration) return;
+    const request2 = this.request = {};
+    this.publish({ ...this.state, phase: "confirming", issue: null });
+    if (this.scope !== scope || this.request !== request2) return;
+    try {
+      const receipt = value(await scope.remote.confirm(scope.sessionId, { sessionId: scope.sessionId, intentId: preview.intentId, processPending, acceptMigration }), parseHistoryResult);
+      if (this.scope !== scope || this.request !== request2) return;
+      if (receipt.sessionId !== scope.sessionId) throw new TypeError("Mismatched continuation receipt");
+      this.publish({ ...this.state, phase: "ready", preview: null, status: { sessionId: scope.sessionId, readable: "readable", compatibleHost: true, execution: "active" } });
+    } catch (error) {
+      if (this.scope !== scope || this.request !== request2) return;
+      const issue = failure(error, true);
+      this.publish({ ...this.state, phase: issue.storageEffects === "may-have-committed" ? "unknown" : "ready", preview: null, issue });
+    }
+  }
+};
+
+// src/client/history-entry.tsx
+var import_jsx_runtime15 = require("react/jsx-runtime");
+function HistoryContinuationEntry({ controller, locale, sessionId: sessionId2 }) {
+  const state = (0, import_react12.useSyncExternalStore)(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const language = (0, import_react12.useSyncExternalStore)((listener) => locale.subscribe(listener), () => locale.getSnapshot());
+  if (state.sessionId !== sessionId2 || state.status?.execution === "active" || state.phase === "loading" && state.status === null && state.issue === null) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(HistoryContinuation, { controller, locale: language.active === "zh" ? "zh" : "en" });
+}
+function registerHistoryContinuation(ctx) {
+  void ctx.inject(["remote.dsmmHistory"], (historyCtx) => {
+    const controller = new HistoryContinuationController(), remote = historyCtx.remote.dsmmHistory;
+    let disposed = false;
+    let connection, selected;
+    let blocks;
+    let held;
+    let watched, stopBlock;
+    const release = () => {
+      const owned = held;
+      held = void 0;
+      if (owned && blocks?.storeFor(owned.id) === owned.store && owned.store.getSnapshot() === owned.block) blocks.set(owned.id, void 0);
+    };
+    const syncBlock = () => {
+      const state = controller.getSnapshot(), id3 = state.sessionId;
+      if (disposed || id3 === null || state.status?.execution === "active") {
+        stopBlock?.();
+        stopBlock = void 0;
+        watched = void 0;
+        release();
+        return;
+      }
+      if (held && held.id !== id3) release();
+      const text6 = historyLocales[historyCtx.locale.getLocale().active === "zh" ? "zh" : "en"];
+      const reason = state.phase === "disconnected" ? text6.disconnected : state.phase === "unknown" ? text6.unknown : state.phase === "confirming" || state.status?.execution === "activating" ? text6.confirming : text6.reasons[state.issue?.code ?? (state.status?.compatibleHost === false ? "unsupported-host" : state.status?.reason) ?? "authorization-required"];
+      const store = blocks?.storeFor(id3);
+      if (watched !== store) {
+        stopBlock?.();
+        watched = store;
+        stopBlock = store?.subscribe(syncBlock);
+      }
+      if (held && (held.store !== store || held.store.getSnapshot() !== held.block)) held = void 0;
+      if (held && (held.id !== id3 || held.block.reason !== reason)) release();
+      if (!blocks || !store || held) return;
+      if (store.getSnapshot() !== void 0) return;
+      const block = { reason };
+      held = { id: id3, store, block };
+      blocks.set(id3, block);
+    };
+    const update = () => {
+      if (disposed) return;
+      const state = selected?.session.getSnapshot();
+      const id3 = selected && state?.sessionId === selected.sessionId && !state.removed ? selected.sessionId : null;
+      controller.bind(remote, connection?.generation.getSnapshot(), id3, selected);
+      syncBlock();
+    };
+    historyCtx.effect(() => controller.subscribe(syncBlock));
+    historyCtx.effect(() => historyCtx.locale.subscribe(syncBlock));
+    historyCtx.effect(() => () => {
+      disposed = true;
+      stopBlock?.();
+      release();
+      controller.dispose();
+    }, "dsmm: history continuation owner");
+    historyCtx.slots.inject("conversation.input.dock", () => historyCtx.slots.register({
+      name: "conversation.input.dock",
+      id: "dsmm-history-continuation",
+      order: 10,
+      inject: () => ({ controller, locale: historyCtx.locale })
+    }, HistoryContinuationEntry));
+    void historyCtx.inject(["conversation"], (conversationCtx) => {
+      blocks = conversationCtx.conversation.blocks;
+      syncBlock();
+      conversationCtx.effect(() => () => {
+        stopBlock?.();
+        stopBlock = void 0;
+        watched = void 0;
+        release();
+        blocks = void 0;
+      }, "dsmm: history composer lifetime");
+    });
+    void historyCtx.inject(["connection"], (connectionCtx) => {
+      connection = connectionCtx.connection;
+      update();
+      connectionCtx.effect(() => connection.generation.subscribe(update));
+      connectionCtx.effect(() => () => {
+        connection = void 0;
+        update();
+      }, "dsmm: history connection lifetime");
+    });
+    void historyCtx.inject(["uiSession", "sessions"], (sessionCtx) => {
+      const source = sessionCtx.uiSession.adapter.current, sessions = sessionCtx.sessions;
+      let stop;
+      const observe = () => {
+        const id3 = source.getSnapshot().key;
+        const candidate2 = id3 === void 0 ? void 0 : sessions.binding(id3);
+        const binding = candidate2?.sessionId === id3 ? candidate2 : void 0;
+        if (binding !== selected) {
+          stop?.();
+          selected = binding;
+          stop = binding?.session.subscribe(update);
+        }
+        update();
+      };
+      observe();
+      sessionCtx.effect(() => source.subscribe(observe));
+      sessionCtx.effect(() => sessions.list.subscribe(observe));
+      sessionCtx.effect(() => () => {
+        stop?.();
+        selected = void 0;
+        update();
+      }, "dsmm: history native scope lifetime");
+    });
+  });
+}
+
+// ../node_modules/.pnpm/zustand@4.4.7_@types+react@18.3.31_immer@10.1.1_react@18.3.1/node_modules/zustand/esm/vanilla.mjs
+var import_meta = {};
+var createStoreImpl = (createState) => {
+  let state;
+  const listeners = /* @__PURE__ */ new Set();
+  const setState = (partial, replace) => {
+    const nextState = typeof partial === "function" ? partial(state) : partial;
+    if (!Object.is(nextState, state)) {
+      const previousState = state;
+      state = (replace != null ? replace : typeof nextState !== "object" || nextState === null) ? nextState : Object.assign({}, state, nextState);
+      listeners.forEach((listener) => listener(state, previousState));
+    }
+  };
+  const getState = () => state;
+  const subscribe = (listener) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  };
+  const destroy = () => {
+    if ((import_meta.env ? import_meta.env.MODE : void 0) !== "production") {
+      console.warn(
+        "[DEPRECATED] The `destroy` method will be unsupported in a future version. Instead use unsubscribe function returned by subscribe. Everything will be garbage-collected if store is garbage-collected."
+      );
+    }
+    listeners.clear();
+  };
+  const api = { setState, getState, subscribe, destroy };
+  state = createState(setState, getState, api);
+  return api;
+};
+var createStore = (createState) => createState ? createStoreImpl(createState) : createStoreImpl;
+
+// ../node_modules/.pnpm/zustand@4.4.7_@types+react@18.3.31_immer@10.1.1_react@18.3.1/node_modules/zustand/esm/middleware.mjs
+var subscribeWithSelectorImpl = (fn) => (set3, get, api) => {
+  const origSubscribe = api.subscribe;
+  api.subscribe = (selector, optListener, options) => {
+    let listener = selector;
+    if (optListener) {
+      const equalityFn = (options == null ? void 0 : options.equalityFn) || Object.is;
+      let currentSlice = selector(api.getState());
+      listener = (state) => {
+        const nextSlice = selector(state);
+        if (!equalityFn(currentSlice, nextSlice)) {
+          const previousSlice = currentSlice;
+          optListener(currentSlice = nextSlice, previousSlice);
+        }
+      };
+      if (options == null ? void 0 : options.fireImmediately) {
+        optListener(currentSlice, currentSlice);
+      }
+    }
+    return origSubscribe(listener);
+  };
+  const initialState = fn(set3, get, api);
+  return initialState;
+};
+var subscribeWithSelector = subscribeWithSelectorImpl;
+
+// ../node_modules/.pnpm/immer@10.1.1/node_modules/immer/dist/immer.mjs
+var NOTHING = Symbol.for("immer-nothing");
+var DRAFTABLE = Symbol.for("immer-draftable");
+var DRAFT_STATE = Symbol.for("immer-state");
+var errors = true ? [
+  // All error codes, starting by 0:
+  function(plugin) {
+    return `The plugin for '${plugin}' has not been loaded into Immer. To enable the plugin, import and call \`enable${plugin}()\` when initializing your application.`;
+  },
+  function(thing) {
+    return `produce can only be called on things that are draftable: plain objects, arrays, Map, Set or classes that are marked with '[immerable]: true'. Got '${thing}'`;
+  },
+  "This object has been frozen and should not be mutated",
+  function(data) {
+    return "Cannot use a proxy that has been revoked. Did you pass an object from inside an immer function to an async process? " + data;
+  },
+  "An immer producer returned a new value *and* modified its draft. Either return a new value *or* modify the draft.",
+  "Immer forbids circular references",
+  "The first or second argument to `produce` must be a function",
+  "The third argument to `produce` must be a function or undefined",
+  "First argument to `createDraft` must be a plain object, an array, or an immerable object",
+  "First argument to `finishDraft` must be a draft returned by `createDraft`",
+  function(thing) {
+    return `'current' expects a draft, got: ${thing}`;
+  },
+  "Object.defineProperty() cannot be used on an Immer draft",
+  "Object.setPrototypeOf() cannot be used on an Immer draft",
+  "Immer only supports deleting array indices",
+  "Immer only supports setting array indices and the 'length' property",
+  function(thing) {
+    return `'original' expects a draft, got: ${thing}`;
+  }
+  // Note: if more errors are added, the errorOffset in Patches.ts should be increased
+  // See Patches.ts for additional errors
+] : [];
+function die(error, ...args) {
+  if (true) {
+    const e = errors[error];
+    const msg = typeof e === "function" ? e.apply(null, args) : e;
+    throw new Error(`[Immer] ${msg}`);
+  }
+  throw new Error(
+    `[Immer] minified error nr: ${error}. Full error at: https://bit.ly/3cXEKWf`
+  );
+}
+var getPrototypeOf = Object.getPrototypeOf;
+function isDraft(value2) {
+  return !!value2 && !!value2[DRAFT_STATE];
+}
+function isDraftable(value2) {
+  if (!value2)
+    return false;
+  return isPlainObject2(value2) || Array.isArray(value2) || !!value2[DRAFTABLE] || !!value2.constructor?.[DRAFTABLE] || isMap(value2) || isSet(value2);
+}
+var objectCtorString = Object.prototype.constructor.toString();
+function isPlainObject2(value2) {
+  if (!value2 || typeof value2 !== "object")
+    return false;
+  const proto = getPrototypeOf(value2);
+  if (proto === null) {
+    return true;
+  }
+  const Ctor = Object.hasOwnProperty.call(proto, "constructor") && proto.constructor;
+  if (Ctor === Object)
+    return true;
+  return typeof Ctor == "function" && Function.toString.call(Ctor) === objectCtorString;
+}
+function each(obj, iter) {
+  if (getArchtype(obj) === 0) {
+    Reflect.ownKeys(obj).forEach((key) => {
+      iter(key, obj[key], obj);
+    });
+  } else {
+    obj.forEach((entry, index) => iter(index, entry, obj));
+  }
+}
+function getArchtype(thing) {
+  const state = thing[DRAFT_STATE];
+  return state ? state.type_ : Array.isArray(thing) ? 1 : isMap(thing) ? 2 : isSet(thing) ? 3 : 0;
+}
+function has(thing, prop) {
+  return getArchtype(thing) === 2 ? thing.has(prop) : Object.prototype.hasOwnProperty.call(thing, prop);
+}
+function set2(thing, propOrOldValue, value2) {
+  const t = getArchtype(thing);
+  if (t === 2)
+    thing.set(propOrOldValue, value2);
+  else if (t === 3) {
+    thing.add(value2);
+  } else
+    thing[propOrOldValue] = value2;
+}
+function is2(x, y) {
+  if (x === y) {
+    return x !== 0 || 1 / x === 1 / y;
+  } else {
+    return x !== x && y !== y;
+  }
+}
+function isMap(target) {
+  return target instanceof Map;
+}
+function isSet(target) {
+  return target instanceof Set;
+}
+function latest(state) {
+  return state.copy_ || state.base_;
+}
+function shallowCopy(base, strict) {
+  if (isMap(base)) {
+    return new Map(base);
+  }
+  if (isSet(base)) {
+    return new Set(base);
+  }
+  if (Array.isArray(base))
+    return Array.prototype.slice.call(base);
+  const isPlain = isPlainObject2(base);
+  if (strict === true || strict === "class_only" && !isPlain) {
+    const descriptors = Object.getOwnPropertyDescriptors(base);
+    delete descriptors[DRAFT_STATE];
+    let keys = Reflect.ownKeys(descriptors);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const desc = descriptors[key];
+      if (desc.writable === false) {
+        desc.writable = true;
+        desc.configurable = true;
+      }
+      if (desc.get || desc.set)
+        descriptors[key] = {
+          configurable: true,
+          writable: true,
+          // could live with !!desc.set as well here...
+          enumerable: desc.enumerable,
+          value: base[key]
+        };
+    }
+    return Object.create(getPrototypeOf(base), descriptors);
+  } else {
+    const proto = getPrototypeOf(base);
+    if (proto !== null && isPlain) {
+      return { ...base };
+    }
+    const obj = Object.create(proto);
+    return Object.assign(obj, base);
+  }
+}
+function freeze(obj, deep = false) {
+  if (isFrozen(obj) || isDraft(obj) || !isDraftable(obj))
+    return obj;
+  if (getArchtype(obj) > 1) {
+    obj.set = obj.add = obj.clear = obj.delete = dontMutateFrozenCollections;
+  }
+  Object.freeze(obj);
+  if (deep)
+    Object.entries(obj).forEach(([key, value2]) => freeze(value2, true));
+  return obj;
+}
+function dontMutateFrozenCollections() {
+  die(2);
+}
+function isFrozen(obj) {
+  return Object.isFrozen(obj);
+}
+var plugins = {};
+function getPlugin(pluginKey) {
+  const plugin = plugins[pluginKey];
+  if (!plugin) {
+    die(0, pluginKey);
+  }
+  return plugin;
+}
+var currentScope;
+function getCurrentScope() {
+  return currentScope;
+}
+function createScope(parent_, immer_) {
+  return {
+    drafts_: [],
+    parent_,
+    immer_,
+    // Whenever the modified draft contains a draft from another scope, we
+    // need to prevent auto-freezing so the unowned draft can be finalized.
+    canAutoFreeze_: true,
+    unfinalizedDrafts_: 0
+  };
+}
+function usePatchesInScope(scope, patchListener) {
+  if (patchListener) {
+    getPlugin("Patches");
+    scope.patches_ = [];
+    scope.inversePatches_ = [];
+    scope.patchListener_ = patchListener;
+  }
+}
+function revokeScope(scope) {
+  leaveScope(scope);
+  scope.drafts_.forEach(revokeDraft);
+  scope.drafts_ = null;
+}
+function leaveScope(scope) {
+  if (scope === currentScope) {
+    currentScope = scope.parent_;
+  }
+}
+function enterScope(immer2) {
+  return currentScope = createScope(currentScope, immer2);
+}
+function revokeDraft(draft2) {
+  const state = draft2[DRAFT_STATE];
+  if (state.type_ === 0 || state.type_ === 1)
+    state.revoke_();
+  else
+    state.revoked_ = true;
+}
+function processResult(result, scope) {
+  scope.unfinalizedDrafts_ = scope.drafts_.length;
+  const baseDraft = scope.drafts_[0];
+  const isReplaced = result !== void 0 && result !== baseDraft;
+  if (isReplaced) {
+    if (baseDraft[DRAFT_STATE].modified_) {
+      revokeScope(scope);
+      die(4);
+    }
+    if (isDraftable(result)) {
+      result = finalize(scope, result);
+      if (!scope.parent_)
+        maybeFreeze(scope, result);
+    }
+    if (scope.patches_) {
+      getPlugin("Patches").generateReplacementPatches_(
+        baseDraft[DRAFT_STATE].base_,
+        result,
+        scope.patches_,
+        scope.inversePatches_
+      );
+    }
+  } else {
+    result = finalize(scope, baseDraft, []);
+  }
+  revokeScope(scope);
+  if (scope.patches_) {
+    scope.patchListener_(scope.patches_, scope.inversePatches_);
+  }
+  return result !== NOTHING ? result : void 0;
+}
+function finalize(rootScope, value2, path) {
+  if (isFrozen(value2))
+    return value2;
+  const state = value2[DRAFT_STATE];
+  if (!state) {
+    each(
+      value2,
+      (key, childValue) => finalizeProperty(rootScope, state, value2, key, childValue, path)
+    );
+    return value2;
+  }
+  if (state.scope_ !== rootScope)
+    return value2;
+  if (!state.modified_) {
+    maybeFreeze(rootScope, state.base_, true);
+    return state.base_;
+  }
+  if (!state.finalized_) {
+    state.finalized_ = true;
+    state.scope_.unfinalizedDrafts_--;
+    const result = state.copy_;
+    let resultEach = result;
+    let isSet2 = false;
+    if (state.type_ === 3) {
+      resultEach = new Set(result);
+      result.clear();
+      isSet2 = true;
+    }
+    each(
+      resultEach,
+      (key, childValue) => finalizeProperty(rootScope, state, result, key, childValue, path, isSet2)
+    );
+    maybeFreeze(rootScope, result, false);
+    if (path && rootScope.patches_) {
+      getPlugin("Patches").generatePatches_(
+        state,
+        path,
+        rootScope.patches_,
+        rootScope.inversePatches_
+      );
+    }
+  }
+  return state.copy_;
+}
+function finalizeProperty(rootScope, parentState, targetObject, prop, childValue, rootPath, targetIsSet) {
+  if (childValue === targetObject)
+    die(5);
+  if (isDraft(childValue)) {
+    const path = rootPath && parentState && parentState.type_ !== 3 && // Set objects are atomic since they have no keys.
+    !has(parentState.assigned_, prop) ? rootPath.concat(prop) : void 0;
+    const res = finalize(rootScope, childValue, path);
+    set2(targetObject, prop, res);
+    if (isDraft(res)) {
+      rootScope.canAutoFreeze_ = false;
+    } else
+      return;
+  } else if (targetIsSet) {
+    targetObject.add(childValue);
+  }
+  if (isDraftable(childValue) && !isFrozen(childValue)) {
+    if (!rootScope.immer_.autoFreeze_ && rootScope.unfinalizedDrafts_ < 1) {
+      return;
+    }
+    finalize(rootScope, childValue);
+    if ((!parentState || !parentState.scope_.parent_) && typeof prop !== "symbol" && Object.prototype.propertyIsEnumerable.call(targetObject, prop))
+      maybeFreeze(rootScope, childValue);
+  }
+}
+function maybeFreeze(scope, value2, deep = false) {
+  if (!scope.parent_ && scope.immer_.autoFreeze_ && scope.canAutoFreeze_) {
+    freeze(value2, deep);
+  }
+}
+function createProxyProxy(base, parent) {
+  const isArray = Array.isArray(base);
+  const state = {
+    type_: isArray ? 1 : 0,
+    // Track which produce call this is associated with.
+    scope_: parent ? parent.scope_ : getCurrentScope(),
+    // True for both shallow and deep changes.
+    modified_: false,
+    // Used during finalization.
+    finalized_: false,
+    // Track which properties have been assigned (true) or deleted (false).
+    assigned_: {},
+    // The parent draft state.
+    parent_: parent,
+    // The base state.
+    base_: base,
+    // The base proxy.
+    draft_: null,
+    // set below
+    // The base copy with any updated values.
+    copy_: null,
+    // Called by the `produce` function.
+    revoke_: null,
+    isManual_: false
+  };
+  let target = state;
+  let traps = objectTraps;
+  if (isArray) {
+    target = [state];
+    traps = arrayTraps;
+  }
+  const { revoke, proxy } = Proxy.revocable(target, traps);
+  state.draft_ = proxy;
+  state.revoke_ = revoke;
+  return proxy;
+}
+var objectTraps = {
+  get(state, prop) {
+    if (prop === DRAFT_STATE)
+      return state;
+    const source = latest(state);
+    if (!has(source, prop)) {
+      return readPropFromProto(state, source, prop);
+    }
+    const value2 = source[prop];
+    if (state.finalized_ || !isDraftable(value2)) {
+      return value2;
+    }
+    if (value2 === peek(state.base_, prop)) {
+      prepareCopy(state);
+      return state.copy_[prop] = createProxy(value2, state);
+    }
+    return value2;
+  },
+  has(state, prop) {
+    return prop in latest(state);
+  },
+  ownKeys(state) {
+    return Reflect.ownKeys(latest(state));
+  },
+  set(state, prop, value2) {
+    const desc = getDescriptorFromProto(latest(state), prop);
+    if (desc?.set) {
+      desc.set.call(state.draft_, value2);
+      return true;
+    }
+    if (!state.modified_) {
+      const current2 = peek(latest(state), prop);
+      const currentState = current2?.[DRAFT_STATE];
+      if (currentState && currentState.base_ === value2) {
+        state.copy_[prop] = value2;
+        state.assigned_[prop] = false;
+        return true;
+      }
+      if (is2(value2, current2) && (value2 !== void 0 || has(state.base_, prop)))
+        return true;
+      prepareCopy(state);
+      markChanged(state);
+    }
+    if (state.copy_[prop] === value2 && // special case: handle new props with value 'undefined'
+    (value2 !== void 0 || prop in state.copy_) || // special case: NaN
+    Number.isNaN(value2) && Number.isNaN(state.copy_[prop]))
+      return true;
+    state.copy_[prop] = value2;
+    state.assigned_[prop] = true;
+    return true;
+  },
+  deleteProperty(state, prop) {
+    if (peek(state.base_, prop) !== void 0 || prop in state.base_) {
+      state.assigned_[prop] = false;
+      prepareCopy(state);
+      markChanged(state);
+    } else {
+      delete state.assigned_[prop];
+    }
+    if (state.copy_) {
+      delete state.copy_[prop];
+    }
+    return true;
+  },
+  // Note: We never coerce `desc.value` into an Immer draft, because we can't make
+  // the same guarantee in ES5 mode.
+  getOwnPropertyDescriptor(state, prop) {
+    const owner = latest(state);
+    const desc = Reflect.getOwnPropertyDescriptor(owner, prop);
+    if (!desc)
+      return desc;
+    return {
+      writable: true,
+      configurable: state.type_ !== 1 || prop !== "length",
+      enumerable: desc.enumerable,
+      value: owner[prop]
+    };
+  },
+  defineProperty() {
+    die(11);
+  },
+  getPrototypeOf(state) {
+    return getPrototypeOf(state.base_);
+  },
+  setPrototypeOf() {
+    die(12);
+  }
+};
+var arrayTraps = {};
+each(objectTraps, (key, fn) => {
+  arrayTraps[key] = function() {
+    arguments[0] = arguments[0][0];
+    return fn.apply(this, arguments);
+  };
+});
+arrayTraps.deleteProperty = function(state, prop) {
+  if (isNaN(parseInt(prop)))
+    die(13);
+  return arrayTraps.set.call(this, state, prop, void 0);
+};
+arrayTraps.set = function(state, prop, value2) {
+  if (prop !== "length" && isNaN(parseInt(prop)))
+    die(14);
+  return objectTraps.set.call(this, state[0], prop, value2, state[0]);
+};
+function peek(draft2, prop) {
+  const state = draft2[DRAFT_STATE];
+  const source = state ? latest(state) : draft2;
+  return source[prop];
+}
+function readPropFromProto(state, source, prop) {
+  const desc = getDescriptorFromProto(source, prop);
+  return desc ? `value` in desc ? desc.value : (
+    // This is a very special case, if the prop is a getter defined by the
+    // prototype, we should invoke it with the draft as context!
+    desc.get?.call(state.draft_)
+  ) : void 0;
+}
+function getDescriptorFromProto(source, prop) {
+  if (!(prop in source))
+    return void 0;
+  let proto = getPrototypeOf(source);
+  while (proto) {
+    const desc = Object.getOwnPropertyDescriptor(proto, prop);
+    if (desc)
+      return desc;
+    proto = getPrototypeOf(proto);
+  }
+  return void 0;
+}
+function markChanged(state) {
+  if (!state.modified_) {
+    state.modified_ = true;
+    if (state.parent_) {
+      markChanged(state.parent_);
+    }
+  }
+}
+function prepareCopy(state) {
+  if (!state.copy_) {
+    state.copy_ = shallowCopy(
+      state.base_,
+      state.scope_.immer_.useStrictShallowCopy_
+    );
+  }
+}
+var Immer2 = class {
+  constructor(config) {
+    this.autoFreeze_ = true;
+    this.useStrictShallowCopy_ = false;
+    this.produce = (base, recipe, patchListener) => {
+      if (typeof base === "function" && typeof recipe !== "function") {
+        const defaultBase = recipe;
+        recipe = base;
+        const self = this;
+        return function curriedProduce(base2 = defaultBase, ...args) {
+          return self.produce(base2, (draft2) => recipe.call(this, draft2, ...args));
+        };
+      }
+      if (typeof recipe !== "function")
+        die(6);
+      if (patchListener !== void 0 && typeof patchListener !== "function")
+        die(7);
+      let result;
+      if (isDraftable(base)) {
+        const scope = enterScope(this);
+        const proxy = createProxy(base, void 0);
+        let hasError = true;
+        try {
+          result = recipe(proxy);
+          hasError = false;
+        } finally {
+          if (hasError)
+            revokeScope(scope);
+          else
+            leaveScope(scope);
+        }
+        usePatchesInScope(scope, patchListener);
+        return processResult(result, scope);
+      } else if (!base || typeof base !== "object") {
+        result = recipe(base);
+        if (result === void 0)
+          result = base;
+        if (result === NOTHING)
+          result = void 0;
+        if (this.autoFreeze_)
+          freeze(result, true);
+        if (patchListener) {
+          const p = [];
+          const ip = [];
+          getPlugin("Patches").generateReplacementPatches_(base, result, p, ip);
+          patchListener(p, ip);
+        }
+        return result;
+      } else
+        die(1, base);
+    };
+    this.produceWithPatches = (base, recipe) => {
+      if (typeof base === "function") {
+        return (state, ...args) => this.produceWithPatches(state, (draft2) => base(draft2, ...args));
+      }
+      let patches, inversePatches;
+      const result = this.produce(base, recipe, (p, ip) => {
+        patches = p;
+        inversePatches = ip;
+      });
+      return [result, patches, inversePatches];
+    };
+    if (typeof config?.autoFreeze === "boolean")
+      this.setAutoFreeze(config.autoFreeze);
+    if (typeof config?.useStrictShallowCopy === "boolean")
+      this.setUseStrictShallowCopy(config.useStrictShallowCopy);
+  }
+  createDraft(base) {
+    if (!isDraftable(base))
+      die(8);
+    if (isDraft(base))
+      base = current(base);
+    const scope = enterScope(this);
+    const proxy = createProxy(base, void 0);
+    proxy[DRAFT_STATE].isManual_ = true;
+    leaveScope(scope);
+    return proxy;
+  }
+  finishDraft(draft2, patchListener) {
+    const state = draft2 && draft2[DRAFT_STATE];
+    if (!state || !state.isManual_)
+      die(9);
+    const { scope_: scope } = state;
+    usePatchesInScope(scope, patchListener);
+    return processResult(void 0, scope);
+  }
+  /**
+   * Pass true to automatically freeze all copies created by Immer.
+   *
+   * By default, auto-freezing is enabled.
+   */
+  setAutoFreeze(value2) {
+    this.autoFreeze_ = value2;
+  }
+  /**
+   * Pass true to enable strict shallow copy.
+   *
+   * By default, immer does not copy the object descriptors such as getter, setter and non-enumrable properties.
+   */
+  setUseStrictShallowCopy(value2) {
+    this.useStrictShallowCopy_ = value2;
+  }
+  applyPatches(base, patches) {
+    let i;
+    for (i = patches.length - 1; i >= 0; i--) {
+      const patch = patches[i];
+      if (patch.path.length === 0 && patch.op === "replace") {
+        base = patch.value;
+        break;
+      }
+    }
+    if (i > -1) {
+      patches = patches.slice(i + 1);
+    }
+    const applyPatchesImpl = getPlugin("Patches").applyPatches_;
+    if (isDraft(base)) {
+      return applyPatchesImpl(base, patches);
+    }
+    return this.produce(
+      base,
+      (draft2) => applyPatchesImpl(draft2, patches)
+    );
+  }
+};
+function createProxy(value2, parent) {
+  const draft2 = isMap(value2) ? getPlugin("MapSet").proxyMap_(value2, parent) : isSet(value2) ? getPlugin("MapSet").proxySet_(value2, parent) : createProxyProxy(value2, parent);
+  const scope = parent ? parent.scope_ : getCurrentScope();
+  scope.drafts_.push(draft2);
+  return draft2;
+}
+function current(value2) {
+  if (!isDraft(value2))
+    die(10, value2);
+  return currentImpl(value2);
+}
+function currentImpl(value2) {
+  if (!isDraftable(value2) || isFrozen(value2))
+    return value2;
+  const state = value2[DRAFT_STATE];
+  let copy;
+  if (state) {
+    if (!state.modified_)
+      return state.base_;
+    state.finalized_ = true;
+    copy = shallowCopy(value2, state.scope_.immer_.useStrictShallowCopy_);
+  } else {
+    copy = shallowCopy(value2, true);
+  }
+  each(copy, (key, childValue) => {
+    set2(copy, key, currentImpl(childValue));
+  });
+  if (state) {
+    state.finalized_ = false;
+  }
+  return copy;
+}
+var immer = new Immer2();
+var produce = immer.produce;
+var produceWithPatches = immer.produceWithPatches.bind(
+  immer
+);
+var setAutoFreeze = immer.setAutoFreeze.bind(immer);
+var setUseStrictShallowCopy = immer.setUseStrictShallowCopy.bind(immer);
+var applyPatches = immer.applyPatches.bind(immer);
+var createDraft = immer.createDraft.bind(immer);
+var finishDraft = immer.finishDraft.bind(immer);
+
+// ../node_modules/.pnpm/@deepseek-ai+dsh-client-sto_c4dee28068babcc7f9caf397e2e88b6e/node_modules/@deepseek-ai/dsh-client-store/lib/index.js
+function notifySubscribers(listeners, label, ...args) {
+  for (const listener of [...listeners]) try {
+    listener(...args);
+  } catch (error) {
+    console.error(`${label} subscriber failed:`, error);
+  }
+}
+function rafBatch(notify) {
+  const schedule = typeof requestAnimationFrame === "function" ? (fn) => {
+    requestAnimationFrame(() => {
+      fn();
+    });
+  } : (fn) => {
+    queueMicrotask(fn);
+  };
+  let scheduled = false;
+  return () => {
+    if (scheduled) return;
+    scheduled = true;
+    schedule(() => {
+      scheduled = false;
+      notify();
+    });
+  };
+}
+function createSnapshotStore(init, opts) {
+  const withSelector = subscribeWithSelector(() => init);
+  const api = createStore()(withSelector);
+  if (opts?.persist) attachPersistence(api, opts.persist.name);
+  let subscribe = (fn) => api.subscribe(() => {
+    notifySubscribers([fn], "[client-store]");
+  });
+  if (opts?.flush === "raf") {
+    const listeners = /* @__PURE__ */ new Set();
+    const flush = rafBatch(() => {
+      notifySubscribers(listeners, "[client-store]");
+    });
+    api.subscribe(flush);
+    subscribe = (fn) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    };
+  }
+  return {
+    getSnapshot: () => api.getState(),
+    subscribe: (fn) => subscribe(fn),
+    update: (mutator) => {
+      api.setState(produce(api.getState(), (draft2) => {
+        mutator(draft2);
+      }), true);
+    },
+    set: (next) => {
+      api.setState(devFreeze(next), true);
+    }
+  };
+}
+function attachPersistence(api, name) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const raw = localStorage.getItem(name);
+    if (raw !== null) api.setState(devFreeze(JSON.parse(raw)), true);
+  } catch (error) {
+    console.error(`snapshot store '${name}' rehydration failed:`, error);
+  }
+  api.subscribe((state) => {
+    try {
+      localStorage.setItem(name, JSON.stringify(state));
+    } catch (error) {
+      console.error(`snapshot store '${name}' persistence failed:`, error);
+    }
+  });
+}
+function devFreeze(value2) {
+  return freeze(value2, true);
+}
+
+// src/client/temporary-permission-entry.ts
+function registerTemporaryPermissionEntry(ctx, permissions) {
+  const store = createSnapshotStore(void 0);
+  void ctx.inject(["connection"], (connectionCtx) => {
+    const connection = connectionCtx.connection;
+    let generation = connection.generation.getSnapshot(), lifetime;
+    let owner;
+    let scopeLifetime, scopeKey = "";
+    const bindScope = () => {
+      const state = permissions.store.getSnapshot();
+      const key = JSON.stringify([state.generation, state.sessionId, state.scope, state.connected]);
+      if (key === scopeKey) return;
+      scopeKey = key;
+      scopeLifetime?.abort();
+      scopeLifetime = void 0;
+      store.set(void 0);
+      if (!lifetime || lifetime.signal.aborted || !state.connected || state.sessionId === null || state.scope === "unknown") return;
+      scopeLifetime = new AbortController();
+      store.set(temporaryPermissionClient(connection, AbortSignal.any([lifetime.signal, scopeLifetime.signal])));
+    };
+    const update = () => {
+      const next = connection.generation.getSnapshot();
+      if (lifetime && generation === next) return;
+      generation = next;
+      lifetime?.abort();
+      lifetime = void 0;
+      scopeLifetime?.abort();
+      scopeKey = "";
+      void owner?.dispose();
+      owner = void 0;
+      store.set(void 0);
+      if (next !== void 0) {
+        const current2 = lifetime = new AbortController();
+        owner = connectionCtx.plugin({ name: "dsmm-temporary-permission-generation", apply(ownerCtx) {
+          ownerCtx.effect(() => () => current2.abort());
+          if (current2.signal.aborted || connection.generation.getSnapshot() !== next) return;
+          registerTemporaryPermissionSlots(ownerCtx, connection);
+        } });
+      }
+      bindScope();
+    };
+    update();
+    connectionCtx.effect(() => connection.generation.subscribe(update));
+    connectionCtx.effect(() => permissions.store.subscribe(bindScope));
+    connectionCtx.effect(() => () => {
+      lifetime?.abort();
+      scopeLifetime?.abort();
+      store.set(void 0);
+    }, "dsmm: temporary permission connection lifetime");
+  });
+  return store;
 }
 
 // src/client/children-controller.ts
@@ -7979,8 +9868,8 @@ var ChildrenController = class {
     refresh: (generation) => this.refresh(generation),
     prompt: (generation, child2) => this.prompt(generation, child2),
     interrupt: (generation, child2) => this.interrupt(generation, child2),
-    editText: (generation, child2, text5) => this.editDraft(generation, child2, { text: text5 }),
-    setDelivery: (generation, child2, delivery) => this.editDraft(generation, child2, { delivery }),
+    editText: (generation, child2, text6) => this.editDraft(generation, child2, { text: text6 }),
+    setDelivery: (generation, child2, delivery2) => this.editDraft(generation, child2, { delivery: delivery2 }),
     addImages: (generation, child2, files) => this.addImages(generation, child2, files),
     removeImage: (generation, child2, image) => {
       const draft2 = this.draft(child2);
@@ -8026,10 +9915,10 @@ var ChildrenController = class {
   }
   fence(preserveDrafts, sessionId2 = this.current.sessionId) {
     const drafts = /* @__PURE__ */ new Map();
-    if (preserveDrafts) for (const [id2, draft2] of this.current.drafts) drafts.set(id2, {
+    if (preserveDrafts) for (const [id3, draft2] of this.current.drafts) drafts.set(id3, {
       ...draft2,
       imageBusy: false,
-      uncertain: draft2.uncertain || this.current.pending.get(childActionKey(id2)) === "prompt"
+      uncertain: draft2.uncertain || this.current.pending.get(childActionKey(id3)) === "prompt"
     });
     this.publish({
       sessionId: sessionId2,
@@ -8052,19 +9941,19 @@ var ChildrenController = class {
   available(generation) {
     return this.live(generation) && this.current.fresh && !this.current.reading;
   }
-  draft(id2) {
-    return this.current.drafts.get(id2) ?? EMPTY_CHILD_DRAFT;
+  draft(id3) {
+    return this.current.drafts.get(id3) ?? EMPTY_CHILD_DRAFT;
   }
-  child(id2) {
-    return this.current.snapshot?.children.find((child2) => child2.id === id2 && child2.parentSessionId === this.current.sessionId);
+  child(id3) {
+    return this.current.snapshot?.children.find((child2) => child2.id === id3 && child2.parentSessionId === this.current.sessionId);
   }
-  editDraft(generation, id2, patch) {
-    if (this.disposed || generation !== this.current.generation || this.child(id2)?.mode !== "continuable" || this.current.pending.has(childActionKey(id2))) return;
-    this.publishDraft(id2, patch);
+  editDraft(generation, id3, patch) {
+    if (this.disposed || generation !== this.current.generation || this.child(id3)?.mode !== "continuable" || this.current.pending.has(childActionKey(id3))) return;
+    this.publishDraft(id3, patch);
   }
-  publishDraft(id2, patch) {
+  publishDraft(id3, patch) {
     const drafts = new Map(this.current.drafts);
-    drafts.set(id2, { ...this.draft(id2), ...patch });
+    drafts.set(id3, { ...this.draft(id3), ...patch });
     this.publish({ drafts });
   }
   issue(error) {
@@ -8086,25 +9975,25 @@ var ChildrenController = class {
       throw new ControlFailure({ kind: "transport", code: "unavailable", unknown: true });
     }
     try {
-      const codec4 = ROLE_CONTROL_REMOTE.descriptors.find((row) => row.method === method).result;
-      if (codec4.mode !== "strict") throw new TypeError("Child result requires a strict codec.");
-      return codec4.create().parse(result.value);
+      const codec6 = ROLE_CONTROL_REMOTE.descriptors.find((row2) => row2.method === method).result;
+      if (codec6.mode !== "strict") throw new TypeError("Child result requires a strict codec.");
+      return codec6.create().parse(result.value);
     } catch {
       throw new ControlFailure({ kind: "protocol", code: "unavailable", unknown: true });
     }
   }
   async refresh(generation) {
     if (!this.live(generation) || this.current.reading || this.current.pending.size > 0 || [...this.current.drafts.values()].some((draft2) => draft2.imageBusy)) return;
-    const id2 = this.current.sessionId;
+    const id3 = this.current.sessionId;
     this.publish({ reading: true, issue: null, descendantIssue: null, fresh: false });
-    const [description, descendants2] = await Promise.allSettled([this.unwrap("describe", () => this.remote.describe(id2)), this.unwrap("descendants", () => this.remote.descendants(id2))]);
+    const [description, descendants2] = await Promise.allSettled([this.unwrap("describe", () => this.remote.describe(id3)), this.unwrap("descendants", () => this.remote.descendants(id3))]);
     if (!this.live(generation)) return;
     if (description.status === "rejected") {
       this.publish({ reading: false, issue: this.issue(description.reason), descendants: null });
       return;
     }
     const snapshot4 = parseChildSessionSnapshot(description.value);
-    if (snapshot4.sessionId !== id2) {
+    if (snapshot4.sessionId !== id3) {
       this.publish({ reading: false, issue: { kind: "protocol", code: "not-owned" }, descendants: null });
       return;
     }
@@ -8116,7 +10005,7 @@ var ChildrenController = class {
     if (descendants2.status === "rejected") descendantIssue = this.issue(descendants2.reason);
     else {
       tree = parseRoleControlDescendants(descendants2.value);
-      if (tree.sessionId !== id2 || tree.admissionEpoch !== snapshot4.admissionEpoch) {
+      if (tree.sessionId !== id3 || tree.admissionEpoch !== snapshot4.admissionEpoch) {
         tree = null;
         descendantIssue = { kind: "protocol", code: "conflict" };
       }
@@ -8145,13 +10034,13 @@ var ChildrenController = class {
     outcomes.set(key, outcome);
     this.publish({ outcomes });
   }
-  canControl(generation, id2, action2) {
-    const child2 = this.child(id2);
-    return this.available(generation) && !this.current.pending.has(childActionKey(id2)) && child2?.mode === "continuable" && !child2.readonly && enabled(child2.controls[action2]) && enabled(this.current.snapshot?.capabilities[action2]);
+  canControl(generation, id3, action2) {
+    const child2 = this.child(id3);
+    return this.available(generation) && !this.current.pending.has(childActionKey(id3)) && child2?.mode === "continuable" && !child2.readonly && enabled(child2.controls[action2]) && enabled(this.current.snapshot?.capabilities[action2]);
   }
-  async prompt(generation, id2) {
-    const draft2 = this.draft(id2), key = childActionKey(id2);
-    if (!this.canControl(generation, id2, "prompt") || draft2.uncertain || draft2.imageBusy || draft2.text.trim() === "" && draft2.images.length === 0 || draft2.images.length > 0 && !enabled(this.current.snapshot?.capabilities.images)) return;
+  async prompt(generation, id3) {
+    const draft2 = this.draft(id3), key = childActionKey(id3);
+    if (!this.canControl(generation, id3, "prompt") || draft2.uncertain || draft2.imageBusy || draft2.text.trim() === "" && draft2.images.length === 0 || draft2.images.length > 0 && !enabled(this.current.snapshot?.capabilities.images)) return;
     this.begin(key, "prompt");
     try {
       let clientTimeZone;
@@ -8159,12 +10048,12 @@ var ChildrenController = class {
         clientTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       } catch {
       }
-      let request;
+      let request2;
       try {
-        request = parseRoleControlPromptRequest({
+        request2 = parseRoleControlPromptRequest({
           requestId: crypto.randomUUID(),
           parentSessionId: this.current.sessionId,
-          childSessionId: id2,
+          childSessionId: id3,
           mode: "continuable",
           delivery: draft2.delivery,
           content: [...draft2.text === "" ? [] : [{ type: "text", text: draft2.text }], ...draft2.images],
@@ -8173,11 +10062,11 @@ var ChildrenController = class {
       } catch {
         throw new ControlFailure({ kind: "local", code: "invalid-content" });
       }
-      const receipt = await this.unwrap("prompt", () => this.remote.prompt(this.current.sessionId, request));
+      const receipt = await this.unwrap("prompt", () => this.remote.prompt(this.current.sessionId, request2));
       if (!this.live(generation)) return;
       this.accepted(key, { kind: "prompt", receipt });
       const drafts = new Map(this.current.drafts);
-      drafts.set(id2, { ...draft2, text: "", images: [], uncertain: false });
+      drafts.set(id3, { ...draft2, text: "", images: [], uncertain: false });
       this.publish({ drafts });
     } catch (error) {
       if (this.live(generation)) {
@@ -8185,7 +10074,7 @@ var ChildrenController = class {
         this.refuse(key, error);
         if (issue.unknown) {
           const drafts = new Map(this.current.drafts);
-          drafts.set(id2, { ...this.draft(id2), uncertain: true });
+          drafts.set(id3, { ...this.draft(id3), uncertain: true });
           this.publish({ drafts });
         }
       }
@@ -8193,12 +10082,12 @@ var ChildrenController = class {
       if (this.live(generation)) this.finish(key);
     }
   }
-  async interrupt(generation, id2) {
-    if (!this.canControl(generation, id2, "interrupt")) return;
-    const key = childActionKey(id2);
+  async interrupt(generation, id3) {
+    if (!this.canControl(generation, id3, "interrupt")) return;
+    const key = childActionKey(id3);
     this.begin(key, "interrupt");
     try {
-      const receipt = await this.unwrap("interrupt", () => this.remote.interrupt(this.current.sessionId, { parentSessionId: this.current.sessionId, childSessionId: id2, mode: "continuable" }));
+      const receipt = await this.unwrap("interrupt", () => this.remote.interrupt(this.current.sessionId, { parentSessionId: this.current.sessionId, childSessionId: id3, mode: "continuable" }));
       if (this.live(generation)) this.accepted(key, { kind: "interrupt", receipt });
     } catch (error) {
       if (this.live(generation)) this.refuse(key, error);
@@ -8206,9 +10095,9 @@ var ChildrenController = class {
       if (this.live(generation)) this.finish(key);
     }
   }
-  async addImages(generation, id2, files) {
-    if (!this.canControl(generation, id2, "prompt") || !enabled(this.current.snapshot?.capabilities.images) || this.draft(id2).imageBusy || files.length === 0) return;
-    this.editDraft(generation, id2, { imageBusy: true });
+  async addImages(generation, id3, files) {
+    if (!this.canControl(generation, id3, "prompt") || !enabled(this.current.snapshot?.capabilities.images) || this.draft(id3).imageBusy || files.length === 0) return;
+    this.editDraft(generation, id3, { imageBusy: true });
     try {
       const images = [];
       for (const file of files) {
@@ -8219,74 +10108,74 @@ var ChildrenController = class {
         const parsed = parseRoleControlPromptRequest({
           requestId: "image-intake",
           parentSessionId: this.current.sessionId,
-          childSessionId: id2,
+          childSessionId: id3,
           mode: "continuable",
           delivery: "queue",
           content: [{ type: "image", mediaType: file.type, data: btoa(body), name: file.name }]
         });
         images.push(parsed.content[0]);
       }
-      if (this.live(generation)) this.publishDraft(id2, { images: [...this.draft(id2).images, ...images] });
+      if (this.live(generation)) this.publishDraft(id3, { images: [...this.draft(id3).images, ...images] });
     } catch {
-      if (this.live(generation)) this.refuse(childActionKey(id2), new ControlFailure({ kind: "local", code: "invalid-content" }));
+      if (this.live(generation)) this.refuse(childActionKey(id3), new ControlFailure({ kind: "local", code: "invalid-content" }));
     } finally {
-      if (this.live(generation)) this.publishDraft(id2, { imageBusy: false });
+      if (this.live(generation)) this.publishDraft(id3, { imageBusy: false });
     }
   }
 };
 
 // src/client/ChildrenPanel.tsx
-var import_react9 = require("react");
-var import_dsh_client_ui_primitives10 = require("@deepseek-ai/dsh-client-ui-primitives");
-var import_jsx_runtime12 = require("react/jsx-runtime");
-function ControlAvailability({ value, label, t }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-availability", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+var import_react13 = require("react");
+var import_dsh_client_ui_primitives12 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_jsx_runtime16 = require("react/jsx-runtime");
+function ControlAvailability({ value: value2, label, t }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-availability", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
       t(label),
       ": ",
-      t(value?.enabled === true ? "enabled" : "disabled")
+      t(value2?.enabled === true ? "enabled" : "disabled")
     ] }),
-    value?.enabled !== true && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t(`reason:${value?.reason ?? "unavailable"}`) })
+    value2?.enabled !== true && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t(`reason:${value2?.reason ?? "unavailable"}`) })
   ] });
 }
 function routeText(route3) {
   return `${route3.provider}/${route3.model}${route3.reasoningEffort === void 0 ? "" : ` (${route3.reasoningEffort})`}`;
 }
-function RouteComparisonDetails({ value, t }) {
-  const initial = value?.initialRoute, live = value?.liveRoute;
+function RouteComparisonDetails({ value: value2, t }) {
+  const initial2 = value2?.initialRoute, live = value2?.liveRoute;
   const liveReasons = { "no-own-request-header": "routeNoOwnHeader", "invalid-own-request-header": "routeInvalidOwnHeader", "not-observed": "routeNotObserved" };
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-availability", children: [
-    value === void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("comparisonUnobserved") }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dl", { className: "dsmm-child-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("initialRoute") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: initial?.status === "known" ? routeText(initial.route) : t("routeUnknown") }),
-      initial?.status === "known" ? /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("initialRouteSource") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-availability", children: [
+    value2 === void 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("comparisonUnobserved") }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("dl", { className: "dsmm-child-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("initialRoute") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: initial2?.status === "known" ? routeText(initial2.route) : t("routeUnknown") }),
+      initial2?.status === "known" ? /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("initialRouteSource") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("dd", { children: [
           t("routeCaptureSource"),
           " · ",
-          initial.source
+          initial2.source
         ] })
-      ] }) : initial !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("initialRouteReason") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
+      ] }) : initial2 !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("initialRouteReason") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("dd", { children: [
           t("routeMissingCapture"),
           " · ",
-          initial.reason
+          initial2.reason
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("liveRoute") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: live?.status === "known" ? routeText(live.route) : t("routeUnknown") }),
-      live?.status === "known" ? /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("liveRouteSource") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("liveRoute") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: live?.status === "known" ? routeText(live.route) : t("routeUnknown") }),
+      live?.status === "known" ? /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("liveRouteSource") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("dd", { children: [
           t("routeOwnHeaderSource"),
           " · ",
           live.source
         ] })
-      ] }) : live !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("liveRouteReason") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
+      ] }) : live !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("liveRouteReason") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("dd", { children: [
           t(liveReasons[live.reason]),
           " · ",
           live.reason
@@ -8295,70 +10184,70 @@ function RouteComparisonDetails({ value, t }) {
     ] })
   ] });
 }
-function InvocationDetails({ value, t, showComparison = true }) {
-  if (value === void 0) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("invocationUnavailable") });
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-    showComparison && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(RouteComparisonDetails, { value: value.routeComparison, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dl", { className: "dsmm-child-meta", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("role") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("dd", { children: [
-        value.label,
+function InvocationDetails({ value: value2, t, showComparison = true }) {
+  if (value2 === void 0) return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("invocationUnavailable") });
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+    showComparison && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(RouteComparisonDetails, { value: value2.routeComparison, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("dl", { className: "dsmm-child-meta", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("role") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("dd", { children: [
+        value2.label,
         " · ",
-        value.role
+        value2.role
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("level") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: value.level }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("mode") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: value.mode }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("reportedRoute") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: value.route === void 0 ? t("routeUnreported") : routeText(value.route) }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("routeSource") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: value.routeSource }),
-      value.runId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("runId") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: value.runId })
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("level") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: value2.level }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("mode") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: value2.mode }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("reportedRoute") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: value2.route === void 0 ? t("routeUnreported") : routeText(value2.route) }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("routeSource") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: value2.routeSource }),
+      value2.runId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("runId") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: value2.runId })
       ] }),
-      value.childId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("childId") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: value.childId })
+      value2.childId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("childId") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: value2.childId })
       ] }),
-      value.jobId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dt", { children: t("jobId") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("dd", { children: value.jobId })
+      value2.jobId !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dt", { children: t("jobId") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("dd", { children: value2.jobId })
       ] })
     ] })
   ] });
 }
-function Issue2({ value, t }) {
-  if (!value) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-issue", role: "alert", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t(value.unknown ? "unknownAction" : "error", { code: value.code }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
-      value.code,
-      value.field === void 0 ? "" : ` · ${t("field")}: ${value.field}`
+function Issue2({ value: value2, t }) {
+  if (!value2) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-issue", role: "alert", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { children: t(value2.unknown ? "unknownAction" : "error", { code: value2.code }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
+      value2.code,
+      value2.field === void 0 ? "" : ` · ${t("field")}: ${value2.field}`
     ] }),
-    value.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t(`reason:${value.reason}`) })
+    value2.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { children: t(`reason:${value2.reason}`) })
   ] });
 }
-function Outcome({ value, t }) {
-  if (!value) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "dsmm-availability", role: "status", "aria-live": "polite", children: value.kind === "prompt" ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("promptAccepted", { id: value.receipt.messageId }) }) : /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("interruptAccepted") }) });
+function Outcome({ value: value2, t }) {
+  if (!value2) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("div", { className: "dsmm-availability", role: "status", "aria-live": "polite", children: value2.kind === "prompt" ? /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { children: t("promptAccepted", { id: value2.receipt.messageId }) }) : /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { children: t("interruptAccepted") }) });
 }
 function ChildComposer({ child: child2, state, actions: actions2, t }) {
-  const prefix = (0, import_react9.useId)(), picker = (0, import_react9.useRef)(null), generation = state.generation, key = childActionKey(child2.id);
+  const prefix = (0, import_react13.useId)(), picker = (0, import_react13.useRef)(null), generation = state.generation, key = childActionKey(child2.id);
   const draft2 = state.drafts.get(child2.id) ?? EMPTY_CHILD_DRAFT;
   const pending = state.pending.has(key), available = state.fresh && !state.reading && !pending;
   const canPrompt = available && enabled(state.snapshot?.capabilities.prompt) && enabled(child2.controls.prompt) && !child2.readonly && child2.mode === "continuable";
   const canImages = canPrompt && enabled(state.snapshot?.capabilities.images) && !draft2.imageBusy;
   const submit = canPrompt && !draft2.uncertain && !draft2.imageBusy && (draft2.text.trim() !== "" || draft2.images.length > 0) && (draft2.images.length === 0 || enabled(state.snapshot?.capabilities.images));
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("form", { className: "dsmm-child-composer", "aria-label": t("prompt"), onSubmit: (event) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("form", { className: "dsmm-child-composer", "aria-label": t("prompt"), onSubmit: (event) => {
     event.preventDefault();
     if (submit) void actions2.prompt(generation, child2.id);
   }, children: [
-    !state.fresh && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t(state.reading ? "reading" : "stale") }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("label", { htmlFor: `${prefix}-message`, children: t("text") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+    !state.fresh && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t(state.reading ? "reading" : "stale") }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("label", { htmlFor: `${prefix}-message`, children: t("text") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(
         "textarea",
         {
           id: `${prefix}-message`,
@@ -8371,48 +10260,48 @@ function ChildComposer({ child: child2, state, actions: actions2, t }) {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("label", { htmlFor: `${prefix}-delivery`, children: t("delivery") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("select", { id: `${prefix}-delivery`, value: draft2.delivery, disabled: !canPrompt, "aria-describedby": `${prefix}-delivery-hint`, onChange: (event) => {
-        const value = event.currentTarget.value;
-        if (value === "queue" || value === "steer") actions2.setDelivery(generation, child2.id, value);
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("label", { htmlFor: `${prefix}-delivery`, children: t("delivery") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("select", { id: `${prefix}-delivery`, value: draft2.delivery, disabled: !canPrompt, "aria-describedby": `${prefix}-delivery-hint`, onChange: (event) => {
+        const value2 = event.currentTarget.value;
+        if (value2 === "queue" || value2 === "steer") actions2.setDelivery(generation, child2.id, value2);
       }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "queue", children: t("queue") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "steer", children: t("steer") })
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("option", { value: "queue", children: t("queue") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("option", { value: "steer", children: t("steer") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { id: `${prefix}-delivery-hint`, className: "dsmm-hint", children: t("deliveryHint") })
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { id: `${prefix}-delivery-hint`, className: "dsmm-hint", children: t("deliveryHint") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { id: `${prefix}-images-hint`, className: "dsmm-hint", children: t("imagesHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("input", { ref: picker, hidden: true, type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", multiple: true, disabled: !canImages, "aria-label": t("images"), onChange: (event) => {
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { id: `${prefix}-images-hint`, className: "dsmm-hint", children: t("imagesHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("input", { ref: picker, hidden: true, type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", multiple: true, disabled: !canImages, "aria-label": t("images"), onChange: (event) => {
         const files = Array.from(event.currentTarget.files ?? []);
         event.currentTarget.value = "";
         if (canImages) void actions2.addImages(generation, child2.id, files);
       } }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives10.Button, { type: "button", variant: "outline", disabled: !canImages, "aria-describedby": `${prefix}-images-hint`, onClick: () => {
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(import_dsh_client_ui_primitives12.Button, { type: "button", variant: "outline", disabled: !canImages, "aria-describedby": `${prefix}-images-hint`, onClick: () => {
         if (canImages) picker.current?.click();
       }, children: t("images") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ControlAvailability, { value: state.snapshot?.capabilities.images, label: "imageAvailability", t }),
-      draft2.images.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("ul", { className: "dsmm-profile-list", children: draft2.images.map((image, index) => /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("li", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ControlAvailability, { value: state.snapshot?.capabilities.images, label: "imageAvailability", t }),
+      draft2.images.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("ul", { className: "dsmm-profile-list", children: draft2.images.map((image, index) => /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("li", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
           image.name ?? image.mediaType,
           " · ",
           image.mediaType
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives10.Button, { type: "button", variant: "outline", disabled: pending || draft2.imageBusy, onClick: () => actions2.removeImage(generation, child2.id, image), "aria-label": `${t("removeImage")}: ${image.name ?? image.mediaType}`, children: t("removeImage") })
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(import_dsh_client_ui_primitives12.Button, { type: "button", variant: "outline", disabled: pending || draft2.imageBusy, onClick: () => actions2.removeImage(generation, child2.id, image), "aria-label": `${t("removeImage")}: ${image.name ?? image.mediaType}`, children: t("removeImage") })
       ] }, index)) })
     ] }),
-    draft2.uncertain && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-warning", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { id: `${prefix}-unknown`, children: t("unknown") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives10.Button, { type: "button", variant: "outline", disabled: !state.fresh || state.reading || pending, onClick: () => actions2.acknowledgeUnknown(generation, child2.id), children: t("acknowledge") })
+    draft2.uncertain && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-warning", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { id: `${prefix}-unknown`, children: t("unknown") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(import_dsh_client_ui_primitives12.Button, { type: "button", variant: "outline", disabled: !state.fresh || state.reading || pending, onClick: () => actions2.acknowledgeUnknown(generation, child2.id), children: t("acknowledge") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ControlAvailability, { value: !enabled(state.snapshot?.capabilities.prompt) ? state.snapshot?.capabilities.prompt : child2.controls.prompt, label: "promptAvailability", t }),
-    draft2.text.trim() === "" && draft2.images.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("emptyMessage") }),
-    draft2.images.length > 0 && !enabled(state.snapshot?.capabilities.images) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("deniedImages") }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-actions", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives10.Button, { type: "submit", variant: "primary", disabled: !submit, children: t("send") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
-        import_dsh_client_ui_primitives10.Button,
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ControlAvailability, { value: !enabled(state.snapshot?.capabilities.prompt) ? state.snapshot?.capabilities.prompt : child2.controls.prompt, label: "promptAvailability", t }),
+    draft2.text.trim() === "" && draft2.images.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("emptyMessage") }),
+    draft2.images.length > 0 && !enabled(state.snapshot?.capabilities.images) && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("deniedImages") }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-actions", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(import_dsh_client_ui_primitives12.Button, { type: "submit", variant: "primary", disabled: !submit, children: t("send") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(
+        import_dsh_client_ui_primitives12.Button,
         {
           type: "button",
           variant: "outline",
@@ -8422,124 +10311,125 @@ function ChildComposer({ child: child2, state, actions: actions2, t }) {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: pending ? t("pending") : draft2.imageBusy ? t("imageReading") : "" })
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: pending ? t("pending") : draft2.imageBusy ? t("imageReading") : "" })
   ] });
 }
-function ChildDetails({ child: child2, state, actions: actions2, t, inspection = false }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("fieldset", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("legend", { children: child2.label?.trim() ? child2.label : child2.id }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+function ChildDetails({ child: child2, state, actions: actions2, t, inspection = false, renderChildPermissions }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("fieldset", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("legend", { children: child2.label?.trim() ? child2.label : child2.id }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
       t("childId"),
       ": ",
       child2.id
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
       t("parentId"),
       ": ",
       child2.parentSessionId
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
       t("mode"),
       ": ",
       child2.mode
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
       t("activity"),
       ": ",
       child2.activity
     ] }),
-    (inspection || child2.readonly) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("readonly") }),
-    child2.mode === "one-shot" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("oneShot") }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(RouteComparisonDetails, { value: child2.routeComparison, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(InvocationDetails, { value: child2.invocation, t, showComparison: false }),
-    (!inspection || !child2.controls.prompt.enabled) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ControlAvailability, { value: child2.controls.prompt, label: "promptAvailability", t }),
-    (!inspection || !child2.controls.interrupt.enabled) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ControlAvailability, { value: child2.controls.interrupt, label: "interruptAvailability", t }),
-    !inspection && child2.mode === "continuable" && !child2.readonly && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ChildComposer, { child: child2, state, actions: actions2, t }),
-    !inspection && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(Issue2, { value: state.issues.get(childActionKey(child2.id)), t }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(Outcome, { value: state.outcomes.get(childActionKey(child2.id)), t })
+    (inspection || child2.readonly) && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { children: t("readonly") }),
+    child2.mode === "one-shot" && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("oneShot") }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(RouteComparisonDetails, { value: child2.routeComparison, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(InvocationDetails, { value: child2.invocation, t, showComparison: false }),
+    (!inspection || !child2.controls.prompt.enabled) && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ControlAvailability, { value: child2.controls.prompt, label: "promptAvailability", t }),
+    (!inspection || !child2.controls.interrupt.enabled) && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ControlAvailability, { value: child2.controls.interrupt, label: "interruptAvailability", t }),
+    !inspection && child2.mode === "continuable" && !child2.readonly && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ChildComposer, { child: child2, state, actions: actions2, t }),
+    !inspection && child2.mode === "continuable" && !child2.readonly && renderChildPermissions?.(child2),
+    !inspection && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(Issue2, { value: state.issues.get(childActionKey(child2.id)), t }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(Outcome, { value: state.outcomes.get(childActionKey(child2.id)), t })
     ] })
   ] });
 }
 function ChildrenPanel(props) {
   const state = props.useChildren((snapshot4) => snapshot4), { t } = props, generation = state.generation;
-  if (props.sessionId === void 0 || props.sessionId !== state.sessionId) return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-profiles dsmm-children", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("h2", { children: t("title") }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t(state.sessionId === null ? "noSession" : "foreign") })
+  if (props.sessionId === void 0 || props.sessionId !== state.sessionId) return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("section", { className: "dsmm-profiles dsmm-children", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("h2", { children: t("title") }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { children: t(state.sessionId === null ? "noSession" : "foreign") })
   ] });
   const data = state.snapshot;
   const refreshingDisabled = state.reading || state.pending.size > 0 || [...state.drafts.values()].some((draft2) => draft2.imageBusy);
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-profiles dsmm-children", "aria-label": t("title"), "aria-busy": state.reading, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("h2", { children: t("title") }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("description") }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("section", { className: "dsmm-profiles dsmm-children", "aria-label": t("title"), "aria-busy": state.reading, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("h2", { children: t("title") }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("description") }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
       t("session"),
       ": ",
       state.sessionId
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "dsmm-actions", children: /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(import_dsh_client_ui_primitives10.Button, { type: "button", variant: "outline", disabled: refreshingDisabled, onClick: () => void props.refresh(generation), children: t("refresh") }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.reading ? t("reading") : state.pending.size > 0 ? t("pending") : !state.fresh ? t(data === null ? "unavailable" : "stale") : "" }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(Issue2, { value: state.issue, t }),
-    data !== null && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("div", { className: "dsmm-actions", children: /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(import_dsh_client_ui_primitives12.Button, { type: "button", variant: "outline", disabled: refreshingDisabled, onClick: () => void props.refresh(generation), children: t("refresh") }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: state.reading ? t("reading") : state.pending.size > 0 ? t("pending") : !state.fresh ? t(data === null ? "unavailable" : "stale") : "" }),
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(Issue2, { value: state.issue, t }),
+    data !== null && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
         t("epoch"),
         ": ",
         data.admissionEpoch
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-availability", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("section", { className: "dsmm-availability", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
           t("runtime"),
           ": ",
           data.capabilities.runtime.binding
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
           t("fence"),
           ": ",
           t(data.capabilities.runtime.deliveryFenceReady ? "yes" : "no")
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
           t("restart"),
           ": ",
           t(data.capabilities.runtime.restartRequired ? "yes" : "no")
         ] }),
-        data.capabilities.runtime.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("authority") }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ControlAvailability, { value: data.capabilities.prompt, label: "promptAvailability", t }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ControlAvailability, { value: data.capabilities.interrupt, label: "interruptAvailability", t })
+        data.capabilities.runtime.reason !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { children: t("authority") }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ControlAvailability, { value: data.capabilities.prompt, label: "promptAvailability", t }),
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ControlAvailability, { value: data.capabilities.interrupt, label: "interruptAvailability", t })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("backgroundHint") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-zone", "aria-label": t("children"), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("h3", { children: t("children") }),
-        data.children.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("emptyChildren") }) : data.children.map((child2) => /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ChildDetails, { child: child2, state, actions: props, t }, child2.id))
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("backgroundHint") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("section", { className: "dsmm-zone", "aria-label": t("children"), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("h3", { children: t("children") }),
+        data.children.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("emptyChildren") }) : data.children.map((child2) => /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ChildDetails, { child: child2, state, actions: props, t, renderChildPermissions: props.renderChildPermissions }, child2.id))
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("section", { className: "dsmm-zone", "aria-label": t("descendants"), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("h3", { children: t("descendants") }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(Issue2, { value: state.descendantIssue, t }),
-      state.descendants === null ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("treeUnavailable") }) : state.descendants.descendants.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "dsmm-hint", children: t("emptyDescendants") }) : state.descendants.descendants.map((entry, index) => /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-availability", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("section", { className: "dsmm-zone", "aria-label": t("descendants"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("h3", { children: t("descendants") }),
+      /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(Issue2, { value: state.descendantIssue, t }),
+      state.descendants === null ? /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("treeUnavailable") }) : state.descendants.descendants.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { className: "dsmm-hint", children: t("emptyDescendants") }) : state.descendants.descendants.map((entry, index) => /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-availability", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
           t("depth"),
           ": ",
           entry.depth
         ] }),
-        entry.kind === "diagnostic" ? /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dsmm-issue", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: t("diagnostic", { reason: entry.reason }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+        entry.kind === "diagnostic" ? /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "dsmm-issue", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("p", { children: t("diagnostic", { reason: entry.reason }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
             t("childId"),
             ": ",
             entry.id
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
             t("parentId"),
             ": ",
             entry.parentSessionId
           ] })
-        ] }) : /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { children: [
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(import_jsx_runtime16.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("p", { children: [
             t("subtree"),
             ": ",
             t(entry.hasChildren ? "yes" : "no")
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ChildDetails, { child: entry.child, state, actions: props, t, inspection: true })
+          /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(ChildDetails, { child: entry.child, state, actions: props, t, inspection: true })
         ] })
       ] }, index))
     ] })
@@ -8550,12 +10440,14 @@ function ChildrenPanel(props) {
 var inject = ["slots", "locale", "remote"];
 async function apply(ctx) {
   registerRoleToolViews(ctx);
-  await ctx.remote.$mount(TYPERT_REMOTE);
+  await ctx.remote.$mount({ ...TYPERT_REMOTE, descriptors: [...TYPERT_REMOTE.descriptors, ...HISTORY_REMOTE.descriptors] });
   await ctx.remote.$mount(ROLE_CONTROL_REMOTE);
   await ctx.remote.$mount(PERMISSION_REMOTE);
+  registerHistoryContinuation(ctx);
   const permissions = new PermissionController();
   ctx.effect(() => () => permissions.dispose(), "dsmm: permission controls");
   ctx.effect(() => ctx.locale.register(PERMISSIONS_NS, { en: permissionEn, zh: permissionZh }), "dsmm: permission locale");
+  const temporaryPermissions = registerTemporaryPermissionEntry(ctx, permissions);
   void ctx.inject(["connection"], (connectionCtx) => {
     const handle = connectionCtx.connection, invoke = permissionClient(handle);
     const update = () => {
@@ -8570,16 +10462,16 @@ async function apply(ctx) {
     const source = sessionCtx.uiSession.adapter.current, sessions = sessionCtx.sessions;
     let observed, stop;
     const update = () => {
-      const id2 = source.getSnapshot().key, binding = id2 === void 0 ? void 0 : sessions.binding(id2);
+      const id3 = source.getSnapshot().key, binding = id3 === void 0 ? void 0 : sessions.binding(id3);
       if (binding !== observed) {
         stop?.();
         observed = binding;
         stop = binding?.session.subscribe(update);
       }
-      const snapshot4 = binding?.session.getSnapshot(), catalog = sessions.list.getSnapshot(), summary = id2 === void 0 ? void 0 : catalog.byId[id2];
-      const child2 = snapshot4?.subagent != null || summary?.origin === "subagent" || summary?.parentId !== void 0;
-      const root = id2 !== void 0 && binding?.sessionId === id2 && snapshot4?.sessionId === id2 && snapshot4.openState === "open" && !snapshot4.removed && catalog.ids.includes(id2) && summary !== void 0 && !child2;
-      permissions.bindScope(id2 ?? null, binding ?? null, child2 ? "child" : root ? "root" : "unknown");
+      const snapshot4 = binding?.session.getSnapshot(), catalog = sessions.list.getSnapshot(), summary2 = id3 === void 0 ? void 0 : catalog.byId[id3];
+      const child2 = snapshot4?.subagent != null || summary2?.origin === "subagent" || summary2?.parentId !== void 0;
+      const root = id3 !== void 0 && binding?.sessionId === id3 && snapshot4?.sessionId === id3 && snapshot4.openState === "open" && !snapshot4.removed && catalog.ids.includes(id3) && summary2 !== void 0 && !child2;
+      permissions.bindScope(id3 ?? null, binding ?? null, child2 ? "child" : root ? "root" : "unknown");
     };
     update();
     sessionCtx.effect(() => source.subscribe(update));
@@ -8613,7 +10505,7 @@ async function apply(ctx) {
       document.head.append(style);
       return () => style.remove();
     }, "dsmm: core styles");
-    const inject2 = () => ({ core, remote: coreCtx.remote.dsmmConfig, workspace });
+    const inject2 = () => ({ core, remote: coreCtx.remote.dsmmConfig, workspace, temporaryPermissions, permissionsT: coreCtx.locale.bind(PERMISSIONS_NS) });
     coreCtx.slots.inject("plugins.bundle.config", () => coreCtx.slots.register({ name: "plugins.bundle.config", key: "@dsmm/dsmm", locale: DEPLOYMENT_NS, inject: inject2 }, DeploymentPage));
     void coreCtx.inject(["configForms"], (formCtx) => {
       workspace.bindForms(formCtx.configForms);
@@ -8623,6 +10515,11 @@ async function apply(ctx) {
   });
   await ctx.inject(["remote.dsmmProfiles"], (profileCtx) => {
     const controller = new ProfilesController(profileCtx.remote.dsmmProfiles);
+    void profileCtx.inject(["connection"], (connectionCtx) => {
+      controller.bindConnection(connectionCtx.connection.generation);
+      void controller.refresh();
+      connectionCtx.effect(() => () => controller.bindConnection(null), "dsmm: profile connection withdrawal");
+    });
     profiles = controller;
     profileCtx.effect(() => controller.store.subscribe(() => {
       deployment?.setSession(controller.store.getSnapshot().session);
@@ -8641,6 +10538,10 @@ async function apply(ctx) {
       return () => style.remove();
     }, "dsmm: profile styles");
     const t = profileCtx.locale.bind(NS);
+    void profileCtx.inject(["conversation"], (conversationCtx) => {
+      controller.attachComposerBlocks(conversationCtx.conversation.blocks, () => t("sessionSelectionBlock"));
+      conversationCtx.effect(() => () => controller.attachComposerBlocks(null), "dsmm: profile composer block lifetime");
+    });
     profileCtx.slots.inject("settings.section", () => profileCtx.slots.register({
       name: "settings.section",
       id: "dsmm-profiles",
@@ -8682,13 +10583,13 @@ async function apply(ctx) {
       }, "dsmm: native session withdrawal");
       void sessionCtx.inject(["modelDirectories", "remote.session"], (modelCtx) => {
         const updateInteraction = () => {
-          const id2 = source.getSnapshot().key;
-          if (id2 === void 0 || nativeSessions.binding(id2) === void 0) {
+          const id3 = source.getSnapshot().key;
+          if (id3 === void 0 || nativeSessions.binding(id3) === void 0) {
             controller.attachModelInteractionSource(null, null);
             return;
           }
           try {
-            controller.attachModelInteractionSource(id2, modelCtx.modelDirectories.directoryFor(id2).store);
+            controller.attachModelInteractionSource(id3, modelCtx.modelDirectories.directoryFor(id3).store);
           } catch {
             controller.attachModelInteractionSource(null, null);
           }
@@ -8698,7 +10599,6 @@ async function apply(ctx) {
         modelCtx.effect(() => () => controller.attachModelInteractionSource(null, null), "dsmm: native model interaction withdrawal");
       });
     });
-    void controller.refresh();
   });
 }
 return module.exports; } });

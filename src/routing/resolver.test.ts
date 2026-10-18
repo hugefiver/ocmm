@@ -267,7 +267,7 @@ test("falls back to first chain entry when current model isn't in the chain", ()
     providerID: "openai",
   })
   assert.ok(r)
-  assert.equal(r!.entry.model, "gpt-6.1-sol")
+  assert.equal(r!.entry.model, "gpt-6-astra")
   assert.deepEqual(r!.entry, BUILTIN_AGENT_INDEX.get("reviewer")!.requirement.fallbackChain[0])
   assert.equal(r!.variant, "xhigh")
   assert.equal(r!.source, "agent-default")

@@ -41,6 +41,8 @@ export interface PermissionRegistration {
 export declare function permissionOriginal(value: object): object;
 type Request = Parameters<Context["approval"]["request"]>[0];
 type Outcome = Awaited<ReturnType<Context["approval"]["request"]>>;
+/** Explicitly audited DSMM approval adapters retain identity through the patched dispatcher. */
+export declare function permissionApprovalAdapter(ctx: Context, listener: (request: Request, next: () => Promise<Outcome>) => Promise<Outcome>): typeof listener;
 export declare function isSandboxWidening(requested: NativeCommandEntry["sandboxMode"], standing: string | undefined): boolean;
 /** Permission admission precedes native approval; subsequent checks enforce execution integrity only. */
 export declare class PermissionControl {

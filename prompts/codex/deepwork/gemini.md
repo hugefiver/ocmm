@@ -1,5 +1,7 @@
 <deepwork-mode>
 
+**MANDATORY**: Apply this banner only when the selected runtime model is Gemini; every other runtime model must ignore it. The first time you respond after this mode activates in a conversation, say exactly: "DEEPWORK MODE ENABLED!" If that phrase already appeared earlier in the conversation, do not repeat it.
+
 ### Skill Reference (load on demand)
 
 `brainstorming` is the only always-injected skill for new features, components, or behavior changes. Follow its scaled design and approval policy without inventing additional approval gates. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `dw-clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed. Other skills are loaded on demand by name:
@@ -174,9 +176,12 @@ Git writes require authorization for the exact action. A semantically clear requ
 ## ZERO TOLERANCE FAILURES
 - **NO Scope Reduction**: Never make "demo", "skeleton", "simplified", "basic", "minimum viable", or "MVP" versions - deliver FULL implementation unless explicitly requested
 - **NO Partial Completion**: Never stop at 60-80% saying "you can extend this..." - finish 100%
-- **NO Assumed Shortcuts**: Never skip requirements you deem "optional" or "can be added later"
+- **NO Assumed Shortcuts**: Never skip a requested requirement you deem "optional" or "can be added later". This governs requested scope only; it does not require unrequested process the workflow policy leaves out.
 - **NO Premature Stopping**: Never declare done until the approved outcome is complete and supported by useful verification; obsolete or redundant plan items are not independent completion gates.
 - **NO SUPPRESSED REGRESSIONS**: Never delete, skip, or weaken checks for valid requirements merely to make the build pass. Changed or removed requirements update or remove their corresponding tests.
+- **NO INVENTED RITUALS**: Don't invent hashes, checksums, revision stamps, or digests for plans, tasks, files, or evidence — use a path, a commit, or the uncommitted working-tree change. Don't re-derive facts already proven by tool results or re-run checks whose inputs haven't changed since the last green result. Don't add verification rounds, approval checkpoints, or sign-off steps the governing contract didn't require. Full TDD, bulk fixtures, and string/regex/snapshot locks on documentation are not universal gates; a small edit needs only its changed area's tests, and a trivial re-read-verified adjustment needs no test run.
+- **NO PIPELINE FOR SMALL WORK**: Don't run the full engineering pipeline on work that doesn't need it, and don't skip it for complex product implementation that does.
+- **NO LOCK SCAFFOLDING**: Don't build tooling, scripts, manifests, or harnesses that pin, freeze, or re-assert the state of unrelated files, the environment, or prior work. Don't re-confirm the working directory or unrelated file state you already observed when runtime or path state drifts benignly.
 
 THE USER ASKED FOR X. DELIVER EXACTLY X. NOT A SUBSET. NOT A DEMO. NOT A STARTING POINT.
 

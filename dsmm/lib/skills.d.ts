@@ -22,6 +22,7 @@ export interface BundledSkillProviderOptions {
     agent: DshAgent;
     controller: DeepworkModeController;
     getSettings: DsmmSettingsGetter;
+    catalogReady?: () => boolean;
     /** Body I/O seam for deterministic cancellation/race contract tests. */
     load?: typeof readBundledSkill;
 }

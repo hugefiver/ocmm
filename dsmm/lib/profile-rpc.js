@@ -132,6 +132,8 @@ let DsmmProfilesHost = (() => {
                 const checkAuthority = () => {
                     if (signal.aborted)
                         throw new DsmmProfileError("cancelled", "The session profile operation was cancelled; no late selection is allowed.");
+                    if (!readOnly)
+                        assertLocalSettingsOperator(this.ctx);
                     const currentConnection = this.ctx.get("connection");
                     const currentOwner = currentConnection === undefined ? undefined : Reflect.get(currentConnection, symbols.original) ?? currentConnection;
                     if (currentOwner !== connectionOwner || currentConnection?.browserPeer !== invocation.peer) {

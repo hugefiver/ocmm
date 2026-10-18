@@ -125,6 +125,18 @@ Before changing an area, read covering tests against the final valid requirement
 
 For code changes, use targeted tests and diagnostics. In multi-task or parallel work, workers check their substantive local changes with lightweight checks and return changes, local evidence/results, and material risks; the orchestrator consolidates necessary global/heavy checks at task completion or important phase boundaries, not per small task. Reuse passing evidence by material relevance under embedded brainstorming, not a frozen code/dependency/environment condition; rerun only affected or missing checks and report uncovered risks. Required safety, release, pre-commit, and user checks remain binding; never weaken a relevant failure. Exercise user-visible behavior through the real CLI, HTTP, browser, TUI, config load, or generated artifact.
 
+## Process Economy
+
+The role prompt owns workflow policy. This section only removes the tendencies that inflate process past it. Recognize and stop these when they start:
+
+- Inventing hashes, checksums, revision stamps, or digests for plans, tasks, coordination state, files, or evidence. Use a path, a commit, or the uncommitted working-tree change instead; hashing belongs to an explicit external integrity, release, security, or protocol requirement.
+- Re-deriving facts already proven by tool results, re-reading files unchanged since the last read, or re-running checks whose inputs have not changed since the last green result.
+- Applying full TDD universally, starting with bulk fixtures or test matrices, or adding string/regex/snapshot locks on documentation, commit messages, or package metadata.
+- Entering the full engineering pipeline for work that does not need it.
+- Adding verification rounds, approval checkpoints, or sign-off steps no governing contract required.
+- Building scaffolding whose purpose is to pin, freeze, or re-assert the state of unrelated files, the environment, or prior work.
+- Re-confirming the working directory, unrelated file state, or environment facts already observed when the runtime, dependency, or path state drifts benignly.
+
 Final answers must name what changed, what was verified, and any remaining risk or skipped check.
 
 </deepwork-mode>

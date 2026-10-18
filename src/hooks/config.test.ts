@@ -820,7 +820,7 @@ test("managed variant-only tiers may catalog-upgrade without weakening explicit 
   for (const [name, model] of [
     ["planner-high", "gpt-6.1-astra"],
     ["plan-critic-high", "gpt-6.1-astra"],
-    ["reviewer-high", "gpt-6.2-sol"],
+    ["reviewer-high", "gpt-6.1-astra"],
   ] as const) {
     assert.equal((target.agent[name] as Record<string, unknown>).model, `openai/${model}`, name)
     assert.deepEqual(
@@ -1091,8 +1091,8 @@ test("config upgrades only catalog-confirmed declared GPT Sol and Astra lanes", 
   }
   await handler(cfg, undefined)
 
-  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-6.2-sol")
-  assert.equal((cfg.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-6.1-astra")
+  assert.equal((cfg.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6.1-astra")
   assert.equal((cfg.agent.oracle as Record<string, unknown>).model, "openai/gpt-6.2-sol")
   assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-6.1-astra")
   assert.equal((cfg.agent.planner as Record<string, unknown>).model, "openai/gpt-6.1-astra")
@@ -1583,7 +1583,7 @@ test("config keeps migrated defaults without an eligible declared GPT lane catal
   assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "anthropic/claude-opus-5")
   assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-6-astra")
   assert.equal((cfg.agent.complex as Record<string, unknown>).model, "openai/gpt-6.1-sol")
-  assert.equal((cfg.agent.builder as Record<string, unknown>).model, "openai/gpt-6.1-sol")
+  assert.equal((cfg.agent.builder as Record<string, unknown>).model, "openai/gpt-6-astra")
 })
 
 test("config upgrades GLM 5.1 fallbacks only from a catalog-confirmed GLM 5.2+ model", async () => {
@@ -1640,7 +1640,7 @@ test("GPT catalog lanes take precedence over a GLM 5.2 catalog upgrade", async (
   }
   await handler(cfg, undefined)
 
-  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal((cfg.agent.orchestrator as Record<string, unknown>).model, "openai/gpt-6.1-astra")
   assert.equal((cfg.agent.deep as Record<string, unknown>).model, "openai/gpt-6.1-astra")
 })
 
@@ -2330,16 +2330,16 @@ test("compatibility mode suppresses catalog upgrades for unresolved qualified al
   }
   const target: ConfigTarget = {
     agent: {},
-    provider: { openai: { models: { "gpt-6.2-sol": {} } } },
+    provider: { openai: { models: { "gpt-6.1-astra": {} } } },
   }
 
   const control: ConfigTarget = { agent: {}, provider: structuredClone(target.provider) }
   await createConfigHandler({ getConfig: defaultConfig })(control, undefined)
-  assert.equal((control.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6.2-sol")
+  assert.equal((control.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6.1-astra")
 
   await createConfigHandler({ getConfig: () => config })(target, undefined)
 
-  assert.equal((target.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6.1-sol")
+  assert.equal((target.agent.reviewer as Record<string, unknown>).model, "openai/gpt-6-astra")
 })
 
 test("compatibility mode suppresses category catalog upgrades for unresolved qualified aliases", async () => {

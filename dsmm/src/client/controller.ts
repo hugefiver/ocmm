@@ -1,5 +1,8 @@
 import type { RemoteResult } from "@deepseek-ai/dsh-typert-protocol";
 import type { HostObservable } from "@deepseek-ai/dsh-client-ui-slots";
+import type { ConnectionGenerationState } from "@deepseek-ai/dsh-client-connection/client";
+import type { ComposerBlock, ComposerBlocks } from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import type { SessionEventSource, SessionEventWindow } from "@deepseek-ai/dsh-api-session-controller/client";
 import type {} from "@deepseek-ai/dsh-agent-preset-registry";
 import type { ModelDirectoryState } from "@deepseek-ai/dsh-client-ui-model-selection/client";
@@ -30,6 +33,8 @@ export interface ProfilesViewSnapshot {
   catalogBusy: boolean;
   catalogUnavailable: boolean;
   currentSessionId: string | null;
+  sessionViewEpoch: number;
+  sessionUnconfirmed: boolean;
   session: SessionProfileSnapshot | null;
   sessionChoice: string | null;
   sessionBusy: "read" | "apply" | "reset" | "mode" | null;
@@ -90,12 +95,20 @@ export function canReconcileSelection(snapshot: ProfileSnapshot | null): boolean
 /** Stable native Store seat, with no filesystem or transport authority. */
 export class ProfilesController {
   private current: ProfilesViewSnapshot = { snapshot: null, editor: null, dirty: false, busy: null, issue: null, notice: null, pendingEditor: null,
-    catalog: null, catalogBusy: false, catalogUnavailable: true, currentSessionId: null, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null, invalidFields: [], editorEpoch: 0, validationEpoch: 0 };
+    catalog: null, catalogBusy: false, catalogUnavailable: true, currentSessionId: null, sessionViewEpoch: 0, sessionUnconfirmed: false, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null, invalidFields: [], editorEpoch: 0, validationEpoch: 0 };
   private accepted: ProfileEditor | null = null;
   private listeners = new Set<() => void>();
   private generation = 0;
   private disposed = false;
   private sessionGeneration = 0;
+  private pendingSessionSelections = new Set<string>();
+  private connection: ConnectionGenerationState | null = null;
+  private connectionBaseline: ReturnType<ConnectionGenerationState["getSnapshot"]>;
+  private connectionBound = false;
+  private stopConnection: (() => void) | null = null;
+  private composerBlocks: ComposerBlocks | null = null;
+  private composerReason: (() => string) | null = null;
+  private composerBlock: { id: SessionId; block: ComposerBlock; store: ReturnType<ComposerBlocks["storeFor"]> } | null = null;
   private catalogGeneration = 0;
   private catalogRemote: ModelCatalogRemote | null = null;
   private modelSelectorGeneration = 0;
@@ -131,7 +144,7 @@ export class ProfilesController {
     editPath: (path, value) => this.editPath(path, value), moveFallback: (role, from, to) => this.editFallbackOrder(role, from, to),
     editRoute: (path, provider, model) => this.editRoute(path, provider, model),
     refreshCatalog: () => this.refreshCatalog(), refreshSession: () => this.refreshSession(),
-    chooseSessionProfile: (id) => { if (!this.disposed && this.current.sessionBusy === null && this.current.busy === null && !this.current.dirty) this.publish({ sessionChoice: id, sessionNotice: null }); },
+    chooseSessionProfile: (id) => { if (!this.disposed && this.connectionCurrent() && !this.current.sessionUnconfirmed && this.current.sessionBusy === null && this.current.busy === null && !this.current.dirty && this.current.pendingEditor === null && this.current.invalidFields.length === 0) this.publish({ sessionChoice: id, sessionNotice: null }); },
     applySession: (options) => this.selectSession(false, options), resetSession: () => this.selectSession(true),
     setDeepwork: (active) => this.setDeepwork(active), useSessionProfileModel: () => this.selectSession(false, { useProfileModel: true }, true),
     setFieldInvalid: (field, invalid) => {
@@ -142,7 +155,56 @@ export class ProfilesController {
     },
   };
   constructor(private readonly remote: DsmmProfilesRemote) {}
-  dispose(): void { this.disposed = true; this.generation += 1; this.sessionGeneration += 1; this.catalogGeneration += 1; this.modelSelectorGeneration += 1; this.modelSelectionGeneration += 1; this.stopModelSelection?.(); this.stopModelEvents?.(); this.stopModelInteraction?.(); this.stopModelSelection = null; this.stopModelEvents = null; this.stopModelInteraction = null; this.modelSelectionSource = null; this.modelEvents = null; this.modelInteraction = null; this.catalogRemote = null; this.modelSelector = null; this.listeners.clear(); }
+  dispose(): void { this.releaseComposerBlock(); this.stopConnection?.(); this.disposed = true; this.generation += 1; this.sessionGeneration += 1; this.catalogGeneration += 1; this.modelSelectorGeneration += 1; this.modelSelectionGeneration += 1; this.stopModelSelection?.(); this.stopModelEvents?.(); this.stopModelInteraction?.(); this.stopModelSelection = null; this.stopModelEvents = null; this.stopModelInteraction = null; this.modelSelectionSource = null; this.modelEvents = null; this.modelInteraction = null; this.catalogRemote = null; this.modelSelector = null; this.listeners.clear(); }
+  bindConnection(source: ConnectionGenerationState | null): void {
+    if (this.disposed) return;
+    const replacement = this.connectionBound && (source !== this.connection || source?.getSnapshot() !== this.connectionBaseline);
+    this.stopConnection?.();
+    this.connection = source;
+    this.connectionBound = true;
+    this.connectionBaseline = source?.getSnapshot();
+    const invalidate = () => {
+      this.connectionBaseline = source?.getSnapshot();
+      this.generation += 1;
+      this.sessionGeneration += 1;
+      this.modelSelectorGeneration += 1;
+      this.publish({ session: null, sessionBusy: null, sessionNotice: null, sessionUnconfirmed: this.current.currentSessionId !== null,
+        sessionViewEpoch: this.current.sessionViewEpoch + 1, busy: null, issue: { kind: "transport", code: "unavailable" } });
+    };
+    if (replacement || source === null || this.connectionBaseline === undefined) invalidate();
+    this.stopConnection = source?.subscribe(() => {
+      invalidate();
+      if (this.connectionCurrent()) { void this.refresh(); void this.refreshSession(); }
+    }) ?? null;
+  }
+  private connectionCurrent(): boolean {
+    return !this.connectionBound || this.connectionBaseline !== undefined && this.connection?.getSnapshot() === this.connectionBaseline;
+  }
+  attachComposerBlocks(blocks: ComposerBlocks | null, reason?: () => string): void {
+    if (this.disposed) return;
+    this.releaseComposerBlock();
+    this.composerBlocks = blocks;
+    this.composerReason = reason ?? null;
+    this.syncComposerBlock();
+  }
+  private releaseComposerBlock(): void {
+    const held = this.composerBlock;
+    this.composerBlock = null;
+    // Native blocks have no owner token. Only release the exact object and
+    // store we installed into an empty seat; never forget or clear another owner.
+    if (held !== null && this.composerBlocks?.storeFor(held.id) === held.store && held.store.getSnapshot() === held.block) this.composerBlocks.set(held.id, undefined);
+  }
+  private syncComposerBlock(): void {
+    const { currentSessionId, sessionBusy, sessionUnconfirmed, session } = this.current;
+    const wanted = currentSessionId !== null && (sessionBusy === "apply" || sessionBusy === "reset" || sessionUnconfirmed || session?.refreshRequired || session?.selection.refreshRequired);
+    if (!wanted || this.composerBlock?.id !== currentSessionId) this.releaseComposerBlock();
+    if (!wanted || this.composerBlock !== null || this.composerBlocks === null || this.composerReason === null) return;
+    const id = currentSessionId as SessionId, store = this.composerBlocks.storeFor(id);
+    if (store.getSnapshot() !== undefined) return;
+    const block = { reason: this.composerReason() };
+    this.composerBlock = { id, store, block };
+    this.composerBlocks.set(id, block);
+  }
   attachModelSelector(remote: ProfileModelSelectorRemote | null): void {
     if (this.disposed) return;
     this.modelSelectorGeneration += 1;
@@ -200,7 +262,7 @@ export class ProfilesController {
     if (id !== this.modelSelectionSessionId) this.attachModelSelectionSource(null, null);
     if (id !== this.modelEventsSessionId) this.attachModelEventSource(null, null);
     if (id !== this.modelInteractionSessionId) this.attachModelInteractionSource(null, null);
-    this.publish({ currentSessionId: id, session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null });
+    this.publish({ currentSessionId: id, sessionViewEpoch: this.current.sessionViewEpoch + 1, sessionUnconfirmed: id !== null && this.pendingSessionSelections.has(id), session: null, sessionChoice: null, sessionBusy: null, sessionIssue: null, sessionNotice: null });
     if (id !== null) void this.refreshSession();
   }
   async refreshCatalog(): Promise<void> {
@@ -219,26 +281,27 @@ export class ProfilesController {
   }
   async refreshSession(preserveFeedback = false): Promise<void> {
     const id = this.current.currentSessionId;
-    if (this.disposed || id === null || this.current.sessionBusy !== null) return;
+    if (this.disposed || !this.connectionCurrent() || id === null || this.current.sessionBusy !== null) return;
     this.modeRefreshPending = false;
     const generation = ++this.sessionGeneration;
-    const live = () => !this.disposed && generation === this.sessionGeneration && id === this.current.currentSessionId;
+    const live = () => !this.disposed && this.connectionCurrent() && generation === this.sessionGeneration && id === this.current.currentSessionId;
     this.publish({ sessionBusy: "read", ...(preserveFeedback ? {} : { sessionIssue: null, sessionNotice: null }) });
     try {
       const session = await this.unwrap(this.remote.describeSession(id));
       if (session.sessionId !== id) throw { kind: "assembly", code: "unavailable" };
-      if (live()) this.publish({ session, sessionChoice: session.selection.selectedId });
+      if (live()) this.publish({ session, sessionChoice: (session.admittedSelection ?? session.selection).selectedId, sessionUnconfirmed: this.pendingSessionSelections.has(id) });
     } catch (error) { if (live()) this.publish({ sessionIssue: this.issue(error) }); }
     finally { if (live()) { this.publish({ sessionBusy: null }); this.refreshObservedMode(); } }
   }
   private async setDeepwork(active: boolean): Promise<void> {
     const { currentSessionId: id, session } = this.current;
-    if (this.disposed || id === null || session?.deepwork === undefined || session.refreshRequired || session.selection.refreshRequired || session.deepwork.locked || session.canToggleMode !== true
+    if (this.disposed || !this.connectionCurrent() || this.current.sessionUnconfirmed || id === null || session?.deepwork === undefined || session.refreshRequired || session.selection.refreshRequired || session.deepwork.locked || session.canToggleMode !== true
       || this.current.sessionBusy !== null || this.current.busy !== null || this.remote.selectMode === undefined) return;
     const generation = ++this.sessionGeneration;
-    const live = () => !this.disposed && generation === this.sessionGeneration && id === this.current.currentSessionId;
+    const live = () => !this.disposed && this.connectionCurrent() && generation === this.sessionGeneration && id === this.current.currentSessionId;
     this.publish({ sessionBusy: "mode", sessionIssue: null, sessionNotice: null });
     try {
+      if (!live()) return;
       const accepted = await this.unwrap(this.remote.selectMode(id, { sessionId: id, active,
         expectedModeRevision: session.deepwork.revision, expectedAdmissionEpoch: session.admissionEpoch }));
       if (accepted.sessionId !== id || accepted.deepwork?.active !== active || !accepted.deepwork.explicit) throw { kind: "assembly", code: "unavailable" };
@@ -248,12 +311,12 @@ export class ProfilesController {
   }
   private async selectSession(reset: boolean, options?: SessionApplyOptions, modelOnly = false): Promise<void> {
     const { currentSessionId: id, session, sessionChoice, snapshot } = this.current;
-    if (this.disposed || id === null || session === null || session.refreshRequired || session.selection.refreshRequired || !writableSelectionVersion(session.selection.selectionRevision)
+    if (this.disposed || !this.connectionCurrent() || this.current.sessionUnconfirmed || id === null || session === null || session.refreshRequired || session.selection.refreshRequired || !writableSelectionVersion(session.selection.selectionRevision)
       || (modelOnly ? session.canSelectModel !== true : session.canApplyOverlay !== true || session.applyOverlayUnavailableReason === "new-session-required") || this.current.sessionBusy !== null
       || this.current.busy !== null || this.current.dirty || this.current.invalidFields.length > 0 || this.current.pendingEditor !== null) return;
     const selectedId = reset ? null : sessionChoice;
-    const revision = snapshot?.profiles.find((profile) => profile.id === selectedId)?.revision;
-    if (!modelOnly && selectedId !== null && !isConfigRevision(revision)) return;
+    const profile = snapshot?.profiles.find((profile) => profile.id === selectedId), revision = profile?.revision;
+    if (!modelOnly && selectedId !== null && (!isConfigRevision(revision) || profile?.error !== undefined)) return;
     const generation = ++this.sessionGeneration;
     const useProfileModel = !reset && options?.useProfileModel === true;
     const selector = this.modelSelector, selectorGeneration = this.modelSelectorGeneration;
@@ -264,10 +327,12 @@ export class ProfilesController {
     const modeWatermark = eventSource === null ? -1 : modeIntentWatermark(eventSource.getSnapshot());
     const interaction = this.modelInteraction, interactionGeneration = this.modelInteractionGeneration;
     const pendingNativeChoice = interaction?.getSnapshot().status === "selecting";
-    const live = () => !this.disposed && generation === this.sessionGeneration && id === this.current.currentSessionId;
+    const live = () => !this.disposed && this.connectionCurrent() && generation === this.sessionGeneration && id === this.current.currentSessionId;
     const selectorLive = () => live() && selector !== null && selector === this.modelSelector && selectorGeneration === this.modelSelectorGeneration;
+    if (!modelOnly) this.pendingSessionSelections.add(id);
     this.publish({ sessionBusy: reset ? "reset" : "apply", sessionIssue: null, sessionNotice: null });
     try {
+      if (!live()) return;
       const accepted = await this.unwrap(modelOnly ? this.remote.describeSession(id) : this.remote.selectSession(id, {
         sessionId: id, id: selectedId, ...(selectedId === null ? {} : { expectedRevision: revision! }),
         expectedSelectionRevision: session.selection.selectionRevision, expectedAdmissionEpoch: session.admissionEpoch,
@@ -275,7 +340,8 @@ export class ProfilesController {
       if (accepted.sessionId !== id) throw { kind: "assembly", code: "unavailable" };
       if (modelOnly && (accepted.admissionEpoch !== session.admissionEpoch || accepted.deepwork?.revision !== session.deepwork?.revision)) throw { kind: "domain", code: "conflict" };
       if (!live()) return;
-      this.publish({ session: accepted, sessionChoice: accepted.selection.selectedId, sessionNotice: useProfileModel ? null : reset ? "reset" : "applied" });
+      this.publish({ session: accepted, sessionChoice: (accepted.admittedSelection ?? accepted.selection).selectedId,
+        sessionNotice: useProfileModel || accepted.refreshRequired || accepted.selection.refreshRequired ? null : reset ? "reset" : "applied" });
       if (!useProfileModel || accepted.refreshRequired || accepted.selection.refreshRequired || !live()) return;
       if (accepted.canSelectModel !== true || !writableSelectionVersion(accepted.selection.selectionRevision)) {
         this.publish({ sessionIssue: { kind: "assembly", code: accepted.selectModelUnavailableReason ?? "unavailable", source: "profile-model" } });
@@ -323,12 +389,23 @@ export class ProfilesController {
       } catch {
         if (live()) this.publish({ sessionIssue: { kind: "assembly", code: selectorLive() ? "model-selection-failed" : "model-service-unavailable", source: "profile-model" } });
       }
-    } catch (error) { if (live()) this.publish({ sessionIssue: this.issue(error) }); }
-    finally { if (live()) { this.publish({ sessionBusy: null }); this.refreshObservedMode(); } }
+    } catch (error) { if (live()) {
+      const issue = this.issue(error);
+      this.publish({ sessionIssue: issue, sessionUnconfirmed: !modelOnly && (issue.kind !== "domain" || issue.code === "cancelled") });
+    } }
+    finally {
+      if (!modelOnly) this.pendingSessionSelections.delete(id);
+      if (live()) { this.publish({ sessionBusy: null }); this.refreshObservedMode(); }
+      else if (!modelOnly && !this.disposed && this.connectionCurrent() && id === this.current.currentSessionId) {
+        this.modeRefreshPending = true;
+        this.refreshObservedMode();
+      }
+    }
   }
   private publish(patch: Partial<ProfilesViewSnapshot>): void {
     if (this.disposed) return;
     this.current = { ...this.current, ...patch };
+    this.syncComposerBlock();
     for (const listener of this.listeners) listener();
   }
   private accept(document: ProfileEditor): void {
@@ -351,9 +428,9 @@ export class ProfilesController {
     return { kind: "assembly", code: "unavailable" };
   }
   private async perform(busy: NonNullable<ProfilesViewSnapshot["busy"]>, operation: (live: () => boolean) => Promise<void>): Promise<void> {
-    if (this.disposed || this.current.busy !== null || this.current.sessionBusy === "apply" || this.current.sessionBusy === "reset" || this.current.pendingEditor !== null) return;
+    if (this.disposed || !this.connectionCurrent() || this.current.busy !== null || this.current.sessionBusy === "apply" || this.current.sessionBusy === "reset" || this.current.pendingEditor !== null) return;
     const generation = ++this.generation;
-    const live = (): boolean => !this.disposed && generation === this.generation;
+    const live = (): boolean => !this.disposed && this.connectionCurrent() && generation === this.generation;
     this.publish({ busy, issue: null, notice: null });
     try { await operation(live); }
     catch (error) { if (live()) {

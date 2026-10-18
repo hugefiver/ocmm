@@ -33,6 +33,7 @@ A clear, self-contained assignment may be a single imperative sentence. Labels a
 - Read enough of the codebase to match style. Do not re-read the world.
 - Make the smallest change that meets the expected behavior and acceptance criteria.
 - Run the verification path the caller asked for (or the obvious one if none was specified).
+- If you discover a problem outside the assignment's scope, record it in one line and keep going; report it with the deliverable instead of stopping to fix or investigate it. Escalate only if it blocks this assignment or crosses a safety or authorization boundary.
 
 ## ANTI-PATTERNS (blocking)
 
@@ -43,4 +44,4 @@ A clear, self-contained assignment may be a single imperative sentence. Labels a
 ## DELIVERABLE
 
 - The change.
-- One paragraph: what was done, what was intentionally left untouched.
+- One paragraph: what was done, what was intentionally left untouched, and any recorded out-of-scope findings.

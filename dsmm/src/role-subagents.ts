@@ -249,7 +249,7 @@ function registerRoleTool(agent: DshAgent, agentCtx: Context, tools: ToolRuntime
 export async function registerHeadlessRoleTools(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, policy: DsmmRolePolicy, admission: NativeAdmission, onlyAgent: DshAgent): Promise<void> {
   const refresh = admittedRealms.get(onlyAgent);
   if (refresh) { refresh(); return; }
-  type State = { tools?: ToolRuntime; parentScope?: object; owned: Array<() => void>; restriction?: () => void; guard?: () => void; signature?: string; hostDefinitions: Array<ToolDefinition | undefined>; identityRole?: DsmmRoleId; identityPrompt?: () => void; promptRealm?: object; guidance?: () => void };
+  type State = { tools?: ToolRuntime; parentScope?: object; owned: Array<() => void>; restriction?: () => void; guard?: () => void; signature?: string; providers: Array<object | undefined>; hostDefinitions: Array<ToolDefinition | undefined>; identityRole?: DsmmRoleId; identityPrompt?: () => void; promptRealm?: object; guidance?: () => void };
   const states = new WeakMap<DshAgent, State>();
   const reconcileIdentity = (agent: DshAgent, role = policy.identity(agent).role): void => {
     const state = states.get(agent);
@@ -288,11 +288,17 @@ export async function registerHeadlessRoleTools(ctx: DshContext, controller: Dee
     const host = ctx.get?.<ToolRuntime>("tools");
     const names = [...hostControls, ...host?.schemas().map((row) => row.name).filter((name) => name.startsWith(`mcp__${settings.lsp.serverName}__`)) ?? []];
     const definitions = names.map((name) => host?.get(name));
+    const providers = targets.map(role => {
+      const provider = subagents?.getProvider(roleProviderName(role));
+      return provider === undefined ? undefined : Reflect.get(provider, symbols.original) ?? provider;
+    });
+    const sameProviders = providers.length === state.providers.length && providers.every((provider, index) => provider === state.providers[index]);
     const signature = JSON.stringify([identity.role, targets, settings.subagents, targets.map((role) => [settings.roleRouting[role], subagents?.getProvider(roleProviderName(role))?.capabilities])]);
     const sameRealm = state.tools !== undefined && (Reflect.get(state.tools, symbols.original) ?? state.tools) === (Reflect.get(tools, symbols.original) ?? tools);
     const parentScope = scopeParentOf(agent);
     const sameParent = state.parentScope === parentScope;
-    if (sameRealm && sameParent && signature === state.signature && definitions.length === state.hostDefinitions.length && definitions.every((definition, i) => definition === state.hostDefinitions[i])) return;
+    if (sameRealm && sameParent && sameProviders && signature === state.signature && definitions.length === state.hostDefinitions.length && definitions.every((definition, i) => definition === state.hostDefinitions[i])) return;
+    state.signature = undefined;
     for (const dispose of state.owned.splice(0)) dispose();
     state.restriction?.(); state.guard?.();
     state.tools = tools;
@@ -310,6 +316,7 @@ export async function registerHeadlessRoleTools(ctx: DshContext, controller: Dee
      for (const entry of inventory) state.owned.push(registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, admission));
     policy.captureTools(agent, tools, [...inventory.map(entry => entry.name), ...names], !sameRealm || !sameParent);
     state.signature = signature;
+    state.providers = providers;
     state.hostDefinitions = definitions;
     state.parentScope = parentScope;
   };
@@ -318,7 +325,7 @@ export async function registerHeadlessRoleTools(ctx: DshContext, controller: Dee
     if (!getSettings(agent).modules.deepwork.enabled) return;
     const agentCtx = nativeAgentContext(agent);
     policy.admit(agent);
-    states.set(agent, { owned: [], hostDefinitions: [] });
+    states.set(agent, { owned: [], hostDefinitions: [], providers: [] });
     const retire = () => {
       stopIdentity();
       const state = states.get(agent);
@@ -329,7 +336,8 @@ export async function registerHeadlessRoleTools(ctx: DshContext, controller: Dee
     };
     admission.lifetime.signal.addEventListener("abort", retire, { once: true });
     agentCtx.effect(() => retire);
-    reconcile(agent);
+    try { reconcile(agent); }
+    catch (error) { retire(); throw error; }
     admittedRealms.set(agent, () => reconcile(agent));
   };
   // Native assembly collects sections before its waterfall. Admission/mode/preset

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { getTraceable, symbols } from "@deepseek-ai/cordis";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { SubagentError, delegationDepthOf } from "@deepseek-ai/dsh-subagent";
@@ -6,6 +7,10 @@ import { freezeSettings } from "./settings.js";
 import { scopeLifetime } from "./lifetime.js";
 import { sessionEvents } from "./session-scope.js";
 import { scopeParentOf } from "./native-scope.js";
+import { DsmmProfileError } from "./profiles.js";
+import { roleProviderName } from "./roles.js";
+import { resolveRoleInvocation } from "./role-invocation.js";
+import { resolvedModelParameterPolicy } from "./model-parameter-policy.js";
 /** Short-lived creation correlations and exact live bindings, never an execution queue. */
 export class NativeAdmission {
     ctx;
@@ -15,6 +20,7 @@ export class NativeAdmission {
     pending = new Map();
     live = new WeakMap();
     candidates = new WeakMap();
+    historyPrepared = new WeakMap();
     agents = new Set();
     activations = new Set();
     activities = new Map();
@@ -23,6 +29,12 @@ export class NativeAdmission {
     guardedTools = new WeakMap();
     agentLifetimes = new WeakMap();
     retirements = new WeakMap();
+    installing = new AsyncLocalStorage();
+    selecting = new WeakSet();
+    failedInstallations = new WeakSet();
+    blankUpdates = new WeakMap();
+    getters = new WeakMap();
+    executions = new WeakMap();
     ready = false;
     install;
     constructor(ctx, profiles, policy) {
@@ -59,6 +71,17 @@ export class NativeAdmission {
         ctx.on("agent/request", async (frame, next) => { await this.ensure(frame.agent); return next(); }, { global: true, prepend: true });
         ctx.on("tools/execute", async (exec, next) => { if (exec.agent)
             await this.ensure(exec.agent); return policy.duringToolExecution(exec, next); }, { global: true, prepend: true });
+        ctx.on("tools/pre-execute", async (exec, next) => {
+            if (exec.agent) {
+                const active = this.executions.get(exec.agent) ?? new Set();
+                active.add(exec.token);
+                this.executions.set(exec.agent, active);
+                await this.ensure(exec.agent);
+            }
+            return next();
+        }, { global: true, prepend: true });
+        ctx.on("tools/result", exec => { if (exec.agent)
+            this.executions.get(exec.agent)?.delete(exec.token); }, { global: true });
         ctx.on("agent-preset/selected", id => {
             const agent = ctx.agents.get(id);
             if (!agent || !this.live.has(agent))
@@ -70,15 +93,63 @@ export class NativeAdmission {
     }
     activate(install) { this.lifetime.signal.throwIfAborted(); this.install = install; this.ready = true; }
     get isReady() { return this.ready && !this.lifetime.signal.aborted; }
+    /** Install the current configuration before publication, without enrolling a historical Agent as blank. */
+    async prepareHistory(agent, admission, signal) {
+        const check = () => {
+            signal.throwIfAborted();
+            this.lifetime.signal.throwIfAborted();
+            if (!this.isReady || !this.install || this.ctx.agents.get(agent.id) !== undefined || agent.session.header.origin === "subagent"
+                || this.ctx.get("dsmmHistoryContinuation")?.admissionForCreated(agent) !== admission)
+                throw new SubagentError("Exact unpublished history candidate required", "UNAUTHORIZED");
+        };
+        check();
+        const prepared = { admission, preset: agent.ctx.get("agentPresets")?.composedPreset(agent.ctx), scopeParent: scopeParentOf(agent), dependencies: this.dependencies(agent) };
+        if (prepared.dependencies.some(value => value === undefined))
+            throw new SubagentError("History composition is unavailable", "UNAUTHORIZED");
+        this.candidates.set(agent, admission);
+        scopeLifetime(agent.ctx, "dsmm: release unpublished history configuration", () => { this.historyPrepared.delete(agent); this.candidates.delete(agent); });
+        this.guardTools(agent);
+        await this.install(agent, this.getter(agent), "history-setup");
+        check();
+        if (prepared.dependencies.some((value, index) => value !== this.dependencies(agent)[index]) || prepared.scopeParent !== scopeParentOf(agent))
+            throw new SubagentError("History composition changed during setup", "UNAUTHORIZED");
+        this.historyPrepared.set(agent, prepared);
+    }
+    isSelecting(agent) { return this.selecting.has(agent); }
     get(agent) { return this.live.get(agent)?.admission; }
-    configuration(agent) { const value = this.candidates.get(agent) ?? this.get(agent); if (!value)
-        throw new SubagentError("No trusted live admission", "UNAUTHORIZED"); return value; }
+    configuration(agent) {
+        const preview = this.installing.getStore();
+        const value = preview?.agent === agent ? preview.admission : this.candidates.get(agent) ?? this.get(agent);
+        if (!value)
+            throw new SubagentError("No trusted live admission", "UNAUTHORIZED");
+        return value;
+    }
+    getter(agent) {
+        let getter = this.getters.get(agent);
+        if (getter === undefined) {
+            getter = () => this.configuration(agent).settings;
+            getter.admission = () => this.configuration(agent);
+            this.getters.set(agent, getter);
+        }
+        return getter;
+    }
+    dependencies(agent) {
+        const presets = agent.ctx.get("agentPresets");
+        return [presets, agent.ctx.get("subagents"), agent.ctx.get("llm"),
+            presets?.serviceFor(agent, "tools") ?? agent.ctx.get("tools"),
+            presets?.serviceFor(agent, "systemPrompt") ?? agent.ctx.get("systemPrompt"),
+            presets?.serviceFor(agent, "skills") ?? agent.ctx.get("skills")].map(service => service === undefined ? undefined : original(service));
+    }
     invocation(agent) { return this.live.get(agent)?.invocation; }
     async ensure(agent) { await this.rebindings.get(agent); return this.assert(agent); }
     assert(agent) {
         this.lifetime.signal.throwIfAborted();
         this.agentLifetimes.get(agent)?.signal.throwIfAborted();
         const live = this.live.get(agent);
+        if (this.failedInstallations.has(agent))
+            throw new SubagentError("Session configuration restoration failed; create a new session", "UNAUTHORIZED");
+        if (this.selecting.has(agent))
+            throw new SubagentError("Session configuration maintenance is in progress", "UNAUTHORIZED");
         if (!this.ready || !live || this.ctx.agents.get(agent.id) !== agent)
             throw new SubagentError("No trusted live admission; create a new session", "UNAUTHORIZED");
         if (live.preset !== agent.ctx.get("agentPresets")?.composedPreset(agent.ctx) || live.scopeParent !== scopeParentOf(agent))
@@ -89,6 +160,112 @@ export class NativeAdmission {
             this.agentLifetimes.get(live.parent)?.signal.throwIfAborted();
         this.policy.assertModuleAdmission(agent);
         return live.admission;
+    }
+    blankReason(agent, allowQueued = false) {
+        if (!this.isReady || this.failedInstallations.has(agent) || this.ctx.agents.get(agent.id) !== agent || !this.ctx.agents.roots().includes(agent) || this.dependencies(agent).some(value => value === undefined))
+            return "runtime-unavailable";
+        const live = this.live.get(agent);
+        if (!live || live.parent || agent.session.header.origin === "subagent" || agent.session.header.isSeeded
+            || sessionEvents(agent.session).some(event => ["turn/start", "step/start", "request/header", "assistant/message", "tool/call"].includes(event.type)))
+            return "new-session-required";
+        if (agent.status !== "idle" || (this.calls.get(agent) ?? 0) !== 0 || (this.executions.get(agent)?.size ?? 0) !== 0 || [...this.pending.values()].some(row => row.parent === agent)
+            || this.ctx.agents.list().some(child => this.ctx.agents.isOwnedBy(child.id, agent))
+            || this.selecting.has(agent) && !allowQueued
+            || !allowQueued && (agent.inbox.nextTurn.length !== 0 || agent.inbox.nextStep.length !== 0))
+            return "busy";
+        if (agent.runMaintenance === undefined)
+            return "maintenance";
+        if (live.preset !== agent.ctx.get("agentPresets")?.composedPreset(agent.ctx) || live.scopeParent !== scopeParentOf(agent)
+            || this.agentLifetimes.get(agent)?.signal.aborted)
+            return "runtime-unavailable";
+        return undefined;
+    }
+    /** Reserved by runMaintenance; newly queued input belongs to the accepted choice. */
+    beginBlank(agent, signal, assertAuthority) {
+        const reason = this.blankReason(agent);
+        if (reason !== undefined)
+            throw new DsmmProfileError(reason === "busy" ? "busy" : "unavailable", "Only an unstarted live session can select its configuration.");
+        const previous = this.live.get(agent);
+        this.assert(agent);
+        const captured = this.dependencies(agent);
+        const preparationSignal = AbortSignal.any([signal, this.lifetime.signal, this.agentLifetimes.get(agent).signal]);
+        this.selecting.add(agent);
+        let finish;
+        const completion = new Promise(resolve => { finish = resolve; });
+        this.blankUpdates.set(agent, completion);
+        let prepared = false, committed = false;
+        let publication;
+        let providers = new Map();
+        const assertCurrent = () => {
+            assertAuthority();
+            preparationSignal.throwIfAborted();
+            if (this.live.get(agent) !== previous || this.blankReason(agent, true) !== undefined || this.dependencies(agent).some((value, index) => value !== captured[index])) {
+                throw new DsmmProfileError("conflict", "The session owner or composition changed before configuration commit.");
+            }
+            for (const [name, expected] of providers) {
+                const current = agent.ctx.get("subagents")?.getProvider(name);
+                if (current === undefined || original(current) !== original(expected) || current.capabilities.depthLimit !== true) {
+                    throw new DsmmProfileError("conflict", "A required native provider changed before configuration commit.");
+                }
+            }
+        };
+        const install = (admission) => this.installing.run({ agent, admission }, () => this.install(agent, this.getter(agent)));
+        return {
+            assertCurrent,
+            prepare: async (admission, describe) => {
+                assertCurrent();
+                this.policy.validateRootRole(agent, admission);
+                await this.installing.run({ agent, admission }, async () => {
+                    const targets = this.policy.targets(agent);
+                    providers = new Map([...targets.map(roleProviderName), ...targets.length === 0 ? [] : ["spawn"]].map(name => {
+                        const provider = agent.ctx.get("subagents")?.getProvider(name);
+                        if (provider?.capabilities.depthLimit !== true)
+                            throw new DsmmProfileError("activation", "An enabled role has no admitted native provider.");
+                        return [name, provider];
+                    }));
+                    for (const role of targets) {
+                        const preset = await agent.ctx.get("agentPresets").resolve(role);
+                        assertCurrent();
+                        if (preset.broken !== undefined)
+                            throw new DsmmProfileError("activation", "An enabled role preset is unavailable.", role);
+                        const routing = admission.settings.roleRouting[role];
+                        if (routing?.primary !== undefined || routing?.fallbackRoutes !== undefined) {
+                            await resolveRoleInvocation(agent, role, admission.settings, preparationSignal, {}, undefined, resolvedModelParameterPolicy(admission));
+                            assertCurrent();
+                        }
+                        for (const level of ["low", "high", "max"])
+                            if (routing?.levels?.[level] !== undefined) {
+                                await resolveRoleInvocation(agent, role, admission.settings, preparationSignal, { level }, undefined, resolvedModelParameterPolicy(admission));
+                                assertCurrent();
+                            }
+                    }
+                });
+                assertCurrent();
+                prepared = true;
+                await install(admission);
+                assertCurrent();
+                this.installing.run({ agent, admission }, describe);
+                publication = Object.freeze({ ...previous, admission });
+            },
+            committed: () => { this.live.set(agent, publication); committed = true; },
+            close: async () => {
+                try {
+                    if (prepared && !committed && this.ctx.agents.get(agent.id) === agent && !this.lifetime.signal.aborted)
+                        await install(previous.admission);
+                }
+                catch (error) {
+                    this.failedInstallations.add(agent);
+                    const refusal = new DsmmProfileError("activation", "Session configuration restoration failed. Execution is disabled; create a new session.");
+                    refusal.cause = error;
+                    throw refusal;
+                }
+                finally {
+                    this.selecting.delete(agent);
+                    this.blankUpdates.delete(agent);
+                    finish();
+                }
+            },
+        };
     }
     async reserve(exec, invocation, provider, maxDepth) {
         const parent = exec.agent;
@@ -199,19 +376,22 @@ export class NativeAdmission {
         return settled;
     }
     async rebindBlank(agent) {
-        const previous = this.live.get(agent);
+        await this.blankUpdates.get(agent);
         this.lifetime.signal.throwIfAborted();
+        const previous = this.live.get(agent);
+        if (previous === undefined)
+            throw new SubagentError("The blank Agent owner was retired", "UNAUTHORIZED");
         if (previous.preset === agent.ctx.get("agentPresets")?.composedPreset(agent.ctx) && previous.scopeParent === scopeParentOf(agent))
             return;
+        if (this.selecting.has(agent))
+            throw new SubagentError("Session configuration maintenance owns the blank composition", "UNAUTHORIZED");
         if (previous.parent || (this.calls.get(agent) ?? 0) !== 0 || [...this.pending.values()].some(row => row.parent === agent)
             || this.ctx.agents.list().some(child => this.ctx.agents.isOwnedBy(child.id, agent)) || sessionEvents(agent.session).some(event => event.type === "turn/start"))
             throw new SubagentError("Preset change requires a new session", "UNAUTHORIZED");
         this.policy.validateRootRole(agent, previous.admission);
         const preset = agent.ctx.get("agentPresets")?.composedPreset(agent.ctx), scopeParent = scopeParentOf(agent);
-        const getter = () => previous.admission.settings;
-        getter.admission = () => previous.admission;
         this.guardTools(agent);
-        await this.install(agent, getter);
+        await this.install(agent, this.getter(agent));
         this.lifetime.signal.throwIfAborted();
         this.agentLifetimes.get(agent).signal.throwIfAborted();
         if (this.ctx.agents.get(agent.id) !== agent || this.live.get(agent) !== previous || scopeParentOf(agent) !== scopeParent)
@@ -254,13 +434,24 @@ export class NativeAdmission {
         else {
             if (agent.session.header.origin === "subagent" || pending)
                 throw new SubagentError("Missing exact parent", "UNAUTHORIZED");
-            // A resume may have opened the native log, but cannot recover DSMM authorization.
-            if ((source !== "startup" || agent.session.header.isSeeded) && (preset?.startsWith("dsmm-") || sessionEvents(agent.session).some(event => ["deepwork/mode", "dsmm/role-policy"].includes(event.type))))
-                throw new SubagentError("DSMM cold recovery is unavailable", "UNAUTHORIZED");
-            admission = await this.profiles.prepareRoot(agent, signal);
-            this.policy.validateRootRole(agent, admission);
-            if ((source !== "startup" || agent.session.header.isSeeded) && admission.settings.defaultActive)
-                throw new SubagentError("Historical sessions are not automatically admitted to Deepwork", "UNAUTHORIZED");
+            const history = source === "resume" ? this.ctx.get("dsmmHistoryContinuation")?.admissionForCreated(agent) : undefined;
+            if (source === "resume") {
+                const prepared = this.historyPrepared.get(agent);
+                if (!history || prepared?.admission !== history || prepared.preset !== preset || prepared.scopeParent !== presetScope
+                    || prepared.dependencies.some((value, index) => value !== this.dependencies(agent)[index]))
+                    throw new SubagentError("History resume requires its exact prepared candidate", "UNAUTHORIZED");
+                admission = history;
+                this.policy.validateRootRole(agent, admission);
+            }
+            else {
+                // A resume may have opened the native log, but cannot recover DSMM authorization.
+                if ((source !== "startup" || agent.session.header.isSeeded) && (preset?.startsWith("dsmm-") || sessionEvents(agent.session).some(event => ["deepwork/mode", "dsmm/role-policy"].includes(event.type))))
+                    throw new SubagentError("DSMM cold recovery is unavailable", "UNAUTHORIZED");
+                admission = await this.profiles.prepareRoot(agent, signal);
+                this.policy.validateRootRole(agent, admission);
+                if ((source !== "startup" || agent.session.header.isSeeded) && admission.settings.defaultActive)
+                    throw new SubagentError("Historical sessions are not automatically admitted to Deepwork", "UNAUTHORIZED");
+            }
         }
         this.agentLifetimes.set(agent, new AbortController());
         scopeLifetime(agent.ctx, "dsmm: retire exact Agent work", () => { void this.retireAgent(agent).catch(() => { }); });
@@ -282,9 +473,7 @@ export class NativeAdmission {
         try {
             if (pending)
                 this.policy.bindChild(agent, parent, admission, pending.invocation, pending.maxDepth, pending.toolFilter);
-            const getter = () => admission.settings;
-            getter.admission = () => admission;
-            await this.install(agent, getter);
+            await this.install(agent, this.getter(agent));
             signal.throwIfAborted();
             this.agentLifetimes.get(agent).signal.throwIfAborted();
             if (pending)
@@ -306,6 +495,7 @@ export class NativeAdmission {
         }
         finally {
             this.candidates.delete(agent);
+            this.historyPrepared.delete(agent);
         }
     }
 }

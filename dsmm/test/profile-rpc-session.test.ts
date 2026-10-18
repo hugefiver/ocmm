@@ -51,10 +51,10 @@ async function fixture(nativeConnection = true, globalConfig = false, baseline =
     const runtime = new DsmmProfileRuntime(ctx as unknown as DshContext, baseline, store, options);
     await runtime.initialize();
     const carrier = { host: "127.0.0.1" }, settingsAuthority = { writable: true };
+    ctx.provide("webServer", carrier); ctx.provide("settings", settingsAuthority);
     let deployment: DsmmDeploymentConfig | undefined;
     if (globalConfig) {
       ctx.provide("profileContext", { home: root, dir: root });
-      ctx.provide("webServer", carrier); ctx.provide("settings", settingsAuthority);
       deployment = new DsmmDeploymentConfig(ctx as unknown as DshContext, {});
     }
     const rpc = ctx.plugin({ name: "session-profile-rpc", inject: ["typert"], apply(ready: Context) {
@@ -142,10 +142,24 @@ test("native Gateway reports immutable admitted configuration and refuses live A
   } finally { await f.dispose(); }
 });
 
+test("session mutations require a local writable operator, not only the exact browser peer", async () => {
+  const f = await fixture();
+  try {
+    const agent = await f.createRoot("rpc-local-writer"), before = await f.runtime.getSession(agent);
+    const args = { sessionId: agent.id, request: selectRequest(before, null) };
+    f.settingsAuthority.writable = false;
+    await assert.rejects(f.invoke("selectSession", args), refused("not-owned"));
+    f.settingsAuthority.writable = true; f.carrier.host = "0.0.0.0";
+    await assert.rejects(f.invoke("selectSession", args), refused("not-owned"));
+    assert.equal((await f.store.loadSessionSelection(agent.id!)).admissionEpoch, null);
+  } finally { await f.dispose(); }
+});
+
 test("native mode RPC changes only an owned root and rejects stale intent and child authority", async () => {
-  const native = await nativeRoutingFixture({ defaultActive: false }, { headless: true, persistence: true });
+  const native = await nativeRoutingFixture({ defaultActive: false }, { headless: true, persistence: true, nativePermissionSettings: true });
   try {
     const ctx = native.ctx; await ctx.plugin(RemoteAccessService).await();
+    ctx.provide("webServer", { host: "127.0.0.1" });
     await Promise.all([ctx.plugin(TypertRegistry).await(), ctx.plugin(TypertGatewayService, {}).await()]);
     await ctx.plugin(MemoryCredentials).await(); await ctx.plugin(NativeConnection).await();
     const invoke = <T>(method: string, args: Record<string, unknown>) => ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method, args, peer: ctx.connection.browserPeer }) as Promise<T>;

@@ -1,5 +1,7 @@
 import type { RemoteResult } from "@deepseek-ai/dsh-typert-protocol";
 import type { HostObservable } from "@deepseek-ai/dsh-client-ui-slots";
+import type { ConnectionGenerationState } from "@deepseek-ai/dsh-client-connection/client";
+import type { ComposerBlocks } from "@deepseek-ai/dsh-client-ui-conversation/client";
 import type { SessionEventSource } from "@deepseek-ai/dsh-api-session-controller/client";
 import type { ModelDirectoryState } from "@deepseek-ai/dsh-client-ui-model-selection/client";
 import type { DsmmProfilesRemote } from "../profile-remote.js";
@@ -42,6 +44,8 @@ export interface ProfilesViewSnapshot {
     catalogBusy: boolean;
     catalogUnavailable: boolean;
     currentSessionId: string | null;
+    sessionViewEpoch: number;
+    sessionUnconfirmed: boolean;
     session: SessionProfileSnapshot | null;
     sessionChoice: string | null;
     sessionBusy: "read" | "apply" | "reset" | "mode" | null;
@@ -95,6 +99,14 @@ export declare class ProfilesController {
     private generation;
     private disposed;
     private sessionGeneration;
+    private pendingSessionSelections;
+    private connection;
+    private connectionBaseline;
+    private connectionBound;
+    private stopConnection;
+    private composerBlocks;
+    private composerReason;
+    private composerBlock;
     private catalogGeneration;
     private catalogRemote;
     private modelSelectorGeneration;
@@ -121,6 +133,11 @@ export declare class ProfilesController {
     readonly actions: ProfilesActions;
     constructor(remote: DsmmProfilesRemote);
     dispose(): void;
+    bindConnection(source: ConnectionGenerationState | null): void;
+    private connectionCurrent;
+    attachComposerBlocks(blocks: ComposerBlocks | null, reason?: () => string): void;
+    private releaseComposerBlock;
+    private syncComposerBlock;
     attachModelSelector(remote: ProfileModelSelectorRemote | null): void;
     attachModelSelectionSource(sessionId: string | null, source: HostObservable<unknown> | null): void;
     attachModelEventSource(sessionId: string | null, source: SessionEventSource | null): void;

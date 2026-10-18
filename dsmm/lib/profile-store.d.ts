@@ -16,8 +16,8 @@ export interface LoadedSessionProfileSelection extends LoadedProfileSelection {
 }
 export declare const MAX_SESSION_PROFILE_CHOICES = 1024;
 export interface SessionProfileCommit<T> {
-    /** Fallible synchronous preparation before the final fence/rename; never publication. */
-    prepare?(selection: LoadedSessionProfileSelection, prepared: T): void;
+    /** Fallible installation preparation before the final fence/rename; never publication. */
+    prepare?(selection: LoadedSessionProfileSelection, prepared: T): void | Promise<void>;
     /** Trusted native liveness/cancellation fence; invoked immediately before rename. */
     assertCurrent(): void;
     /** Synchronous publication after durable commit. Must not throw or await. */

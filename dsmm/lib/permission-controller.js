@@ -1,7 +1,7 @@
 import { Service } from "@deepseek-ai/cordis";
 import { HarnessError } from "@deepseek-ai/dsh-llm";
 import { TOOL_ABORTED } from "@deepseek-ai/dsh-tools";
-import { isSandboxWidening, PermissionControl, PermissionRefusal } from "./permission-control.js";
+import { isSandboxWidening, PermissionControl, PermissionRefusal, permissionApprovalAdapter } from "./permission-control.js";
 import { classifyPermissionShell } from "./permission-shell.js";
 import { nativeCommandMatch } from "./permission-native-command.js";
 import { NATIVE_PERMISSION_CAPABILITIES, registerNativePermissionRules } from "./permission-native-rules.js";
@@ -109,7 +109,7 @@ export class DsmmPermissionController extends Service {
                 },
             });
             ctx.tools.guard(exec => this.permissions.guard(exec));
-            ctx.on("approval/request", (request, next) => this.permissions.answerer(request, next), { prepend: true, global: true });
+            ctx.on("approval/request", permissionApprovalAdapter(ctx, (request, next) => this.permissions.answerer(request, next)), { prepend: true, global: true });
             ctx.on("tools/result", exec => { this.permissions.finish(exec); }, { global: true });
             ctx.on("agent/disposed", ({ agent }) => { this.permissions.revokeAgent(agent); }, { global: true });
         }

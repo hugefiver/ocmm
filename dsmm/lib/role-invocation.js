@@ -27,7 +27,7 @@ export function bindRoleInvocation(agent, invocation, original) {
 export function capturedRoleInvocation(agent) { return captured.get(agent); }
 export function capturedOriginalRoleInvocation(agent) { return originalCaptures.get(agent)?.invocation; }
 /** Complete selections replace model and effort together; effort-only selections narrow candidates. */
-export async function resolveRoleInvocation(parent, target, settings, signal, options = {}, nativeOptions) {
+export async function resolveRoleInvocation(parent, target, settings, signal, options = {}, nativeOptions, parameterPolicy) {
     if (!isDsmmRoleId(target) || target === "dsmm-orchestrator")
         throw new SubagentError("Unknown DSMM delegation target", "UNAUTHORIZED");
     if (Object.keys(options).some(key => key !== "level" && key !== "route"))
@@ -93,7 +93,7 @@ export async function resolveRoleInvocation(parent, target, settings, signal, op
     if (llm === undefined)
         throw new Error("DSMM invocation requires the parent's native LLM service");
     const admission = parent.ctx.get("dsmmProfileRuntime")?.admission(parent);
-    const modelParameterPolicy = capturedRoleInvocation(parent)?.modelParameterPolicy
+    const modelParameterPolicy = parameterPolicy ?? capturedRoleInvocation(parent)?.modelParameterPolicy
         ?? (admission === undefined ? configuredModelParameterPolicy(settings) : resolvedModelParameterPolicy(admission));
     const project = (candidate, source) => modelRouteFromCall(projectModelRouteParameters(candidate, source, modelParameterPolicy.mode !== "native-defaults"));
     const projected = initialCandidates.map((candidate, index) => project(candidate, index === 0 || candidateEffort !== undefined ? effortSource : "dsmm-config"));

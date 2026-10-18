@@ -48,7 +48,7 @@ export function capturedRoleInvocation(agent: DshAgent): ResolvedRoleInvocation 
 export function capturedOriginalRoleInvocation(agent: DshAgent): ChildAdmissionCapture["invocation"] | undefined { return originalCaptures.get(agent)?.invocation; }
 
 /** Complete selections replace model and effort together; effort-only selections narrow candidates. */
-export async function resolveRoleInvocation(parent: Agent, target: DsmmRoleId, settings: DsmmSettings, signal: AbortSignal, options: DsmmInvocationOptions = {}, nativeOptions?: AgentOptions): Promise<ResolvedRoleInvocation> {
+export async function resolveRoleInvocation(parent: Agent, target: DsmmRoleId, settings: DsmmSettings, signal: AbortSignal, options: DsmmInvocationOptions = {}, nativeOptions?: AgentOptions, parameterPolicy?: ResolvedModelParameterPolicy): Promise<ResolvedRoleInvocation> {
   if (!isDsmmRoleId(target) || target === "dsmm-orchestrator") throw new SubagentError("Unknown DSMM delegation target", "UNAUTHORIZED");
   if (Object.keys(options).some(key => key !== "level" && key !== "route")) throw new SubagentError("Unknown DSMM invocation parameter", "UNSUPPORTED_CAPABILITY");
   const level = options.level ?? "normal";
@@ -93,7 +93,7 @@ export async function resolveRoleInvocation(parent: Agent, target: DsmmRoleId, s
   const llm = parent.ctx.get("llm") as DshLlmRuntime | undefined;
   if (llm === undefined) throw new Error("DSMM invocation requires the parent's native LLM service");
   const admission = parent.ctx.get("dsmmProfileRuntime")?.admission(parent as unknown as DshAgent);
-  const modelParameterPolicy = capturedRoleInvocation(parent as unknown as DshAgent)?.modelParameterPolicy
+  const modelParameterPolicy = parameterPolicy ?? capturedRoleInvocation(parent as unknown as DshAgent)?.modelParameterPolicy
     ?? (admission === undefined ? configuredModelParameterPolicy(settings) : resolvedModelParameterPolicy(admission));
   const project = (candidate: DsmmModelRoute, source: "native" | "dsmm-config") => modelRouteFromCall(projectModelRouteParameters(candidate, source, modelParameterPolicy.mode !== "native-defaults"));
   const projected = initialCandidates.map((candidate, index) => project(candidate, index === 0 || candidateEffort !== undefined ? effortSource : "dsmm-config"));

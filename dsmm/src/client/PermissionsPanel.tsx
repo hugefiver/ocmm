@@ -6,9 +6,11 @@ import type { PermissionRuleAction } from "../permission-settings.js";
 import type { PermissionController, PermissionView } from "./permission-controller.js";
 import type { PermissionIssue } from "./permission-client.js";
 import type { PermissionLocaleKey } from "./permission-locales.js";
+import { TemporaryGrants } from "./TemporaryPermissions.js";
+import type { TemporaryPermissionRemote } from "../permission-temporary-types.js";
 
 type Locale = PropsLocale<"settings.dsmm-permissions">;
-export type PermissionsPanelProps = Locale & { controller: PermissionController; sessionId?: string };
+export type PermissionsPanelProps = Locale & { controller: PermissionController; sessionId?: string; temporary?: TemporaryPermissionRemote };
 const actions: readonly PermissionRuleAction[] = ["inherit", "allow", "ask", "deny"];
 const kinds: readonly PermissionRuleMatch["kind"][] = ["outside-read", "shell", "webSearch", "webFetch"];
 const ruleDraft = (rule: PermissionRule): PermissionRuleDraft => ({ id: rule.id, action: rule.action, match: structuredClone(rule.match) });
@@ -96,7 +98,7 @@ export function PermissionRulesEditor({ controller, state, t }: Locale & { contr
     {state.dirty && <p>{t("dirty")}</p>}
   </section>;
 }
-export function PermissionsPanel({ controller, t, sessionId }: PermissionsPanelProps) {
+export function PermissionsPanel({ controller, t, sessionId, temporary }: PermissionsPanelProps) {
   const state = useSyncExternalStore(controller.store.subscribe, controller.store.getSnapshot);
   useEffect(() => controller.watch(), [controller]);
   if (sessionId !== undefined && sessionId !== state.sessionId) return <p className="dsmm-hint" role="status">{t("rulesUnavailable")}</p>;
@@ -104,5 +106,6 @@ export function PermissionsPanel({ controller, t, sessionId }: PermissionsPanelP
     <h2>{t("title")}</h2><RootState state={state} t={t} /><p className="dsmm-hint">{t("nativeApproval")}</p>
     <p className="dsmm-status" role="status" aria-live="polite">{state.busy !== null ? t("busy") : state.reading ? t("reading") : state.notice === null ? "" : t(state.notice)}</p>
     <PermissionRulesEditor controller={controller} state={state} t={t} />
+    {temporary && sessionId && <TemporaryGrants key={sessionId} remote={temporary} sessionId={sessionId} t={t} />}
   </section>;
 }

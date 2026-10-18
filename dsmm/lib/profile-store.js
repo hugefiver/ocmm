@@ -179,7 +179,14 @@ export class ProfileStore {
             const bytes = Buffer.from(`${JSON.stringify(pointer)}\n`, "utf8");
             const selection = { sessionId: request.sessionId, admissionEpoch: epoch,
                 selectedId: request.id, appliedRevision: revision, selectionRevision: "unavailable", document: draft?.document ?? null, content: draft?.content ?? null, ...source, ...warningFields(draft) };
-            commit.prepare?.(selection, prepared);
+            try {
+                await commit.prepare?.(selection, prepared);
+            }
+            catch (error) {
+                if (error instanceof DsmmProfileError)
+                    throw error;
+                throw new DsmmProfileError("activation", "The candidate installation could not be prepared; the previous session selection was retained.");
+            }
             const owned = this.atomicReplace(target, bytes, fence, assertLock);
             commit.committed(selection, prepared);
             const observed = observeCommitted(target, owned, this.observe);

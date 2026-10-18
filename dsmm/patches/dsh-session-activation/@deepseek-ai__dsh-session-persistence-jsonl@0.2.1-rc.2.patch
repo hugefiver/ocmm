@@ -1,0 +1,35 @@
+diff --git a/lib/index.js b/lib/index.js
+index 8247fd4f6fb1114ae1080f5e98b124e10376468f..3044242107b3e9c7ead8337f4c61f910adfc0711 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -2401,6 +2401,7 @@ function waitWithAbort(operation, signal) {
+ * flush, and never existed if the process crashes before that.
+ */
+ var JsonlSessionPersistence = class extends SessionPersistence {
++	writeAdmission = Object.freeze({ lockedInspection: 1 });
+ 	config;
+ 	tracker;
+ 	/** Backend label for diagnostics and effects; shadows `Service.name` without changing the service key. */
+@@ -2525,6 +2526,22 @@ var JsonlSessionPersistence = class extends SessionPersistence {
+ 			lease = await this.acquireLease(id, void 0, dirname(resolved.currentPath));
+ 			const prepared = await this.requireStoredLog(id, options?.signal);
+ 			options?.signal?.throwIfAborted();
++			if (options?.validateWriteAdmission !== void 0) {
++				const immutable = value => {
++					if (value !== null && typeof value === "object") {
++						for (const child of Object.values(value)) immutable(child);
++						Object.freeze(value);
++					}
++					return value;
++				};
++				const inspection = immutable(structuredClone({ meta: prepared.meta, inheritedEventCount: prepared.inheritedEventCount, events: prepared.events, sourceVersion: prepared.status === "prepared" ? prepared.publication.source.sourceVersion : SESSION_FORMAT_VERSION, migrationRequired: prepared.status === "prepared" }));
++				const result = options.validateWriteAdmission(inspection);
++				if (result !== void 0) {
++					Promise.resolve(result).catch(() => {});
++					throw new TypeError("Write admission must complete synchronously without a return value");
++				}
++				options?.signal?.throwIfAborted();
++			}
+ 			let stored;
+ 			if (prepared.status === "prepared") stored = await this.publishStoredMigration(id, prepared);
+ 			else stored = prepared;

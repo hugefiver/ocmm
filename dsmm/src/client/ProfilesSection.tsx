@@ -68,10 +68,7 @@ export function ProfilesSection(props: ProfilesSectionProps) {
   else if (snapshot?.selectedId !== null && snapshot?.selectedId !== undefined) selection = t("appliedProfile", { id: snapshot.selectedId, revision: t(configurationVersionState(snapshot.sourceRevision)) });
   const notice = state.notice === null ? "" : t(state.notice.key === "reset" ? "resetDone" : state.notice.key, { id: state.notice.id });
   const warnings = editor === null ? [] : draftWarnings(editor.content);
-  return <section className="dsmm-profiles" aria-labelledby={`${prefix}-title`} aria-busy={state.busy !== null}>
-    <h2 id={`${prefix}-title`}>{t("title")}</h2>
-    <p>{t("description")}</p>
-    {snapshot?.origin !== undefined && <p className="dsmm-hint">{t(snapshot.origin === "legacy" ? "legacyOrigin" : snapshot.origin === "central" ? "centralOrigin" : "explicitOrigin")}</p>}
+  return <section className="dsmm-profiles" aria-label={t("title")} aria-busy={state.busy !== null}>
     {readOnly && <p role="status" className="dsmm-hint">{t("readOnlyOrigin")}</p>}
     <section className="dsmm-zone" aria-labelledby={`${prefix}-browse`} data-dsmm-zone="browse">
     <h3 id={`${prefix}-browse`}>{t("browseZone")}</h3>
@@ -87,9 +84,8 @@ export function ProfilesSection(props: ProfilesSectionProps) {
       </select>
       {snapshot.profiles.length === 0 && <p className="dsmm-hint">{t("empty")}</p>}
     </div>}
-    {snapshot !== null && snapshot.profiles.length > 0 && <ul className="dsmm-profile-list" aria-label={t("savedInventory")}>{snapshot.profiles.map((profile, index) => <li key={`${index}:${profile.id}`}>
+    {snapshot !== null && snapshot.profiles.some(profile => profile.error !== undefined || profile.warnings?.length) && <ul className="dsmm-profile-list" aria-label={t("savedInventory")}>{snapshot.profiles.filter(profile => profile.error !== undefined || profile.warnings?.length).map((profile, index) => <li key={`${index}:${profile.id}`}>
       <p>{profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id}</p>
-      <p className="dsmm-hint">{t("savedRevision", { revision: t(configurationVersionState(profile.revision)) })}</p>
       <ProfileWarnings warnings={profile.warnings} t={t} />
       {profile.error !== undefined && <IssueDetails issue={profile.error} t={t} />}
     </li>)}</ul>}
@@ -103,7 +99,6 @@ export function ProfilesSection(props: ProfilesSectionProps) {
     {editor === null && <p className="dsmm-hint">{t("noEditor")}</p>}
     {editor !== null && <div className="dsmm-editor">
       <p data-dsmm-editor-state>{t(editor.refreshRequired ? "savedRefreshRequired" : state.dirty ? "dirty" : applied ? "savedApplied" : relationship === "unknown" ? "savedRelationshipUnknown" : "savedNotApplied")}</p>
-      <p className="dsmm-hint">{t("savedRevision", { revision: t(editor.revision === null ? "versionAbsent" : configurationVersionState(editor.revision)) })}</p>
       <div className="dsmm-actions">
         <Button type="button" variant="primary" disabled={editorDisabled || !state.dirty || snapshot === null || state.invalidFields.length > 0} onClick={() => { void props.save(); }}>{t(state.busy === "save" ? "saving" : "save")}</Button>
         {editor.revision !== null && <Button type="button" variant="outline" disabled={disabled} onClick={() => { void props.reload(); }}>{t("reload")}</Button>}
@@ -115,7 +110,7 @@ export function ProfilesSection(props: ProfilesSectionProps) {
         <Input ref={inputRef} id={`${prefix}-id`} className="dsmm-input" value={editor.id} disabled={editorDisabled || editor.revision !== null} aria-invalid={idInvalid || undefined} aria-describedby={`${prefix}-id-hint${idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editId(event.currentTarget.value)} />
         <p id={`${prefix}-id-hint`} className="dsmm-hint">{t("idHint")}</p>
       </div>
-      <div className="dsmm-catalog"><h3>{t("catalogTitle")}</h3><p className="dsmm-hint">{t("catalogHint")}</p>
+      <div className="dsmm-catalog">
         {state.catalogUnavailable && <p className="dsmm-hint">{t("catalogUnavailable")}</p>}
         {state.catalog?.failures.map((failure) => <p className="dsmm-hint" key={failure.id}>{t("catalogFailure", { name: failure.name, id: failure.id })}</p>)}
         <Button type="button" variant="outline" disabled={state.catalogBusy} onClick={() => { void props.refreshCatalog(); }}>{t(state.catalogBusy ? "catalogRefreshing" : "catalogRefresh")}</Button>
@@ -132,13 +127,10 @@ export function ProfilesSection(props: ProfilesSectionProps) {
     </section>
     <section className="dsmm-zone" aria-labelledby={`${prefix}-global`} data-dsmm-zone="future-default">
       <h3 id={`${prefix}-global`}>{t("globalScope")}</h3>
-      <p className="dsmm-hint">{t("newSessions")}</p>
+      <p id={`${prefix}-global-action`} className="dsmm-hint">{t("newSessions")}</p>
       <p data-dsmm-selection>{selection}</p>
-      <p className="dsmm-hint">{t("futurePin", { revision: t(configurationVersionState(snapshot?.selectionRevision)) })}</p>
       {snapshot?.refreshRequired && <p role="status">{t("savedRefreshRequired")}</p>}
       {snapshot?.selectedWarnings?.length ? <div><p>{t("futureWarnings")}</p><ProfileWarnings warnings={snapshot.selectedWarnings} t={t} /></div> : null}
-      <p className="dsmm-hint">{t("savedOnlyHint")}</p>
-      <p id={`${prefix}-global-action`} className="dsmm-hint">{t("globalActionHint")}</p>
       <div className="dsmm-actions">
         <Button type="button" variant="primary" aria-describedby={`${prefix}-global-action`} disabled={editorDisabled || state.dirty || editor?.revision == null || !reconcilable || (applied && !selectionConflict)} onClick={() => { void props.apply(); }}>{t(state.busy === "apply" ? "applying" : "apply")}</Button>
         <Button type="button" variant="outline" disabled={editorDisabled || !reconcilable || (snapshot?.selectedId === null && !selectionConflict)} onClick={() => { void props.reset(); }}>{t(state.busy === "reset" ? "resetting" : "reset")}</Button>

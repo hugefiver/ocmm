@@ -203,6 +203,7 @@ export interface SessionProfileSnapshot {
   selectModelUnavailableReason?: SessionActionUnavailableReason;
   canToggleMode: boolean;
   toggleModeUnavailableReason?: SessionActionUnavailableReason;
+  /** Host-authoritative blank-session choice; never started-session hot Apply. */
   canApplyOverlay: boolean;
   applyOverlayUnavailableReason?: SessionActionUnavailableReason;
   rolePolicy?: DsmmRoleRuntimeState;

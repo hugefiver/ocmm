@@ -293,12 +293,18 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
         const host = ctx.get?.("tools");
         const names = [...hostControls, ...host?.schemas().map((row) => row.name).filter((name) => name.startsWith(`mcp__${settings.lsp.serverName}__`)) ?? []];
         const definitions = names.map((name) => host?.get(name));
+        const providers = targets.map(role => {
+            const provider = subagents?.getProvider(roleProviderName(role));
+            return provider === undefined ? undefined : Reflect.get(provider, symbols.original) ?? provider;
+        });
+        const sameProviders = providers.length === state.providers.length && providers.every((provider, index) => provider === state.providers[index]);
         const signature = JSON.stringify([identity.role, targets, settings.subagents, targets.map((role) => [settings.roleRouting[role], subagents?.getProvider(roleProviderName(role))?.capabilities])]);
         const sameRealm = state.tools !== undefined && (Reflect.get(state.tools, symbols.original) ?? state.tools) === (Reflect.get(tools, symbols.original) ?? tools);
         const parentScope = scopeParentOf(agent);
         const sameParent = state.parentScope === parentScope;
-        if (sameRealm && sameParent && signature === state.signature && definitions.length === state.hostDefinitions.length && definitions.every((definition, i) => definition === state.hostDefinitions[i]))
+        if (sameRealm && sameParent && sameProviders && signature === state.signature && definitions.length === state.hostDefinitions.length && definitions.every((definition, i) => definition === state.hostDefinitions[i]))
             return;
+        state.signature = undefined;
         for (const dispose of state.owned.splice(0))
             dispose();
         state.restriction?.();
@@ -322,6 +328,7 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
             state.owned.push(registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, admission));
         policy.captureTools(agent, tools, [...inventory.map(entry => entry.name), ...names], !sameRealm || !sameParent);
         state.signature = signature;
+        state.providers = providers;
         state.hostDefinitions = definitions;
         state.parentScope = parentScope;
     };
@@ -332,7 +339,7 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
             return;
         const agentCtx = nativeAgentContext(agent);
         policy.admit(agent);
-        states.set(agent, { owned: [], hostDefinitions: [] });
+        states.set(agent, { owned: [], hostDefinitions: [], providers: [] });
         const retire = () => {
             stopIdentity();
             const state = states.get(agent);
@@ -348,7 +355,13 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
         };
         admission.lifetime.signal.addEventListener("abort", retire, { once: true });
         agentCtx.effect(() => retire);
-        reconcile(agent);
+        try {
+            reconcile(agent);
+        }
+        catch (error) {
+            retire();
+            throw error;
+        }
         admittedRealms.set(agent, () => reconcile(agent));
     };
     // Native assembly collects sections before its waterfall. Admission/mode/preset

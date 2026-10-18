@@ -25,7 +25,7 @@ function capabilityReason(reason: SessionActionUnavailableReason | undefined, t:
     case "model-unconfigured": return t("headerNoProfileModel");
     case "model-service-unavailable": return t("headerModelUnconfirmed");
     case "new-session-required": return t("sessionNewRequired");
-    default: return t("headerUnavailable");
+    default: return t("headerActionUnavailable");
   }
 }
 function menuIssue(issue: ProfilesIssue): { code: string; field?: string } {
@@ -44,8 +44,8 @@ export function SessionScope({ state, actions, t, compact = false }: PropsLocale
   const labels = session === null ? null : sessionProfileLabels(session, t);
   const selected = state.snapshot?.profiles.find((profile) => profile.id === state.sessionChoice);
   const disabled = state.busy !== null || state.pendingEditor !== null || state.sessionBusy !== null || state.dirty || state.invalidFields.length > 0;
-  const current = () => actions.readProfileView().currentSessionId === state.currentSessionId;
-  const ready = session !== null && !session.refreshRequired && !session.selection.refreshRequired && writableSelectionVersion(session.selection.selectionRevision);
+  const current = () => { const live = actions.readProfileView(); return live.currentSessionId === state.currentSessionId && live.sessionViewEpoch === state.sessionViewEpoch && live.session === session; };
+  const ready = session !== null && !state.sessionUnconfirmed && !session.refreshRequired && !session.selection.refreshRequired && writableSelectionVersion(session.selection.selectionRevision);
   const allowed = ready && session.canApplyOverlay === true && session.applyOverlayUnavailableReason !== "new-session-required";
   const modelAllowed = ready && session.canSelectModel === true && session.profileModel !== undefined;
   const status = state.sessionNotice === null ? "" : t(state.sessionNotice === "mode-on" ? "headerModeOn" : state.sessionNotice === "mode-off" ? "headerModeOff" : state.sessionNotice === "applied-with-model" ? "sessionAppliedWithModel" : state.sessionNotice === "applied" ? "sessionApplied" : "sessionResetDone");
@@ -53,7 +53,7 @@ export function SessionScope({ state, actions, t, compact = false }: PropsLocale
   try { if (binding !== undefined) binding = parseSubagentRuntimeAdmissionView(binding); } catch { binding = undefined; }
   return <div className="dsmm-session-scope" aria-busy={state.sessionBusy !== null} data-dsmm-session-scope>
     {!compact && <h3>{t("sessionScope")}</h3>}
-    {state.currentSessionId === null ? <p className="dsmm-hint">{t("noSession")}</p> : <>
+    {state.currentSessionId === null ? <p className="dsmm-hint">{t("sessionChooseWorkspace")}</p> : <>
       {labels !== null && <p data-dsmm-session-state>{labels.admitted}</p>}
       {labels !== null && !compact && <p className="dsmm-hint" data-dsmm-session-future-default>{labels.futureDefault}</p>}
       {session === null && <p className="dsmm-hint" id={`${prefix}-overlay-reason`}>{t("sessionUnavailable")}</p>}
@@ -63,25 +63,27 @@ export function SessionScope({ state, actions, t, compact = false }: PropsLocale
         <select id={`${prefix}-choice`} value={state.sessionChoice ?? ""} disabled={disabled || !allowed} aria-describedby={!allowed ? `${prefix}-overlay-reason` : undefined} onChange={(event) => { if (current()) actions.chooseSessionProfile(event.currentTarget.value || null); }}>
           <option value="">{t("sessionBaseline")}</option>
           {state.sessionChoice !== null && selected === undefined && <option value={state.sessionChoice}>{state.sessionChoice}</option>}
-          {state.snapshot?.profiles.map((profile) => <option key={profile.id} value={profile.id} disabled={!isConfigRevision(profile.revision) || profile.error !== undefined}>{profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id}{profileWarnings(profile.warnings).length ? ` — ${t("warningProfile")}` : ""}</option>)}
+          {state.snapshot?.profiles.map((profile) => <option key={profile.id} value={profile.id} disabled={!isConfigRevision(profile.revision) || profile.error !== undefined}>{profile.label?.trim() || profile.id}{profileWarnings(profile.warnings).length ? ` — ${t("warningProfile")}` : ""}</option>)}
         </select>
       </div>
       {!compact && <><p className="dsmm-hint">{t("sessionModelHint")}</p>
         <Button type="button" variant="outline" disabled={disabled || !modelAllowed} aria-describedby={!modelAllowed ? `${prefix}-model-reason` : undefined} onClick={() => { if (current()) void actions.useSessionProfileModel(); }}>{t("headerUseCurrentModel")}</Button>
         {!modelAllowed && <p className="dsmm-hint" id={`${prefix}-model-reason`}>{capabilityReason(session?.selectModelUnavailableReason, t)}</p>}
-        {session !== null && <div className="dsmm-availability">
+        {session !== null && <details><summary>{t("technicalDetails")}</summary><div className="dsmm-availability">
           <p>{binding === undefined ? t("bindingUnknown") : t("bindingState", { binding: binding.binding, ready: t(binding.deliveryFenceReady ? "enabled" : "disabled"), restart: t(binding.restartRequired ? "enabled" : "disabled") })}</p>
           {binding?.reason !== undefined && <p>{t("bindingReason", { reason: binding.reason })}</p>}
-        </div>}
-        {session?.roles !== undefined && <details><summary>{t("admittedRoles")}</summary>{session.roles.map(role => <div className="dsmm-availability" key={role.id}><p>{role.id}</p><RoleAvailability value={role} t={t} /></div>)}</details>}
+        </div>
+        {session.roles !== undefined && <details><summary>{t("admittedRoles")}</summary>{session.roles.map(role => <div className="dsmm-availability" key={role.id}><p>{role.id}</p><RoleAvailability value={role} t={t} /></div>)}</details>}
+        {session.rolePolicy !== undefined && <p data-dsmm-session-policy>{t("roleState", { route: session.rolePolicy.route === undefined ? t("inheritRoute") : `${session.rolePolicy.route.provider}/${session.rolePolicy.route.model}${session.rolePolicy.route.reasoningEffort === undefined ? "" : ` (${session.rolePolicy.route.reasoningEffort})`}`, strategy: session.rolePolicy.strategy, retries: session.rolePolicy.retries, failures: session.rolePolicy.rateLimitFailures, switches: session.rolePolicy.switches, delay: session.rolePolicy.totalDelayMs })}</p>}
+        </details>}
       </>}
       {state.dirty && <p className="dsmm-hint">{t("sessionDirty")}</p>}
-      {(session?.refreshRequired || session?.selection.refreshRequired) && <p role="status">{t("savedRefreshRequired")}</p>}
+      {(session?.refreshRequired || session?.selection.refreshRequired) && <p role="status">{t("sessionCommittedRefresh")}</p>}
+      {state.sessionUnconfirmed && <p role="status">{t("sessionUnconfirmedRefresh")}</p>}
       <div className="dsmm-actions"><Button type="button" variant="outline" disabled={disabled || !allowed || (state.sessionChoice !== null && !isConfigRevision(selected?.revision))} aria-describedby={!allowed ? `${prefix}-overlay-reason` : undefined} onClick={() => { if (current()) void actions.applySession(); }}>{t(state.sessionBusy === "apply" ? "sessionApplying" : "sessionApply")}</Button>
         {!compact && <Button type="button" variant="outline" disabled={disabled || !allowed} aria-describedby={!allowed ? `${prefix}-overlay-reason` : undefined} onClick={() => { if (current()) void actions.resetSession(); }}>{t(state.sessionBusy === "reset" ? "sessionResetting" : "sessionReset")}</Button>}
         <Button type="button" variant="outline" disabled={state.sessionBusy !== null || state.busy !== null || state.pendingEditor !== null} onClick={() => { if (current()) void actions.refreshSession(); }}>{t("sessionRefresh")}</Button>
       </div>
-      {!compact && session?.rolePolicy !== undefined && <p data-dsmm-session-policy>{t("roleState", { route: session.rolePolicy.route === undefined ? t("inheritRoute") : `${session.rolePolicy.route.provider}/${session.rolePolicy.route.model}${session.rolePolicy.route.reasoningEffort === undefined ? "" : ` (${session.rolePolicy.route.reasoningEffort})`}`, strategy: session.rolePolicy.strategy, retries: session.rolePolicy.retries, failures: session.rolePolicy.rateLimitFailures, switches: session.rolePolicy.switches, delay: session.rolePolicy.totalDelayMs })}</p>}
     </>}
     {state.sessionIssue !== null && <p role="alert">{state.sessionIssue.source === "profile-model" ? t(state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed")
       : state.sessionIssue.code === "conflict" ? t("sessionConflict")
@@ -108,34 +110,35 @@ export function SessionProfiles(props: SessionProfilesProps) {
   const profiles = state.snapshot?.profiles ?? [];
   const currentSaved = profiles.find((profile) => profile.id === current);
   const committing = state.sessionBusy !== null;
-  const unavailable = id === null || committing || state.busy !== null || session === null || session.refreshRequired === true || session.selection.refreshRequired === true;
+  const unavailable = id === null || committing || state.busy !== null || state.sessionUnconfirmed || session === null || session.refreshRequired === true || session.selection.refreshRequired === true;
   const profileDisabled = unavailable || state.pendingEditor !== null || state.dirty || state.invalidFields.length > 0
     || session === null || !writableSelectionVersion(session.selection.selectionRevision);
   const disabled = profileDisabled || session?.canApplyOverlay !== true || session?.applyOverlayUnavailableReason === "new-session-required" || state.snapshot === null;
   let feedback = "";
-  if (state.sessionIssue !== null) feedback = t(state.sessionIssue.source === "profile-model" ? state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed"
+  if (state.sessionUnconfirmed) feedback = t("sessionUnconfirmedRefresh");
+  else if (session?.refreshRequired || session?.selection.refreshRequired) feedback = t("sessionCommittedRefresh");
+  else if (state.sessionIssue !== null) feedback = t(state.sessionIssue.source === "profile-model" ? state.sessionIssue.code === "model-unconfigured" ? "headerNoProfileModel" : state.sessionIssue.code === "model-choice-changed" ? "headerModelChoiceChanged" : "headerModelUnconfirmed"
     : state.sessionIssue.code === "conflict" ? "headerConflict" : state.sessionIssue.code === "activation" ? "headerActivationRefused"
     : state.sessionIssue.code === "maintenance" ? "headerMaintenanceRefused" : state.sessionIssue.code === "busy" ? "headerBusyRefused"
     : state.sessionIssue.code === "cancelled" ? "headerCancelledRefused" : state.sessionIssue.code === "unavailable" || state.sessionIssue.kind === "assembly" ? "headerUnavailableRefused" : "headerSelectionRefused");
   else if (committing || state.busy !== null) feedback = t(state.sessionBusy === "apply" || state.sessionBusy === "reset" ? "headerApplying" : "headerLoading");
   else if (state.dirty || state.invalidFields.length > 0 || state.pendingEditor !== null) feedback = t("headerDraft");
-  else if (id === null) feedback = t("headerNoSession");
+   else if (id === null) feedback = t("sessionChooseWorkspace");
   else if (session === null || state.snapshot === null) feedback = t("headerUnavailable");
-   else if (session.refreshRequired || session.selection.refreshRequired) feedback = t("savedRefreshRequired");
   else if (state.sessionNotice !== null) feedback = t(state.sessionNotice === "mode-on" ? "headerModeOn" : state.sessionNotice === "mode-off" ? "headerModeOff" : state.sessionNotice === "applied-with-model" ? "headerAppliedWithModel" : "headerApplied");
-  const profileName = unknownCaptured ? t("headerCaptured") : admission !== undefined && sourceRelationship(admission, currentSaved?.revision) === "current" && currentSaved?.label?.trim() ? `${currentSaved.label} (${currentSaved.id})` : admission?.selectedId ?? t("sessionBaseline");
+  const profileName = unknownCaptured ? t("headerCaptured") : admission !== undefined && sourceRelationship(admission, currentSaved?.revision) === "current" && currentSaved?.label?.trim() ? currentSaved.label : admission?.selectedId ?? t("sessionBaseline");
   const currentLabel = t("headerCurrentProfile", { profile: session === null ? t("headerUnavailable") : profileName });
   const entries: MenuEntry[] = [{ type: "label", id: "@current", text: currentLabel }];
   for (const warning of profileWarnings(session?.warnings)) entries.push({ type: "label", id: `@warning:${warning.code}`, text: t("warningMarker", { code: warning.code, field: warning.field }) });
-  if (id === null && state.snapshot !== null) entries.push({ type: "label", id: "@future", text: t("sessionFutureDefault", { profile: state.snapshot.profiles.find((profile) => profile.id === state.snapshot!.selectedId)?.label?.trim() || state.snapshot.selectedId || t("sessionBaseline") }) });
-  if (feedback !== "" && (state.sessionNotice === null || state.sessionIssue !== null)) entries.push({ type: "label", id: "@status", text: feedback });
+  if ((id === null || session?.canApplyOverlay === true) && state.snapshot !== null) entries.push({ type: "label", id: "@future", text: t("sessionFutureDefault", { profile: state.snapshot.profiles.find((profile) => profile.id === state.snapshot!.selectedId)?.label?.trim() || state.snapshot.selectedId || t("sessionBaseline") }) });
+  if (feedback !== "" && (state.sessionNotice === null || state.sessionIssue !== null || state.sessionUnconfirmed || session?.refreshRequired || session?.selection.refreshRequired)) entries.push({ type: "label", id: "@status", text: feedback });
   const mode = session?.deepwork;
   entries.push({ id: "@mode", label: t(mode === undefined ? "headerModeUnavailable" : mode.locked ? "headerModePreset" : mode.active ? "headerModeDisable" : "headerModeEnable"),
      disabled: unavailable || session?.canToggleMode !== true || mode === undefined || mode.locked });
   if (session !== null && session.canToggleMode !== true) entries.push({ type: "label", id: "@mode-reason", text: capabilityReason(session.toggleModeUnavailableReason, t) });
   const diagnostic = state.sessionIssue === null ? null : menuIssue(state.sessionIssue);
   const diagnosticText = diagnostic === null ? "" : t("headerIssueCode", { code: diagnostic.code }) + (diagnostic.field === undefined ? "" : ` ${t("headerIssueField", { field: diagnostic.field })}`);
-  const retryHint = t(diagnostic?.code === "maintenance" || diagnostic?.code === "busy" ? "headerWaitRetryHint" : "headerRetryHint");
+  const retryHint = t(state.sessionUnconfirmed ? "sessionUnconfirmedRefresh" : diagnostic?.code === "maintenance" || diagnostic?.code === "busy" ? "headerWaitRetryHint" : "headerRetryHint");
   if (diagnostic !== null) entries.push({ type: "label", id: "@diagnostic", text: diagnosticText }, { type: "label", id: "@retry", text: retryHint });
   if (admission?.selectedId != null && currentSaved === undefined) entries.push({ id: admission.selectedId, label: `${admission.selectedId} — ${t("headerSavedUnavailable")}`, disabled: true });
   if (unknownCaptured) entries.push({ id: "__dsmm_captured_default__", label: t("headerCaptured"), disabled: true });
@@ -150,10 +153,11 @@ export function SessionProfiles(props: SessionProfilesProps) {
       footer={[{ id: "@refresh", label: t("headerCompactRefresh"), disabled: committing || state.busy !== null }]}
       anchor={<Button type="button" size="sm" variant="toolbar" className="dsmm-profile-trigger" icon={<IconBranchOutlineRegular />} aria-label={t("headerProfileLabel")} aria-haspopup="menu" aria-expanded={open} aria-describedby={`${prefix}-feedback`} onClick={() => setOpenFor(open ? undefined : id)} />}
       onClose={() => setOpenFor(undefined)} onSelect={(value) => {
-        if (props.readProfileView().currentSessionId !== id) return;
+         const live = props.readProfileView();
+         if (live.currentSessionId !== id || live.sessionViewEpoch !== state.sessionViewEpoch || live.session !== session) return;
         if (value === "@refresh") {
           if (committing || state.busy !== null) return;
-          void (async () => { await props.refresh(); if (id !== null && props.readProfileView().currentSessionId === id) await props.refreshSession(); })();
+           void (async () => { await props.refresh(); if (id !== null && props.readProfileView().currentSessionId === id && props.readProfileView().sessionViewEpoch === state.sessionViewEpoch) await props.refreshSession(); })();
         } else {
           const row = entries.find((entry) => entry.id === value && !("type" in entry));
           if (row === undefined || !("disabled" in row) || row.disabled) return;

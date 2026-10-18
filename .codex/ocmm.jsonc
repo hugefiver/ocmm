@@ -1,12 +1,12 @@
 {
   "agents": {
-    "orchestrator": { "model": "apai/gpt-6.1-sol", "variant": "high" },
+    "orchestrator": { "model": "apai/gpt-5.6-sol", "variant": "high" },
     "planner": { "model": "apai/gpt-6-astra", "variant": "high" },
     "reviewer": { "model": "apai/gpt-6-astra", "variant": "high" },
-    "clarifier": { "model": "apai/gpt-6.1-sol", "variant": "high" },
+    "clarifier": { "model": "apai/gpt-5.6-sol", "variant": "high" },
     "plan-critic": { "model": "apai/gpt-6-astra", "variant": "high" },
     "oracle": { "model": "apai/gpt-6.1-sol", "variant": "xhigh" },
-    "oracle-2nd": { "model": "apai/gpt-6.1-sol", "variant": "high" },
+    "oracle-2nd": { "model": "apai/gpt-5.6-sol", "variant": "high" },
     "doc-search": { "model": "apai/gpt-6-luna", "variant": "high" },
     "explore": { "model": "apai/gpt-6-luna", "variant": "medium" },
     "code-search": { "model": "apai/gpt-6-luna", "variant": "medium" },

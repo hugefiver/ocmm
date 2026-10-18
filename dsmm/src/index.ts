@@ -1,5 +1,6 @@
 import { Context, symbols } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
+import type {} from "@deepseek-ai/dsh-api-gateway";
 import type { DshAgent, DshContext } from "./dsh-types.js";
 import { registerDeepworkCommand, registerDsmmStatusCommand } from "./commands.js";
 import { registerSafetyGuards } from "./guards.js";
@@ -26,6 +27,10 @@ import { registerRoleControlRpc } from "./role-control-rpc.js";
 import { nativeStandingFullAccess } from "./permission-native-access.js";
 import { DsmmProfileError } from "./profiles.js";
 import { registerLspRuntime } from "./lsp.js";
+import { DsmmHistoryCandidates } from "./history-candidates.js";
+import { registerHistoryContinuationRpc } from "./history-rpc.js";
+import { requireHistoryAdmission } from "./history-support.js";
+import { installTemporaryPermissions } from "./permission-temporary-install.js";
 
 export const name = "dsmm";
 export const inject = ["profileContext", "agents"] as const;
@@ -66,6 +71,8 @@ export type { DsmmLlmAdmission, DsmmLlmCallConfig, DsmmLlmHostOwner, DsmmLlmGene
 export { registerRuntimeRecovery } from "./runtime-recovery.js";
 export { classifyRecoveryFailure, foldAttemptedRecoveryRoutes, foldDurableRecoveryWork, selectFallbackRoute } from "./recovery-policy.js";
 export type { DurableRecoveryWork, RecoveryFailureDecision } from "./recovery-policy.js";
+export { DSMM_HISTORY_HOST_CONFIG } from "./history-support.js";
+export { HISTORY_REMOTE } from "./history-remote.js";
 
 export function createDsmmHostPlugin(startup: DsmmHostStartupOptions) {
   assertSupportedHostStartup(startup);
@@ -75,6 +82,7 @@ export async function apply(input: DshContext, config: Config = {}, startupOptio
   assertSupportedHostStartup(startupOptions);
   if (!Context.is(input)) throw new Error("DSMM requires the native Cordis Host");
   const ctx = input;
+  requireHistoryAdmission(ctx);
   const deployment = new DsmmDeploymentConfig(ctx, config);
   const lifetime = new AbortController();
   scopeLifetime(ctx, "dsmm: retire Core", () => lifetime.abort());
@@ -142,21 +150,21 @@ export async function apply(input: DshContext, config: Config = {}, startupOptio
   if (startup.settings.modules.deepwork.enabled) await registerLspRuntime(ctx, startup.settings.lsp, getSettings);
   lifetime.signal.throwIfAborted();
   const installed = new WeakSet<Agent>();
-  admission.activate(async (agent, candidate) => {
+  admission.activate(async (agent, candidate, phase) => {
     candidate.subagentRuntime = () => runtimeAdmissionView(ctx);
     const scope = agent.ctx as DshContext;
-    if (candidate().modules.deepwork.enabled) {
-      registerAgentSkills(scope, controller, candidate, agent as DshAgent, admission.lifetime.signal);
+    if (startup.settings.modules.deepwork.enabled) {
+      registerAgentSkills(scope, controller, candidate, agent as DshAgent, admission.lifetime.signal, () => !nativeAdmission.isSelecting(agent));
       registerDeepworkPrompt(scope, controller, candidate, { section: startup.profile.section ?? startup.global.section }, agent as DshAgent, admission.lifetime.signal);
     }
     if (installed.has(agent)) {
-      if (candidate().modules.deepwork.enabled && ctx.get("subagents") !== undefined) await registerHeadlessRoleTools(scope, controller, candidate, policy, nativeAdmission, agent as DshAgent);
+      if (phase !== "history-setup" && startup.settings.modules.deepwork.enabled && ctx.get("subagents") !== undefined) await registerHeadlessRoleTools(scope, controller, candidate, policy, nativeAdmission, agent as DshAgent);
       return;
     }
     registerModelRouting(scope, controller, candidate);
     registerSafetyGuards(scope, controller, candidate, policy);
-    if (candidate().modules.deepwork.enabled) {
-      if (ctx.get("subagents") !== undefined) await registerHeadlessRoleTools(scope, controller, candidate, policy, nativeAdmission, agent as DshAgent);
+    if (startup.settings.modules.deepwork.enabled) {
+      if (phase !== "history-setup" && ctx.get("subagents") !== undefined) await registerHeadlessRoleTools(scope, controller, candidate, policy, nativeAdmission, agent as DshAgent);
     }
     installed.add(agent);
   });
@@ -166,8 +174,17 @@ export async function apply(input: DshContext, config: Config = {}, startupOptio
   });
   ctx.inject(["typert"], scope => { registerConfigRpc(scope, deployment, startup.settings, () => profiles, startup.sources, mountedPermission); new DsmmProfilesHost(scope, profiles); registerRoleControlRpc(scope, nativeAdmission); });
   const permissions = createCorePermissionAuthority(ctx, { getSettings, rolePolicy: policy, signal: lifetime.signal });
+  const history = ctx.inject(["typert", "agentLoop", "sessionController", "sessionPersistence", "agentPresets"], function mountHistoryContinuation(scope) {
+    registerHistoryContinuationRpc(scope, new DsmmHistoryCandidates(scope, profiles, deployment, nativeAdmission), nativeAdmission);
+  });
+  if ((["typert", "agentLoop", "sessionController", "sessionPersistence", "agentPresets"] as const).every(key => ctx.get(key))) await history.await();
   const installPermissions = () => ctx.inject(["tools", ...(ctx.fiber.entry === undefined ? [] : ["settings"])], scope => {
     const installed = installCorePermissions(scope, deployment, permissions.authority, permissions.assertWritable);
+    scope.inject(["approval", "typertGateway", "typert", "subagents"], temporaryScope => {
+      if (typeof temporaryScope.approval.settlement !== "function" || typeof temporaryScope.typertGateway.registerApprovalPermits !== "function") return;
+      const temporary = installTemporaryPermissions(temporaryScope, { core: permissions, roles: policy, rules: installed.rules });
+      temporaryScope.effect(() => () => temporary.dispose(), "dsmm: temporary permissions");
+    });
     const identity: object = Reflect.get(installed, symbols.original) ?? installed;
     scopeLifetime(scope, "dsmm: release permission projection", () => { if (permissionOwner === identity) permissionOwner = undefined; }, () => { permissionOwner = identity; });
   });

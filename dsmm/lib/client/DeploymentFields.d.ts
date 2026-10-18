@@ -6,12 +6,14 @@ type Locale = PropsLocale<"plugins.dsmm">;
 export declare const permissionText: (t: Locale["t"]) => (key: PermissionLocaleKey) => string;
 export declare function fieldLabel(path: readonly string[], t: Locale["t"]): string;
 export declare function displayValue(value: unknown, t: Locale["t"]): string;
-export declare function AdvancedField({ schema, path, controller, inherited, upper, t }: Locale & {
+export declare function AdvancedField({ schema, path, controller, inherited, upper, expanded, onExpandedChange, t }: Locale & {
     schema: DeploymentSchemaNode;
     path: string[];
     controller: DeploymentController;
     inherited: unknown;
     upper: unknown;
+    expanded?: boolean;
+    onExpandedChange?: (expanded: boolean) => void;
 }): import("react").JSX.Element;
 export declare function ScalarField({ schema, path, controller, inherited, t }: Locale & {
     schema: DeploymentSchemaNode;
@@ -19,10 +21,12 @@ export declare function ScalarField({ schema, path, controller, inherited, t }: 
     controller: DeploymentController;
     inherited: unknown;
 }): import("react").JSX.Element;
-export declare function Field({ schema, path, controller, t }: Locale & {
+export declare function Field({ schema, path, controller, initiallyOpen, disclosures, t }: Locale & {
     schema: DeploymentSchemaNode;
     path: string[];
     controller: DeploymentController;
+    initiallyOpen?: boolean;
+    disclosures?: Map<string, boolean>;
 }): import("react").JSX.Element;
 export {};
 //# sourceMappingURL=DeploymentFields.d.ts.map

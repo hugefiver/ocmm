@@ -1,0 +1,55 @@
+diff --git a/lib/index.js b/lib/index.js
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -777,6 +777,9 @@ let AgentPresetRegistry = (() => {
+ 			let disposed = false;
+ 			return {
+ 				key: generation.key,
++				assertCurrent: () => {
++					if (disposed || generation.retired || this.definitions.get(generation.mount.presetId)?.generation !== generation) throw new Error("Preset revision is no longer current");
++				},
+ 				[Symbol.asyncDispose]: async () => {
+ 					if (disposed) return;
+ 					disposed = true;
+diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
+--- a/lib/types/index.d.ts
++++ b/lib/types/index.d.ts
+@@ -13,6 +13,12 @@ export { entryListProblem, type PresetDefinition } from './definition.ts';
+ export { auditRows, leakedServices, type PresetMount, type RowAudit } from './mount.ts';
+ export type { AgentPresetInspection } from './composition-inventory.ts';
+ export type { AgentPreset, Config } from './preset.ts';
++/** Retains a revision; current-authority consumers must also call assertCurrent. */
++export interface AgentPresetScopeLease extends AsyncDisposable {
++    readonly key: ScopeKey;
++    /** Synchronously throws when disposed, retired, or replaced in the registry. */
++    assertCurrent(): void;
++}
+ declare module '@deepseek-ai/cordis' {
+     interface Context {
+         agentPresets: AgentPresetRegistry;
+@@ -126,9 +132,7 @@ export declare class AgentPresetRegistry extends TypertRemoteService {
+      * @param id Preset identity or the default.
+      * @returns A revision lease; dispose it after the scoped read completes.
+      */
+-    acquireScope(id?: string): Promise<{
+-        key: ScopeKey;
+-    } & AsyncDisposable>;
++    acquireScope(id?: string): Promise<AgentPresetScopeLease>;
+     /** Read plugin rows without creating an Agent.
+      * @returns Current declaration metadata and activation states.
+      */
+diff --git a/lib/types/index.js b/lib/types/index.js
+--- a/lib/types/index.js
++++ b/lib/types/index.js
+@@ -386,7 +386,10 @@ let AgentPresetRegistry = (() => {
+         async acquireScope(id) {
+             const generation = await this.retain(id);
+             let disposed = false;
+-            return { key: generation.key, [Symbol.asyncDispose]: async () => {
++            return { key: generation.key, assertCurrent: () => {
++                    if (disposed || generation.retired || this.definitions.get(generation.mount.presetId)?.generation !== generation)
++                        throw new Error("Preset revision is no longer current");
++                }, [Symbol.asyncDispose]: async () => {
+                     if (disposed)
+                         return;
+                     disposed = true;

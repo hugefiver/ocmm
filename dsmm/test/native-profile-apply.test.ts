@@ -185,7 +185,7 @@ async function select(f: Awaited<ReturnType<typeof fixture>>, id: string, revisi
     expectedSelectionRevision: before.selectionRevision })) as Parameters<DsmmProfilesRemote["select"]>[0]));
 }
 
-test("finite native catalog and cross-VM RPC Apply default with no root and idle roots preserves old admissions", async () => {
+test("finite native catalog and cross-VM RPC keep future defaults independent from explicit blank choices", async () => {
   const f = await fixture();
   try {
     const a = await save(f, "a", overlay("profile-a"));
@@ -202,15 +202,12 @@ test("finite native catalog and cross-VM RPC Apply default with no root and idle
     assert.equal(oldAdmission.profile?.id, "a");
     assert.equal(f.runtime.admission(newRoot as unknown as DshAgent).profile?.id, "b");
     const before = value(await f.remote.describeSession(oldRoot.id));
-    assert.equal(before.canApplyOverlay, false);
-    assert.equal(before.applyOverlayUnavailableReason, "new-session-required");
-    const refused = await f.remote.selectSession(oldRoot.id, { sessionId: oldRoot.id, id: b.id, expectedRevision: b.revision,
-      expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch });
-    assert.ok(!refused.ok);
-    const failure = remoteErrorOf(refused.error);
-    assert.equal(failure?.code, "dsmm-profiles/refused");
-    assert.equal(failure?.details.code, "unavailable");
-    assert.equal(f.runtime.admission(oldRoot as unknown as DshAgent), oldAdmission);
+    assert.equal(before.canApplyOverlay, true);
+    const selected = value(await f.remote.selectSession(oldRoot.id, { sessionId: oldRoot.id, id: b.id, expectedRevision: b.revision,
+      expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch }));
+    assert.equal(selected.admittedSelection?.selectedId, b.id);
+    assert.equal(selected.scope, "session-override");
+    assert.notEqual(f.runtime.admission(oldRoot as unknown as DshAgent), oldAdmission);
     assert.equal(oldAdmission.settings.modelParameters.passthrough, true);
     assert.equal(value(await f.remote.describeSession(newRoot.id)).configuration!.modelParameterPolicy?.mode, "native-defaults");
     assert.deepEqual(JSON.parse(JSON.stringify(value(await f.remote.describeSession(newRoot.id)).configuration!.settings.modelParameters)), { passthrough: false });
@@ -231,8 +228,8 @@ test("Use profile model remains an independent capability while manual native mo
     const before = value(await f.remote.describeSession(root.id));
     assert.equal(before.canSelectModel, true);
     assert.deepEqual(JSON.parse(JSON.stringify(before.profileModel)), primary);
-    assert.equal(before.canApplyOverlay, false);
-    assert.equal(before.applyOverlayUnavailableReason, "new-session-required");
+    assert.equal(before.canApplyOverlay, true);
+    assert.equal(before.applyOverlayUnavailableReason, undefined);
     // Native public selection and durable intent seams, not a replacement Models SDK.
     for (const route of [primary, { provider: "fixture", model: "profile-b", reasoningEffort: "low" }]) {
       const resolved = await f.native.ctx.llm.resolveCallConfig({ ...route, reasoningEffort: ReasoningEffortId(route.reasoningEffort) });

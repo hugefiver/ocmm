@@ -32,8 +32,8 @@ export interface LoadedSessionProfileSelection extends LoadedProfileSelection {
 export const MAX_SESSION_PROFILE_CHOICES = 1024;
 
 export interface SessionProfileCommit<T> {
-  /** Fallible synchronous preparation before the final fence/rename; never publication. */
-  prepare?(selection: LoadedSessionProfileSelection, prepared: T): void;
+  /** Fallible installation preparation before the final fence/rename; never publication. */
+  prepare?(selection: LoadedSessionProfileSelection, prepared: T): void | Promise<void>;
   /** Trusted native liveness/cancellation fence; invoked immediately before rename. */
   assertCurrent(): void;
   /** Synchronous publication after durable commit. Must not throw or await. */
@@ -252,7 +252,11 @@ export class ProfileStore {
       const bytes = Buffer.from(`${JSON.stringify(pointer)}\n`, "utf8");
       const selection: LoadedSessionProfileSelection = { sessionId: request.sessionId, admissionEpoch: epoch,
         selectedId: request.id, appliedRevision: revision, selectionRevision: "unavailable", document: draft?.document ?? null, content: draft?.content ?? null, ...source, ...warningFields(draft) };
-      commit.prepare?.(selection, prepared);
+      try { await commit.prepare?.(selection, prepared); }
+      catch (error) {
+        if (error instanceof DsmmProfileError) throw error;
+        throw new DsmmProfileError("activation", "The candidate installation could not be prepared; the previous session selection was retained.");
+      }
       const owned = this.atomicReplace(target, bytes, fence, assertLock);
       commit.committed(selection, prepared);
       const observed = observeCommitted(target, owned, this.observe);

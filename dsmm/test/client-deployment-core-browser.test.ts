@@ -14,6 +14,7 @@ import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { DsmmConfigHost } from "../lib/profile-rpc.js";
 import type { DshAgent } from "../lib/dsh-types.js";
+import { deploymentEn } from "../src/client/deployment-locales.ts";
 
 const available = process.env.DSMM_TEST_DSH_ENTRY !== undefined && process.env.DSMM_TEST_PLAYWRIGHT_ENTRY !== undefined;
 
@@ -97,7 +98,7 @@ test("Core deployment controls save sparse desired values through native Gateway
       banner: { js: 'window.__ModuleLoader__.load({id:"@dsmm/dsmm",factory:(require)=>{const module={exports:{}};const exports=module.exports;' }, footer: { js: "return module.exports;}});" } });
     await writeFile(join(packageRoot, "lib", "client.js"), result.outputFiles![0]!.text);
     server = await startProfileUiServer({ nativeRequire: sdk, packageRoot, sha256: "owned-core-source-fixture", composition: stableCompositionBundle(COMPOSITION_ID) });
-    browser = await chromium.launch({ executablePath: chromium.executablePath(), headless: true, args: ["--disable-extensions", "--disable-sync"] });
+    browser = await chromium.launch({ executablePath: process.env.DSMM_TEST_BROWSER_EXECUTABLE ?? chromium.executablePath(), headless: true, args: ["--disable-extensions", "--disable-sync"] });
     const context = await browser.newContext({ viewport: { width: 768, height: 900 }, serviceWorkers: "block" });
     assert.deepEqual(await context.cookies(), []);
     await context.tracing.start({ screenshots: true, snapshots: true });
@@ -130,11 +131,11 @@ test("Core deployment controls save sparse desired values through native Gateway
     await openGroup(global, "modelParameters");
     const globalField = global.getByRole("combobox", { name: /^(?:Model parameter passthrough|模型参数透传)$/u });
     await globalField.waitFor(); assert.equal(await globalField.inputValue(), "inherit");
-    assert.equal(await globalField.locator('option[value="inherit"]').textContent(), "Unset — inherit · On");
+    assert.equal(await globalField.locator('option[value="inherit"]').textContent(), `${deploymentEn.unset} · ${deploymentEn.on}`);
     await globalField.selectOption("false");
-    await saveBar.getByRole("button", { name: "Save Global config", exact: true }).click();
+    await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     assert.equal(await globalField.isDisabled(), true);
-    assert.equal(await saveBar.getByRole("button", { name: "Save Global config", exact: true }).isDisabled(), true);
+    assert.equal(await saveBar.getByRole("button", { name: "Save", exact: true }).isDisabled(), true);
     assert.equal(await saveBar.getByRole("status").textContent(), "Saving…");
     releaseSave();
     await saved();
@@ -147,13 +148,13 @@ test("Core deployment controls save sparse desired values through native Gateway
     await openGroup(native, "modelParameters");
     const nativeField = native.getByRole("combobox", { name: "Model parameter passthrough", exact: true });
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLSelectElement>('[data-dsmm-layer="profile"] select')].some(select => !select.disabled));
-    assert.equal(await nativeField.locator('option[value="inherit"]').textContent(), "Unset — inherit · Off");
-    await nativeField.selectOption("true"); await saveBar.getByRole("button", { name: "Save profile overrides", exact: true }).click();
+    assert.equal(await nativeField.locator('option[value="inherit"]').textContent(), `${deploymentEn.unset} · ${deploymentEn.off}`);
+    await nativeField.selectOption("true"); await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     await saved();
     assert.equal(profile.persistedConfig().modelParameters?.passthrough, true);
     const routes = profile.persistedConfig().roleRouting;
     assert.deepEqual(routes?.["dsmm-reviewer"]?.primary, { provider: "fixture", model: "not-in-catalog", reasoningEffort: "future-exact", temperature: 0.3, opaque: { keep: [1, null, "raw"] } });
-    await nativeField.selectOption("inherit"); await saveBar.getByRole("button", { name: "Save profile overrides", exact: true }).click();
+    await nativeField.selectOption("inherit"); await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     await saved();
     assert.equal(profile.persistedConfig().modelParameters?.passthrough, undefined);
     assert.equal((await profile.deployment.readDesired()).settings.modelParameters.passthrough, false);
@@ -164,7 +165,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     const raw = native.getByRole("textbox", { name: /Existing-provider routes/u });
     const edited = { "dsmm-reviewer": { primary: { provider: "fixture", model: "not-in-catalog", reasoning_effort: "raw-future-exact", temperature: 0.4, maxTokens: 123, stop: ["END"], opaque: { keep: [1, null, "edited-while-off"] } } } };
     await raw.fill(JSON.stringify(edited, null, 2));
-    await saveBar.getByRole("button", { name: "Save profile overrides", exact: true }).click();
+    await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     await saved();
     assert.deepEqual(profile.persistedConfig().roleRouting, edited);
     assert.equal((await profile.deployment.readDesired()).settings.modelParameters.passthrough, false);
@@ -173,17 +174,17 @@ test("Core deployment controls save sparse desired values through native Gateway
     await openModule("Permissions and guards");
     await openGroup(global, "permissionControl");
     const globalPermission = global.locator('details[data-field="permissionControl"]').getByRole("combobox", { name: "Enabled", exact: true });
-    await globalPermission.selectOption("false"); await saveBar.getByRole("button", { name: "Save Global config", exact: true }).click();
+    await globalPermission.selectOption("false"); await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     await saved();
     assert.equal((await profile.deployment.readGlobal()).config.permissionControl?.enabled, false);
     assert.equal((await profile.deployment.readGlobal()).config.modelParameters?.passthrough, false);
     await scope.selectOption("profile");
     await openGroup(native, "permissionControl");
     const nativePermission = native.locator('details[data-field="permissionControl"]').getByRole("combobox", { name: "Enabled", exact: true });
-    await nativePermission.selectOption("true"); await saveBar.getByRole("button", { name: "Save profile overrides", exact: true }).click();
+    await nativePermission.selectOption("true"); await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     await saved();
     assert.equal(profile.persistedConfig().permissionControl?.enabled, true);
-    await nativePermission.selectOption("inherit"); await saveBar.getByRole("button", { name: "Save profile overrides", exact: true }).click();
+    await nativePermission.selectOption("inherit"); await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     await saved();
     assert.equal(profile.persistedConfig().permissionControl?.enabled, undefined);
     assert.equal((await profile.deployment.readDesired()).settings.permissionControl.enabled, false);
@@ -191,6 +192,27 @@ test("Core deployment controls save sparse desired values through native Gateway
 
     assert.equal(profile.runtime.admission(root), original);
     profile.assertLive();
+
+    await scope.selectOption("global");
+    await openModule("Subagent settings");
+    const subagents = global.locator('details[data-field="subagents"]');
+    assert.equal(await subagents.evaluate((element: HTMLDetailsElement) => element.open), true);
+    const depth = subagents.locator('[data-field="subagents.maxDepth"] input');
+    assert.equal(await depth.isVisible(), true);
+    await depth.fill("2");
+    await subagents.locator(":scope > summary").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('details[data-field="subagents"]')?.open === false);
+    await saveBar.getByRole("button", { name: "Save", exact: true }).click();
+    await saved();
+    assert.equal(await subagents.evaluate((element: HTMLDetailsElement) => element.open), false);
+    await page.getByRole("button", { name: "EN / 中文", exact: true }).click();
+    assert.equal(await subagents.evaluate((element: HTMLDetailsElement) => element.open), false);
+    await page.getByRole("button", { name: "EN / 中文", exact: true }).click();
+    await openModule("Subagent settings");
+    assert.equal(await subagents.evaluate((element: HTMLDetailsElement) => element.open), false);
+    await subagents.locator(":scope > summary").click();
+    assert.equal(await depth.isVisible(), true);
 
     await scope.selectOption("global");
     await openModule("Configuration state");
@@ -247,7 +269,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     const baseline = await profile.deployment.readGlobal();
     await profile.deployment.saveGlobal({ expectedRevision: baseline.revision, edits: [{ op: "set", path: ["workflow", "reviewCap"], value: 2 }] }, () => {});
     const savesBefore = calls.filter(call => call.method === "save").length;
-    await saveBar.getByRole("button", { name: "Save Global config", exact: true }).click();
+    await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     await saveBar.getByRole("alert").waitFor(); assert.equal(await globalField.inputValue(), "true");
     assert.equal(calls.filter(call => call.method === "save").length, savesBefore);
     await saveBar.getByRole("button", { name: "Discard and reload", exact: true }).click();
@@ -258,8 +280,10 @@ test("Core deployment controls save sparse desired values through native Gateway
     t.diagnostic(`Native gateway Global Save + durable native SettingsForms On/inherit/raw JSON Save; old admission retained; busy, keyboard focus/select, conflict/discard and reduced-motion covered. EN/ZH light/dark at 375/768/1280 without horizontal overflow. Screenshots/trace: ${process.env.DSMM_UI_EVIDENCE_DIR ?? "temporary (removed at cleanup)"}; no Lighthouse audit performed.`);
   } finally {
     releaseSave();
-    await browser?.close(); await server?.close(); await host.fiber.dispose(); await run.dispose();
-    if (await realpath(owned) !== owned || dirname(owned) !== temporaryParent || !basename(owned).startsWith("dsmm-core-ui-")) throw new Error("Unexpected Core UI cleanup path");
-    await rm(owned, { recursive: true, force: false });
+    try { await browser?.close(); } finally {
+      await server?.close(); await host.fiber.dispose(); await run.dispose();
+      if (await realpath(owned) !== owned || dirname(owned) !== temporaryParent || !basename(owned).startsWith("dsmm-core-ui-")) throw new Error("Unexpected Core UI cleanup path");
+      await rm(owned, { recursive: true, force: false });
+    }
   }
 });

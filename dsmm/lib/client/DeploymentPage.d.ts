@@ -1,4 +1,5 @@
-import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
+import type { HostObservable, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
+import type { TemporaryPermissionRemote } from "../permission-temporary-types.js";
 import type { ConfigForms } from "@deepseek-ai/dsh-client-ui-settings/client";
 import type { DsmmConfigRemote } from "../profile-remote.js";
 import type { SubagentRuntimeAdmissionView } from "../profile-types.js";
@@ -12,6 +13,8 @@ export interface DeploymentPageProps extends Locale {
     remote: DsmmConfigRemote;
     workspace?: DeploymentWorkspace;
     permissions?: PermissionController;
+    temporaryPermissions?: HostObservable<TemporaryPermissionRemote | undefined>;
+    permissionsT?: PropsLocale<"settings.dsmm-permissions">["t"];
     forms?: ConfigForms;
 }
 export declare function ScopeSave({ controller, workspace, refreshOnly, t }: Locale & {

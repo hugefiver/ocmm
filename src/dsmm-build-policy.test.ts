@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 
-test("effective pnpm configuration approves only the two pinned required dependency builds", () => {
+test("effective pnpm configuration approves only explicitly required dependency builds", () => {
   const config = JSON.parse(execFileSync(
     process.platform === "win32" ? "cmd.exe" : "pnpm",
     process.platform === "win32"
@@ -20,8 +20,10 @@ test("effective pnpm configuration approves only the two pinned required depende
     assert.equal(typeof allowed, "boolean", `${dependency} must have an explicit build decision`);
   }
   assert.deepEqual(approvals.filter(([, allowed]) => allowed).map(([dependency]) => dependency).sort(), [
+    "@deepseek-ai/dsh-subprocess-local@0.2.1-rc.2",
     "esbuild@0.25.12",
     "koffi@3.1.1",
+    "node-pty@1.2.0-beta.15",
   ]);
   assert.equal(config.allowBuilds["@google/genai@2.21.0"], false);
   assert.equal(config.allowBuilds["protobufjs@7.6.6"], false);

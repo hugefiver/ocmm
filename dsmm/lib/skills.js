@@ -96,12 +96,14 @@ export function registerBundledSkills(ctx, skills, options) {
                 async list(lookup) {
                     const signal = signalFor(lookup), current = generation, parent = scopeParentOf(agentScope);
                     signal.throwIfAborted();
+                    if (options.catalogReady?.() === false)
+                        return { candidates: [], complete: false };
                     const enabled = names();
                     if (enabled.length === 0)
                         return [];
                     const snapshot = await ancestor(lookup, signal);
                     signal.throwIfAborted();
-                    if (!snapshot.complete || generation !== current || scopeParentOf(agentScope) !== parent)
+                    if (!snapshot.complete || generation !== current || scopeParentOf(agentScope) !== parent || options.catalogReady?.() === false)
                         return { candidates: [], complete: false };
                     return enabled.filter((name) => !occupied(snapshot, name)).map((name) => ({
                         ...bundledSkillMetadata(name), rank: BUNDLED_SKILL_RANK, locator: { name, parent }
@@ -110,6 +112,8 @@ export function registerBundledSkills(ctx, skills, options) {
                 async get(candidate, lookup) {
                     const signal = signalFor(lookup), current = generation;
                     signal.throwIfAborted();
+                    if (options.catalogReady?.() === false)
+                        return undefined;
                     const name = names().find((name) => name === candidate.name);
                     const locator = candidate.locator;
                     if (name === undefined || typeof locator !== "object" || locator === null

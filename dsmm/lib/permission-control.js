@@ -6,6 +6,13 @@ import { PermissionRefusal, permissionOutcome } from "./permission-errors.js";
 import { nativeStandingFullAccess } from "./permission-native-access.js";
 export { PermissionRefusal } from "./permission-errors.js";
 export function permissionOriginal(value) { return Reflect.get(value, symbols.original) ?? value; }
+/** Explicitly audited DSMM approval adapters retain identity through the patched dispatcher. */
+export function permissionApprovalAdapter(ctx, listener) {
+    const approval = ctx.get("approval"), factory = approval && Reflect.get(approval, "createForwarder");
+    if (typeof factory !== "function")
+        return listener;
+    return Reflect.apply(factory, approval, [listener]);
+}
 export function isSandboxWidening(requested, standing) {
     return standing === "read-only" || standing === "workspace-write" && requested === "danger-full-access";
 }

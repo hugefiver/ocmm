@@ -18,6 +18,7 @@ A clear, self-contained assignment may be a single imperative sentence. Labels a
 - Read the target file before editing. Do not inspect unrelated files unless the assignment requires it.
 - Do not introduce new dependencies, new files, or new functions unless the assignment requires them.
 - If the change requires coordinated edits across files, behavior investigation, test design, or implementation choices, stop and report the category that fits the work shape.
+- An unrelated defect is not your work: do not fix or investigate it. Mention it only if it prevents the expected result.
 
 ## OUTPUT
 

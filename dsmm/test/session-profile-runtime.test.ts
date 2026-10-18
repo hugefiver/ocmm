@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
-import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
-import { SessionId } from "@deepseek-ai/dsh-session";
+import { mock, test } from "node:test";
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
+import { ToolRuntime } from "@deepseek-ai/dsh-tools";
+import { ReasoningEffortId, ToolCallId } from "@deepseek-ai/dsh-llm";
+import { SessionId, SessionLogOffset } from "@deepseek-ai/dsh-session";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ModelSelectionRef } from "@deepseek-ai/dsh-agent";
-import type { DshAgent } from "../src/dsh-types.js";
+import type { DshAgent, DshContext } from "../src/dsh-types.js";
 import { createProfileRuntime, DsmmProfileRuntime } from "../src/profile-runtime.js";
 import { ProfileStore } from "../src/profile-store.js";
 import type { SessionProfileSelectRequest } from "../src/profile-types.js";
 import { resolveConfig } from "../src/settings.js";
+import { DsmmProfileError } from "../src/profiles.js";
+import { DsmmDeploymentConfig } from "../src/deployment-config.js";
 import { headerRoutes, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
 const route = (model: string) => ({ provider: "fixture", model, reasoningEffort: "high" });
@@ -46,7 +50,7 @@ test("ordinary native mode writes survive future-default changes and reopen with
     const future = await f.create({ agentPreset: "standard" });
     const futureState = await runtime.getSession(structural(future));
     assert.equal(futureState.deepwork!.active, false); assert.equal(futureState.deepwork!.explicit, false);
-    assert.equal(futureState.canApplyOverlay, false); assert.equal(futureState.applyOverlayUnavailableReason, "new-session-required");
+    assert.equal(futureState.canApplyOverlay, true); assert.equal(futureState.applyOverlayUnavailableReason, undefined);
     assert.equal((await runtime.getSession(structural(ordinary))).deepwork!.active, false, "existing admission remains immutable");
     const enabled = await runtime.selectMode(toggle(disabled, true), structural(ordinary));
     assert.equal(enabled.deepwork!.active, true); assert.equal(enabled.deepwork!.explicit, true);
@@ -152,19 +156,277 @@ test("profile model metadata follows the admitted ordinary root role without cha
   } finally { await f.dispose(); }
 });
 
-test("advanced Apply is explicitly unavailable and cannot replace an immutable native admission", async () => {
+test("blank A/B/default choices drive the first native prompt and delegated route without changing future defaults or native model intent", async () => {
   const f = await nativeRoutingFixture();
   try {
-    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "dsmm-orchestrator" });
-    const saved = await runtime.save({ id: "future", content: profile("future", "future-model"), expectedRevision: null });
-    const before = runtime.admission(structural(agent));
-    const snapshot = await runtime.getSession(structural(agent));
-    assert.equal(snapshot.canApplyOverlay, false);
-    assert.equal(snapshot.applyOverlayUnavailableReason, "new-session-required");
-    await assert.rejects(runtime.selectSession(await request(runtime, agent, saved.id, saved.revision), structural(agent)), { code: "unavailable" });
-    assert.equal(runtime.admission(structural(agent)), before);
-    assert.equal((await centralStore(f).loadSessionSelection(agent.id)).selectionRevision, "absent");
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" });
+    const nativeChoice = structuredClone(agent.options), global = await runtime.describe();
+    const a = await runtime.save({ id: "a", content: profile("a", "a-model"), expectedRevision: null });
+    const document = JSON.parse(profile("b", "b-model"));
+    document.settings.locale = "zh-Hans"; document.settings.subagents = { toolTopology: "parameterized" };
+    document.settings.workflow = { policy: "legacy", reviewCap: 2 };
+    const b = await runtime.save({ id: "b", content: JSON.stringify(document), expectedRevision: null });
+    const choose = async (id: string | null, revision?: string) => runtime.selectSession(await request(runtime, agent, id, revision), structural(agent));
+    assert.equal((await runtime.getSession(structural(agent))).canApplyOverlay, true);
+    assert.equal((await choose(a.id, a.revision)).admittedSelection?.selectedId, "a");
+    const selected = await choose(b.id, b.revision);
+    assert.equal(selected.admittedSelection?.selectedId, "b");
+    assert.equal(selected.admittedSelection?.refreshRequired, undefined);
+    assert.equal(selected.deepwork?.active, true);
+    await assert.rejects(runtime.selectSession({ ...await request(runtime, agent, b.id, b.revision), expectedSelectionRevision: "absent" }, structural(agent)), { code: "conflict" });
+    assert.equal(agent.ctx.tools.get("dsmm_role", agent)?.name, "dsmm_role");
+    assert.equal(agent.ctx.tools.get("dsmm_reviewer", agent), undefined);
+    const baseline = await choose(null);
+    assert.equal(baseline.scope, "deployment-baseline"); assert.equal(baseline.deepwork?.active, false);
+    assert.equal((await choose(b.id, b.revision)).admittedSelection?.selectedId, "b");
+    const admitted = runtime.admission(structural(agent));
+    assert.equal(f.ctx.get("dsmmNativeAdmission")!.get(agent), admitted);
+    assert.equal((await runtime.describe()).selectionRevision, global.selectionRevision);
+    assert.deepEqual(agent.options, nativeChoice);
+    const skillRegistry = agent.ctx.get("agentPresets")!.serviceFor(agent, "skills") ?? agent.ctx.get("skills")!;
+    const skills = await skillRegistry.list({ scope: agent });
+    assert.ok(skills.some(skill => skill.name === "brainstorming"));
+    await f.ctx.get("agentPresets")!.select(agent, "dsmm-orchestrator");
+    await f.ctx.get("dsmmNativeAdmission")!.ensure(agent);
+    assert.equal(runtime.admission(structural(agent)), admitted, "blank preset recomposition keeps the accepted current configuration");
+    await runFixtureTurn(agent);
+    assert.equal(headerRoutes(agent)[0]?.model, "native-default");
+    assert.match(JSON.stringify(f.adapter.calls[0]?.messages), /reviewCap: 2/u);
+    assert.match(JSON.stringify(f.adapter.calls[0]?.messages), /zh-Hans/u);
+    const child = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", agent);
+    await runFixtureTurn(child);
+    assert.equal(headerRoutes(child)[0]?.model, "b-model-review");
+    assert.equal(runtime.admission(structural(child)).epoch, admitted.epoch);
+    assert.equal(runtime.admission(structural(child)).settings.locale, "zh-Hans");
+    await f.releaseAuxiliary(child);
+    assert.equal((await runtime.getSession(structural(agent))).applyOverlayUnavailableReason, "new-session-required");
+    await assert.rejects(choose(a.id, a.revision), { code: "unavailable" });
+    assert.equal(runtime.admission(structural(agent)), admitted);
   } finally { await f.dispose(); }
+});
+
+test("blank selection cannot cross a native preset reservation, cancelled request or disposed exact owner", async t => {
+  for (const race of ["preset", "cancelled", "disposed"] as const) await t.test(race, async () => {
+    const f = await nativeRoutingFixture(), entered = gate(), blocked = gate();
+    const original = ProfileStore.prototype.selectSession;
+    let interception: ReturnType<typeof mock.method> | undefined;
+    try {
+      const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" });
+      const saved = await runtime.save({ id: "race", content: profile("race", "race-model"), expectedRevision: null });
+      const before = runtime.admission(structural(agent)), choice = await request(runtime, agent, saved.id, saved.revision);
+      interception = mock.method(ProfileStore.prototype, "selectSession", function (this: ProfileStore, ...[request, epoch, validate, commit]: Parameters<ProfileStore["selectSession"]>) {
+        return original.call(this, request, epoch, async document => { entered.release(); await blocked.promise; return validate(document); }, commit);
+      });
+      const cancellation = new AbortController();
+      const selecting = runtime.selectSession(choice, structural(agent), cancellation.signal);
+      await entered.promise;
+      if (race === "preset") {
+        const refused = assert.rejects(selecting, error => error instanceof DsmmProfileError && ["cancelled", "conflict"].includes(error.code));
+        await f.ctx.get("agentPresets")!.select(agent, "dsmm-orchestrator");
+        blocked.release();
+        await refused;
+        await f.ctx.get("dsmmNativeAdmission")!.ensure(agent);
+        assert.equal(runtime.admission(structural(agent)), before);
+        assert.equal((await centralStore(f).loadSessionSelection(agent.id)).admissionEpoch, null);
+        assert.equal(f.ctx.get("agentPresets")!.composedPreset(agent.ctx), "dsmm-orchestrator");
+        assert.equal((await runtime.getSession(structural(agent))).canApplyOverlay, true);
+      } else {
+        const refused = assert.rejects(selecting, error => error instanceof DsmmProfileError);
+        const disposal = race === "disposed" ? f.disposeAgent(agent) : undefined;
+        if (race === "cancelled") cancellation.abort();
+        blocked.release(); await refused; await disposal;
+        assert.equal((await centralStore(f).loadSessionSelection(agent.id)).admissionEpoch, null);
+        if (race !== "disposed") assert.equal(runtime.admission(structural(agent)), before);
+      }
+    } finally { blocked.release(); interception?.mock.restore(); await f.dispose(); }
+  });
+});
+
+test("a tool executing outside a turn still occupies the blank capability until its real result", async () => {
+  const entered = gate(), blocked = gate();
+  const f = await nativeRoutingFixture({}, { fixtureTools: [{ name: "blank_busy_tool", description: "Isolated pending execution", parameters: {},
+    output: { schema: { type: "string" }, render: () => [{ type: "text", text: "done" }] },
+    async execute() { entered.release(); await blocked.promise; return "done"; },
+  }] });
+  try {
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" }), choice = await request(runtime, agent, null);
+    const execution = agent.ctx.tools.execute({ agent, name: "blank_busy_tool", arguments: {}, callId: ToolCallId("blank-busy-tool"), signal: new AbortController().signal });
+    await entered.promise;
+    assert.equal(agent.status, "idle");
+    await assert.rejects(runtime.selectSession(choice, structural(agent)), { code: "busy" });
+    blocked.release(); assert.equal((await execution).isError, false);
+    assert.equal((await runtime.selectSession(choice, structural(agent))).scope, "deployment-baseline");
+  } finally { blocked.release(); await f.dispose(); }
+});
+
+test("blank choices read current deployment values but cannot mount runtime or permission capabilities above startup", async () => {
+  const f = await nativeRoutingFixture({}, { async beforeDsmm(ctx) {
+    const deployment = new DsmmDeploymentConfig(ctx as DshContext, {});
+    await deployment.store.save(JSON.stringify({ modules: { deepwork: { enabled: false } }, permissionControl: { enabled: false } }), (await deployment.readGlobal()).revision, () => {});
+  } });
+  try {
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" });
+    const deployment = f.ctx.get("dsmmDeploymentConfig")!;
+    await deployment.store.save(JSON.stringify({ defaultActive: true, locale: "ja", modules: { deepwork: { enabled: true } }, permissionControl: { enabled: true }, subagents: { allowRouteOverride: true } }), (await deployment.readGlobal()).revision, () => {});
+    const selected = await runtime.selectSession(await request(runtime, agent, null), structural(agent));
+    const admission = runtime.admission(structural(agent));
+    assert.equal(admission.settings.locale, "ja");
+    assert.equal(admission.settings.modules.deepwork.enabled, false);
+    assert.equal(admission.settings.permissionControl.enabled, false);
+    assert.equal(admission.settings.subagents.allowRouteOverride, false);
+    assert.equal(selected.deepwork?.active, false);
+    assert.ok(selected.configuration?.restartRequired.includes("modules.deepwork.enabled"));
+    assert.ok(selected.configuration?.restartRequired.includes("permissionControl.enabled"));
+    await runFixtureTurn(agent);
+    assert.doesNotMatch(JSON.stringify(f.adapter.calls[0]?.messages), /DEEPWORK MODE ENABLED!/u);
+    assert.equal(headerRoutes(agent)[0]?.model, "native-default");
+  } finally { await f.dispose(); }
+});
+
+test("blank route preflight refuses unavailable delegated models without changing admission or consuming the first prompt", async () => {
+  const f = await nativeRoutingFixture();
+  try {
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" }), before = runtime.admission(structural(agent));
+    const saved = await runtime.save({ id: "missing-route", content: profile("missing-route", "missing-model"), expectedRevision: null });
+    f.adapter.unavailableModels.add("missing-model-review");
+    await assert.rejects(runtime.selectSession(await request(runtime, agent, saved.id, saved.revision), structural(agent)), { code: "activation" });
+    assert.equal(runtime.admission(structural(agent)), before);
+    assert.equal((await centralStore(f).loadSessionSelection(agent.id)).admissionEpoch, null);
+    assert.equal(f.adapter.calls.length, 0);
+    await runFixtureTurn(agent);
+    assert.doesNotMatch(JSON.stringify(f.adapter.calls[0]?.messages), /DEEPWORK MODE ENABLED!/u);
+  } finally { await f.dispose(); }
+});
+
+test("blank maintenance orders a queued first prompt after the committed choice and rejects competing/stale choices", async () => {
+  const f = await nativeRoutingFixture();
+  const original = ProfileStore.prototype.selectSession;
+  let interception: ReturnType<typeof mock.method> | undefined;
+  const entered = gate(), blocked = gate();
+  try {
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" });
+    const saved = await runtime.save({ id: "queued", content: profile("queued", "queued-model"), expectedRevision: null });
+    const choice = await request(runtime, agent, saved.id, saved.revision);
+    interception = mock.method(ProfileStore.prototype, "selectSession", function (this: ProfileStore, ...[request, epoch, validate, commit]: Parameters<ProfileStore["selectSession"]>) {
+      return original.call(this, request, epoch, async document => { entered.release(); await blocked.promise; return validate(document); }, commit);
+    });
+    const selecting = runtime.selectSession(choice, structural(agent));
+    await entered.promise;
+    const firstTurn = runFixtureTurn(agent);
+    assert.equal(agent.status, "idle"); assert.equal(f.adapter.calls.length, 0);
+    await assert.rejects(runtime.selectSession(choice, structural(agent)), { code: "maintenance" });
+    blocked.release();
+    const selected = await selecting;
+    await firstTurn;
+    assert.equal(selected.admittedSelection?.selectedId, saved.id);
+    assert.match(JSON.stringify(f.adapter.calls[0]?.messages), /DEEPWORK MODE ENABLED!/u);
+    assert.equal(headerRoutes(agent)[0]?.model, "native-default");
+    await assert.rejects(runtime.selectSession(choice, structural(agent)), { code: "conflict" });
+    assert.equal((await centralStore(f).loadSessionSelection(agent.id)).admissionEpoch, selected.admissionEpoch);
+  } finally { blocked.release(); interception?.mock.restore(); await f.dispose(); }
+});
+
+test("blank selection refuses preexisting input, seeded history and owned children even without a root turn", async () => {
+  const f = await nativeRoutingFixture();
+  try {
+    const runtime = runtimeOf(f), queued = await f.create({ agentPreset: "standard" });
+    const choice = await request(runtime, queued, null);
+    queued.inject(createUserMessage({ content: [{ type: "text", text: "Already submitted" }], source: { kind: "user" } }));
+    assert.equal((await runtime.getSession(structural(queued))).applyOverlayUnavailableReason, "busy");
+    await assert.rejects(runtime.selectSession(choice, structural(queued)), { code: "busy" });
+    const seed = queued.session.snapshotEvents();
+    const seeded = await f.create({ agentPreset: "standard", isSeeded: true }, undefined, { seed, inheritedEventCount: SessionLogOffset(seed.length) });
+    assert.equal(seeded.session.header.isSeeded, true);
+    assert.equal((await runtime.getSession(structural(seeded))).applyOverlayUnavailableReason, "new-session-required");
+    await assert.rejects(runtime.selectSession(await request(runtime, seeded, null), structural(seeded)), { code: "unavailable" });
+    const parent = await f.create({ agentPreset: "dsmm-orchestrator" });
+    const child = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", parent);
+    assert.equal(parent.session.snapshotEvents().some(event => event.type === "turn/start"), false);
+    await assert.rejects(runtime.selectSession(await request(runtime, parent, null), structural(parent)), { code: "busy" });
+    await f.releaseAuxiliary(child);
+  } finally { await f.dispose(); }
+});
+
+test("failed blank installation restores the old prompt and callable definitions before the first turn", async () => {
+  const f = await nativeRoutingFixture({ defaultActive: true, locale: "en" });
+  let fault: ReturnType<typeof mock.method> | undefined;
+  try {
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" });
+    const before = runtime.admission(structural(agent));
+    const saved = await runtime.save({ id: "broken", expectedRevision: null, content: JSON.stringify({ version: 1, id: "broken", settings: {
+      defaultActive: true, locale: "ja", subagents: { toolTopology: "parameterized" },
+    } }) });
+    const register = ToolRuntime.prototype.register;
+    let failed = false;
+    fault = mock.method(ToolRuntime.prototype, "register", function (this: ToolRuntime, definition: Parameters<ToolRuntime["register"]>[0]) {
+      if (definition.name === "dsmm_role" && !failed) { failed = true; throw new Error("Fixture installation failure"); }
+      return register.call(this, definition);
+    });
+    await assert.rejects(runtime.selectSession(await request(runtime, agent, saved.id, saved.revision), structural(agent)), { code: "activation" });
+    assert.equal(failed, true);
+    assert.equal(runtime.admission(structural(agent)), before);
+    assert.equal((await centralStore(f).loadSessionSelection(agent.id)).admissionEpoch, null);
+    assert.equal(agent.ctx.tools.get("dsmm_reviewer", agent)?.name, "dsmm_reviewer");
+    assert.equal(agent.ctx.tools.get("dsmm_role", agent), undefined);
+    await runFixtureTurn(agent);
+    assert.match(JSON.stringify(f.adapter.calls[0]?.messages), /capturedLocale\\":\\"en/u);
+    const child = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", agent);
+    await runFixtureTurn(child);
+    assert.equal(runtime.admission(structural(child)).epoch, before.epoch);
+    await f.releaseAuxiliary(child);
+  } finally { fault?.mock.restore(); await f.dispose(); }
+});
+
+test("blank transaction reports durable observation failure honestly and rolls back rename/operator failures", async t => {
+  for (const failure of ["rename", "observe", "operator"] as const) await t.test(failure, async () => {
+    const f = await nativeRoutingFixture({ defaultActive: true, locale: "en" });
+    let interception: ReturnType<typeof mock.method> | undefined;
+    try {
+      const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" });
+      const before = runtime.admission(structural(agent)), original = ProfileStore.prototype.selectSession;
+      const saved = await runtime.save({ id: "transaction", expectedRevision: null, content: JSON.stringify({ version: 1, id: "transaction", settings: {
+        defaultActive: true, locale: "ja", subagents: { toolTopology: "parameterized" },
+      } }) });
+      let observed = false, authorized = true;
+      const store = ProfileStore.fromCentral(f.home, f.profileDir, before.deployment!.entryId, {
+        rename(source, destination) { if (failure === "rename" && destination.includes(".sessions")) throw new Error("Fixture rename failure"); renameSync(source, destination); },
+        observe(path) {
+          if (failure !== "observe" || !path.includes(".sessions")) return;
+          observed = true;
+          assert.notEqual(runtime.admission(structural(agent)), before);
+          assert.equal(f.ctx.get("dsmmNativeAdmission")!.get(agent), runtime.admission(structural(agent)));
+          throw new Error("Fixture post-commit observation failure");
+        },
+      });
+      interception = mock.method(ProfileStore.prototype, "selectSession", function (...[_request, epoch, validate, commit]: Parameters<ProfileStore["selectSession"]>) {
+        return original.call(store, _request, epoch, validate, { ...commit, async prepare(selection, prepared) {
+          await commit.prepare?.(selection, prepared);
+          if (failure === "operator") authorized = false;
+        } });
+      });
+      const choice = await request(runtime, agent, saved.id, saved.revision);
+      const selecting = runtime.selectSession(choice, structural(agent), undefined, () => { if (!authorized) throw new DsmmProfileError("not-owned", "Fixture operator retired"); });
+      if (failure === "observe") {
+        const result = await selecting;
+        assert.equal(observed, true); assert.equal(result.refreshRequired, true);
+        assert.equal(result.admittedSelection?.selectedId, saved.id);
+        assert.equal((await store.loadSessionSelection(agent.id)).admissionEpoch, result.admissionEpoch);
+        const confirmed = await runtime.getSession(structural(agent));
+        assert.equal(confirmed.admittedSelection?.selectedId, saved.id);
+        assert.equal(confirmed.admittedSelection?.refreshRequired, undefined);
+        assert.equal(confirmed.admittedSelection?.selectionRevision, confirmed.selection.selectionRevision);
+        await assert.rejects(runtime.selectSession(choice, structural(agent)), { code: "conflict" });
+      } else {
+        await assert.rejects(selecting, { code: failure === "rename" ? "io" : "not-owned" });
+        assert.equal(runtime.admission(structural(agent)), before);
+        assert.equal((await store.loadSessionSelection(agent.id)).admissionEpoch, null);
+        assert.equal(agent.ctx.tools.get("dsmm_reviewer", agent)?.name, "dsmm_reviewer");
+        assert.equal(agent.ctx.tools.get("dsmm_role", agent), undefined);
+      }
+      await runFixtureTurn(agent);
+      assert.match(JSON.stringify(f.adapter.calls[0]?.messages), failure === "observe" ? /capturedLocale\\":\\"ja/u : /capturedLocale\\":\\"en/u);
+    } finally { interception?.mock.restore(); await f.dispose(); }
+  });
 });
 
 test("explicit store startup lock contention still refuses, while strict legacy startup reads never contend or write locks", async () => {

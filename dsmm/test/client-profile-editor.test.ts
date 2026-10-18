@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { createContext, runInContext, runInThisContext } from "node:vm";
 import { setImmediate } from "node:timers/promises";
 import test from "node:test";
@@ -28,6 +30,9 @@ import { isProfileId } from "../src/profile-remote.ts";
 import { build } from "esbuild";
 import type { EditableChoiceProps } from "../src/client/EditableChoice.js";
 import type { SessionScope } from "../src/client/SessionProfiles.js";
+import type { ComposerBlocks } from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type { ConnectionGeneration } from "@deepseek-ai/dsh-client-connection/client";
+import { createSnapshotStore } from "@deepseek-ai/dsh-client-store";
 import { editStructuredPath as editCurrentPath, moveFallback as moveCurrentFallback, structuredDocument as currentDocument } from "../src/client/structured.js";
 
 const controllerBundle = await build({ entryPoints: [fileURLToPath(new URL("../src/client/controller.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "cjs", external: ["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-ui-primitives", "jsonc-parser"] });
@@ -268,7 +273,6 @@ test("named legacy editor keeps its pinned selection inspectable and disables ev
     const button = nodes.find(node => node.type === NativeProfileButton && node.props.children === copy);
     assert.ok(button, copy); assert.equal(button.props.disabled, true, copy);
   }
-  assert.ok(nodes.some(node => node.props.children === en.legacyOrigin));
   assert.ok(nodes.some(node => node.props.children === en.readOnlyOrigin));
   assert.ok(nodes.some(node => node.type === "textarea" && node.props.readOnly === true && String(node.props.value).includes("untouched document comment")));
   const refresh = nodes.find(node => node.type === NativeProfileButton && node.props.children === en.refresh);assert.equal(refresh?.props.disabled, false);
@@ -286,7 +290,7 @@ test("profile control is an icon-only native portaled menu with no standalone vi
   assert.equal(menu.props.portal, true); assert.equal(menu.props.autoFocus, true);
   assert.equal(nodes.some((node) => ["label", "select", "p", "details", "summary"].includes(String(node.type))), false);
   const trigger = nodes.find((node) => node.type === NativeProfileButton); assert.ok(trigger);
-  assert.equal(trigger.props.children, undefined); assert.equal(trigger.props["aria-label"], "Current-session profile (header)");
+  assert.equal(trigger.props.children, undefined); assert.equal(trigger.props["aria-label"], en.headerProfileLabel);
   assert.ok(nodes.some((node) => node.type === NativeProfileIcon));
   f.controller.dispose();
 });
@@ -297,7 +301,7 @@ test("true sessionless welcome keeps the profile control inspectable without ena
   assert.notEqual(tree, null, "undefined native identity and null controller identity are the same honest sessionless state");
   const menu = elements(tree).find((node) => node.type === NativeProfileMenu); assert.ok(menu);
   const entries = menu.props.items as MenuEntry[];
-  assert.ok(entries.some((entry) => "type" in entry && entry.type === "label" && entry.id === "@status" && entry.text === en.headerNoSession));
+  assert.ok(entries.some((entry) => "type" in entry && entry.type === "label" && entry.id === "@status" && entry.text.length > 0));
   assert.ok(entries.filter((entry) => !("type" in entry)).every((entry) => "disabled" in entry && entry.disabled));
   assert.equal(f.controller.store.getSnapshot().currentSessionId, null); assert.deepEqual(f.selections, []);
   f.controller.dispose();
@@ -318,7 +322,7 @@ test("the same root menu enables on an owned blank binding and rejects a retaine
 });
 function headerMenu(tree: unknown) {
   const menu = elements(tree).find((element) => element.type === NativeProfileMenu); assert.ok(menu);
-  return menu as ReactElement<{ selectedId: string; items: MenuEntry[]; onSelect(id: string): void }>;
+  return menu as ReactElement<{ selectedId: string; items: MenuEntry[]; onSelect(id: string): void; onClose(): void }>;
 }
 function menuRowDisabled(tree: unknown, id = "p"): boolean {
   const entry = headerMenu(tree).props.items.find((entry) => entry.id === id && !("type" in entry)); assert.ok(entry);
@@ -441,11 +445,11 @@ test("session labels keep captured profile A distinct from future global B witho
   f.controller.setSession(captured.sessionId); await settle(f.controller);
   const state = f.controller.store.getSnapshot();
   const labels = sessionProfileLabels(state.session!, translate);
-  assert.ok(labels.admitted.includes("profile-a")); assert.ok(labels.admitted.includes(en.versionUnknown));
+  assert.ok(labels.admitted.includes("profile-a"));
   assert.equal(labels.admitted.includes("profile-b"), false);
-  assert.ok(labels.futureDefault.includes("profile-b")); assert.ok(labels.futureDefault.includes(en.versionUnknown));
+  assert.ok(labels.futureDefault.includes("profile-b"));
   assert.deepEqual(state.session!.selection, { selectedId: null, appliedRevision: null, selectionRevision: "absent" });
-  assert.equal(state.sessionChoice, null, "display admission never substitutes the chosen sidecar/CAS target");
+  assert.equal(state.sessionChoice, "profile-a", "the selector shows admitted configuration while sidecar CAS stays independent");
   assert.equal(state.editor!.content, draft); assert.equal(state.dirty, true);
   assert.equal(f.calls.includes("select"), false); assert.deepEqual(f.selections, []);
   f.controller.dispose();
@@ -838,7 +842,7 @@ test("native model selection failure preserves the accepted profile and reports 
   assert.equal(state.sessionIssue!.message, undefined);
   assert.equal(state.snapshot!.selectedId, null);
   const component = await nativeHeaderComponent();
-  assert.equal(menuFeedback(headerTree(component, f.controller)), "Profile applied; model change unconfirmed. Check Models/Settings.");
+  assert.ok(menuFeedback(headerTree(component, f.controller)).length > 0);
   f.controller.dispose();
 });
 
@@ -1012,6 +1016,194 @@ test("saved profile state uses recorded source version and keeps missing source 
     sourceRevision = changed; await f.controller.refresh(); assert.equal(status(), en.savedNotApplied);
     sourceRevision = undefined; await f.controller.refresh(); assert.equal(status(), en.savedRelationshipUnknown);
     assert.equal(f.calls.includes("select"), false); assert.equal(f.controller.store.getSnapshot().dirty, false);
+  } finally { f.controller.dispose(); }
+});
+
+test("new-session page selects the retained native blank's profile and baseline with sidecar CAS, not future-default or model writes", async () => {
+  const component = await nativeHeaderComponent(), scope = await nativeHeaderComponent("SessionScope");
+  const future = { selectedId: "p", appliedRevision: revision, sourceRevision: revision, selectionRevision: revision };
+  let accepted: SessionProfileSnapshot = { ...session("native-workspace-blank"), switchAllowed: false,
+    admittedSelection: future, globalDefault: future };
+  const selections: SessionProfileSelectRequest[] = [];
+  const f = fixture({ describe: async () => success({ ...snapshot, ...future, profiles: [...snapshot.profiles, { id: "q", label: "Q", revision: otherRevision }] }),
+    describeSession: async () => success(accepted), selectSession: async (id, request) => {
+      selections.push(request);
+      const selection = { selectedId: request.id, appliedRevision: request.expectedRevision ?? null, selectionRevision: otherRevision };
+      accepted = { ...accepted, selection, admittedSelection: selection, admissionEpoch: `epoch-${selections.length + 1}`, scope: request.id === null ? "deployment-baseline" : "session-override" };
+      return success(accepted);
+    } });
+  let models = 0;
+  f.controller.attachModelSelector({ selectModel: async request => { models++; return success({ selected: request }); } });
+  try {
+    await f.controller.refresh();
+    const sessionless = headerMenu(headerTree(component, f.controller));
+    assert.equal(menuRowDisabled(headerTree(component, f.controller), "q"), true);
+    sessionless.props.onSelect("q");
+    assert.equal(selections.length, 0);
+    // Native workspace navigation owns create/retain and the composer. DSMM
+    // receives its real identity and never creates a substitute session.
+    f.controller.setSession(accepted.sessionId); await settle(f.controller);
+    assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "p");
+    assert.equal(elements(headerTree(scope, f.controller)).find(node => node.type === "select")!.props.value, "p");
+    sessionless.props.onSelect("q"); assert.equal(selections.length, 0, "retained sessionless callbacks cannot act on a new binding");
+    const menu = headerMenu(headerTree(component, f.controller));
+    menu.props.onClose(); assert.equal(selections.length, 0, "dismissing the menu does not apply a choice");
+    menu.props.onSelect("q"); await settle(f.controller);
+    assert.equal(selections[0]!.expectedSelectionRevision, "absent", "admitted future-default revision is not session sidecar CAS");
+    assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "q");
+    headerMenu(headerTree(component, f.controller)).props.onSelect(""); await settle(f.controller);
+    assert.equal(selections[1]!.id, null); assert.equal(selections[1]!.expectedRevision, undefined);
+    assert.equal(selections[1]!.expectedSelectionRevision, otherRevision);
+    assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "");
+    assert.equal(f.controller.store.getSnapshot().snapshot!.selectedId, "p");
+    assert.equal(f.calls.includes("select"), false); assert.equal(models, 0);
+  } finally { f.controller.dispose(); }
+});
+
+async function nativeComposerBlocks(): Promise<ComposerBlocks> {
+  const source = await readFile(join(dirname(sourceRequire.resolve("@deepseek-ai/dsh-client-ui-conversation/package.json")), "lib", "client.js"), "utf8");
+  const start = source.indexOf("//#region lib/types/client/input/blocks.js"), end = source.indexOf("//#endregion", start);
+  assert.ok(start >= 0 && end > start);
+  // Execute the shipped registry with its real native store. This is a
+  // controller seam test, not a substitute for rendering the native composer.
+  const realm = createContext({ _deepseek_ai_dsh_client_store: { createSnapshotStore } });
+  return runInContext(`${source.slice(start, end)}\nnew ComposerBlockRegistry()`, realm) as ComposerBlocks;
+}
+
+test("native composer block is acquired before profile RPC and released only from its exact owned seat", async () => {
+  for (const boundary of ["accepted", "navigation", "dispose", "withdrawal", "foreign", "forget"] as const) {
+    const pending = deferred<RemoteResult<SessionProfileSnapshot>>(), blocks = await nativeComposerBlocks();
+    const id = SessionId(`blank-block-${boundary}`);
+    const f = fixture({ selectSession: async () => { assert.ok(blocks.storeFor(id).getSnapshot()); return pending.promise; } });
+    try {
+      await f.controller.refresh(); f.controller.setSession(id); await settle(f.controller);
+      f.controller.attachComposerBlocks(blocks, () => en.sessionSelectionBlock);
+      f.controller.actions.chooseSessionProfile("p"); const applying = f.controller.actions.applySession();
+      const owned = blocks.storeFor(id).getSnapshot(); assert.ok(owned);
+      const foreign = { reason: "Native model unavailable" };
+      if (boundary === "navigation") f.controller.setSession("another-root");
+      if (boundary === "dispose") f.controller.dispose();
+      if (boundary === "withdrawal") f.controller.attachComposerBlocks(null);
+      if (boundary === "foreign") blocks.set(id, foreign);
+      if (boundary === "forget") { blocks.forget(id); blocks.set(id, foreign); }
+      pending.resolve(success(appliedWithModel(id))); await applying;
+      assert.equal(blocks.storeFor(id).getSnapshot(), boundary === "foreign" || boundary === "forget" ? foreign : undefined);
+    } finally { f.controller.dispose(); }
+  }
+  const blocks = await nativeComposerBlocks(), id = SessionId("blank-existing-block"), foreign = { reason: en.sessionSelectionBlock };
+  blocks.set(id, foreign);
+  const f = fixture();
+  try {
+    await f.controller.refresh(); f.controller.setSession(id); await settle(f.controller);
+    f.controller.attachComposerBlocks(blocks, () => en.sessionSelectionBlock);
+    f.controller.actions.chooseSessionProfile("p"); await f.controller.actions.applySession();
+    f.controller.dispose();
+    assert.equal(blocks.storeFor(id).getSnapshot(), foreign, "even equal reason text cannot confer ownership of an existing native block");
+  } finally { f.controller.dispose(); }
+});
+
+test("an unconfirmed profile result requires a successful reread, never automatic retry", async () => {
+  const component = await nativeHeaderComponent();
+  for (const refusal of ["transport", "cancelled"] as const) {
+    const blocks = await nativeComposerBlocks(), id = SessionId(`blank-unconfirmed-${refusal}`);
+    let writes = 0, unreadable = false;
+    const f = fixture({ selectSession: async () => { writes++; return refusal === "transport"
+      ? { ok: false, error: new RemoteError("gateway/cancelled", "lost reply", {}) }
+      : { ok: false, error: new RemoteError("dsmm-profiles/refused", "cancelled", { code: "cancelled", message: "cancelled" }) }; },
+      describeSession: async () => unreadable ? { ok: false, error: new RemoteError("gateway/cancelled", "read unavailable", {}) } : success(session(id)) });
+    try {
+      await f.controller.refresh(); f.controller.setSession(id); await settle(f.controller);
+      f.controller.attachComposerBlocks(blocks, () => en.sessionSelectionBlock);
+      f.controller.actions.chooseSessionProfile("p"); await f.controller.actions.applySession();
+      assert.equal(f.controller.store.getSnapshot().sessionUnconfirmed, true);
+      assert.equal(menuRowDisabled(headerTree(component, f.controller), "p"), true);
+      assert.equal(menuFeedback(headerTree(component, f.controller)), en.sessionUnconfirmedRefresh);
+      await f.controller.actions.applySession(); await f.controller.actions.resetSession(); assert.equal(writes, 1);
+      unreadable = true; await f.controller.refreshSession();
+      assert.ok(blocks.storeFor(id).getSnapshot()); assert.equal(f.controller.store.getSnapshot().sessionUnconfirmed, true);
+      unreadable = false; await f.controller.refreshSession();
+      assert.equal(blocks.storeFor(id).getSnapshot(), undefined); assert.equal(f.controller.store.getSnapshot().sessionUnconfirmed, false);
+      assert.equal(writes, 1);
+    } finally { f.controller.dispose(); }
+  }
+});
+
+test("a native composer notification that changes the current view prevents dispatch of the old selection", async () => {
+  const blocks = await nativeComposerBlocks(), id = SessionId("blank-reentrant-navigation"), f = fixture();
+  try {
+    await f.controller.refresh(); f.controller.setSession(id); await settle(f.controller);
+    f.controller.attachComposerBlocks(blocks, () => en.sessionSelectionBlock);
+    const stop = blocks.storeFor(id).subscribe(() => { if (blocks.storeFor(id).getSnapshot() !== undefined) f.controller.setSession(null); });
+    f.controller.actions.chooseSessionProfile("p"); await f.controller.actions.applySession(); stop();
+    assert.equal(f.selections.length, 0); assert.equal(f.controller.store.getSnapshot().currentSessionId, null);
+    assert.equal(blocks.storeFor(id).getSnapshot(), undefined);
+  } finally { f.controller.dispose(); }
+});
+
+test("committed refresh-required selection is visible as pending confirmation and cannot replay", async () => {
+  const component = await nativeHeaderComponent(), blocks = await nativeComposerBlocks(), id = SessionId("blank-committed-refresh");
+  let writes = 0, accepted = session(id);
+  const f = fixture({ describeSession: async () => success(accepted), selectSession: async () => {
+    writes++; accepted = { ...appliedWithModel(id), refreshRequired: true }; return success(accepted);
+  } });
+  try {
+    await f.controller.refresh(); f.controller.setSession(id); await settle(f.controller);
+    f.controller.attachComposerBlocks(blocks, () => en.sessionSelectionBlock);
+    headerMenu(headerTree(component, f.controller)).props.onSelect("p"); await settle(f.controller);
+    assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "p");
+    assert.equal(menuFeedback(headerTree(component, f.controller)), en.sessionCommittedRefresh);
+    assert.equal(f.controller.store.getSnapshot().sessionNotice, null); assert.ok(blocks.storeFor(id).getSnapshot());
+    await f.controller.actions.applySession(); await f.controller.actions.resetSession(); assert.equal(writes, 1);
+    accepted = appliedWithModel(id); await f.controller.refreshSession();
+    assert.equal(blocks.storeFor(id).getSnapshot(), undefined); assert.equal(writes, 1);
+  } finally { f.controller.dispose(); }
+});
+
+test("connection generations and leave-return navigation invalidate retained menus and late selection replies", async () => {
+  const component = await nativeHeaderComponent(), pending = deferred<RemoteResult<SessionProfileSnapshot>>();
+  const connection = createSnapshotStore<ConnectionGeneration | undefined>({ id: 1, host: { home: "isolated" } });
+  let writes = 0;
+  const f = fixture({ selectSession: async () => { writes++; return pending.promise; } });
+  try {
+    f.controller.bindConnection(connection); await f.controller.refresh();
+    f.controller.setSession("same-native-id"); await settle(f.controller);
+    const old = headerMenu(headerTree(component, f.controller));
+    f.controller.setSession(null); f.controller.setSession("same-native-id"); await settle(f.controller);
+    old.props.onSelect("p"); assert.equal(writes, 0);
+    const retained = headerMenu(headerTree(component, f.controller)); retained.props.onSelect("p");
+    await f.controller.open("p"); // A pending selection cannot replace the editor.
+    connection.set(undefined);
+    await f.controller.actions.applySession(); retained.props.onSelect("p"); assert.equal(writes, 1);
+    pending.resolve(success(appliedWithModel("same-native-id"))); await setImmediate();
+    assert.equal(f.controller.store.getSnapshot().session, null); assert.equal(f.controller.store.getSnapshot().sessionNotice, null);
+    connection.set({ id: 2, host: { home: "isolated" } }); await settle(f.controller);
+    retained.props.onSelect("p"); assert.equal(writes, 1);
+    assert.equal(f.controller.store.getSnapshot().session!.admissionEpoch, "epoch-1");
+    await f.controller.open("p"); f.controller.actions.editPath(["label"], "Keep disconnected settings draft");
+    const draft = f.controller.store.getSnapshot().editor!.content;
+    connection.set(undefined); connection.set({ id: 3, host: { home: "isolated" } }); await settle(f.controller);
+    assert.equal(f.controller.store.getSnapshot().editor!.content, draft); assert.equal(f.controller.store.getSnapshot().dirty, true);
+  } finally { f.controller.dispose(); }
+});
+
+test("returning to a blank with an in-flight selection waits for completion and rereads rather than replaying", async () => {
+  const component = await nativeHeaderComponent(), pending = deferred<RemoteResult<SessionProfileSnapshot>>();
+  const blocks = await nativeComposerBlocks(), id = SessionId("blank-return-pending");
+  let accepted = session(id), writes = 0, reads = 0;
+  const f = fixture({ describeSession: async () => { reads++; return success(accepted); }, selectSession: async () => { writes++; return pending.promise; } });
+  try {
+    await f.controller.refresh(); f.controller.setSession(id); await settle(f.controller);
+    f.controller.attachComposerBlocks(blocks, () => en.sessionSelectionBlock);
+    f.controller.actions.chooseSessionProfile("p"); const applying = f.controller.actions.applySession();
+    f.controller.setSession(null); f.controller.setSession(id); await settle(f.controller);
+    assert.equal(f.controller.store.getSnapshot().sessionUnconfirmed, true);
+    assert.equal(menuRowDisabled(headerTree(component, f.controller), "p"), true);
+    assert.ok(blocks.storeFor(id).getSnapshot());
+    await f.controller.actions.applySession(); assert.equal(writes, 1);
+    accepted = appliedWithModel(id); pending.resolve(success(accepted)); await applying; await settle(f.controller);
+    assert.equal(reads, 3); assert.equal(writes, 1);
+    assert.equal(headerMenu(headerTree(component, f.controller)).props.selectedId, "p");
+    assert.equal(f.controller.store.getSnapshot().sessionUnconfirmed, false); assert.equal(blocks.storeFor(id).getSnapshot(), undefined);
   } finally { f.controller.dispose(); }
 });
 

@@ -1,5 +1,10 @@
 export declare const NS = "settings.dsmm-profiles";
 export declare const en: {
+    sessionChooseWorkspace: string;
+    sessionSelectionBlock: string;
+    sessionCommittedRefresh: string;
+    sessionUnconfirmedRefresh: string;
+    technicalDetails: string;
     diagnosticJsonc: string;
     diagnosticDuplicate: string;
     diagnosticUnsafe: string;
@@ -146,6 +151,7 @@ export declare const en: {
     headerModelUnconfirmed: string;
     headerAppliedWithModel: string;
     headerModelChoiceChanged: string;
+    headerActionUnavailable: string;
     headerActivationRefused: string;
     headerSelectionRefused: string;
     headerIssueCode: string;

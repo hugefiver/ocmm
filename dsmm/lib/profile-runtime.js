@@ -1,9 +1,10 @@
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { lstatSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { Context } from "@deepseek-ai/cordis";
 import { ProfileStore, validateSessionProfileId } from "./profile-store.js";
-import { DsmmProfileError, profileDocumentWarnings, requiredReason, resolveProfileSettings } from "./profiles.js";
+import { DsmmProfileError, parseProfileDocument, profileDocumentWarnings, requiredReason, resolveProfileSettings, validateProfileId } from "./profiles.js";
 import { DSMM_ROLES, isDsmmRoleId } from "./roles.js";
 import { freezeSettings, isRootRoleEnabled } from "./settings.js";
 import { roleRouteRuntimeState } from "./role-routing.js";
@@ -36,6 +37,7 @@ export class DsmmProfileRuntime {
     document = null;
     bound = new WeakMap();
     observations = new WeakMap();
+    historyAdmissions = new WeakSet();
     disposed = false;
     queue = Promise.resolve();
     mode;
@@ -88,6 +90,51 @@ export class DsmmProfileRuntime {
         this.bound.set(agent, admission);
     }
     release(agent) { this.bound.delete(agent); }
+    /** Prepare an explicit current choice; historical selection files and epochs are not read. */
+    async prepareHistory(profileId, signal) {
+        this.assertCurrent();
+        signal.throwIfAborted();
+        if (profileId !== null)
+            validateProfileId(profileId);
+        const directory = profileId === null ? undefined : this.store.profileDir;
+        if (profileId !== null && directory === undefined)
+            throw new DsmmProfileError("unavailable", "History continuation requires an observable saved-profile store.");
+        const path = directory === undefined ? undefined : join(directory, `${profileId}.jsonc`);
+        const observe = () => {
+            if (path === undefined)
+                return undefined;
+            const stat = lstatSync(path, { bigint: true }), parent = lstatSync(directory, { bigint: true });
+            if (!stat.isFile() || stat.isSymbolicLink() || !parent.isDirectory() || parent.isSymbolicLink())
+                throw new DsmmProfileError("unsafe-path", "The saved profile source is not a regular file.");
+            return [realpathSync(directory), parent.dev, parent.ino, stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs];
+        };
+        const source = observe();
+        const saved = profileId === null ? null : await this.store.read(profileId);
+        const deployment = await this.options.readDesired?.();
+        const document = saved === null ? null : parseProfileDocument(saved.content, saved.id);
+        const candidate = this.prepare(document, { selectedId: profileId, appliedRevision: saved?.revision ?? null,
+            selectionRevision: "unavailable", ...(saved === null ? {} : { sourceRevision: saved.revision }) }, newEpoch(), profileId === null ? "deployment-baseline" : "session-override", deployment);
+        const assertCurrent = () => {
+            this.assertCurrent();
+            signal.throwIfAborted();
+            if (!isDeepStrictEqual(source, observe()))
+                throw new DsmmProfileError("conflict", "The saved profile changed during history continuation.");
+        };
+        await this.validate(candidate.settings);
+        assertCurrent();
+        this.historyAdmissions.add(candidate);
+        return { admission: candidate, ...(saved?.label === undefined ? {} : { label: saved.label }), assertCurrent,
+            revalidate: async (currentSignal) => {
+                currentSignal.throwIfAborted();
+                assertCurrent();
+                const desired = await this.options.readDesired?.();
+                if (!isDeepStrictEqual(desired, deployment))
+                    throw new DsmmProfileError("conflict", "Deployment changed during history continuation.");
+                await this.validate(candidate.settings);
+                currentSignal.throwIfAborted();
+                assertCurrent();
+            } };
+    }
     async prepareRoot(agent, signal) {
         this.assertRoot(agent);
         signal.throwIfAborted();
@@ -112,19 +159,24 @@ export class DsmmProfileRuntime {
         const disk = await this.store.loadSessionSelection(agent.id);
         await this.ctx.get?.("dsmmNativeAdmission")?.ensure?.(agent);
         this.assertRoot(agent);
-        if (this.admission(agent) !== admitted || (disk.admissionEpoch === null && admitted.scope !== "global-default")
-            || (disk.admissionEpoch !== null && (disk.admissionEpoch !== admitted.epoch || disk.selectedId !== admitted.selectedId || disk.appliedRevision !== admitted.appliedRevision))) {
+        if (this.admission(agent) !== admitted || !this.historyAdmissions.has(admitted) && ((disk.admissionEpoch === null && admitted.scope !== "global-default")
+            || (disk.admissionEpoch !== null && (disk.admissionEpoch !== admitted.epoch || disk.selectedId !== admitted.selectedId || disk.appliedRevision !== admitted.appliedRevision)))) {
             throw new DsmmProfileError("conflict", "The session choice changed outside this owner; its admitted configuration was retained.");
         }
+        if (disk.admissionEpoch === admitted.epoch)
+            this.observations.set(admitted, selectionState(disk));
+        return this.sessionSnapshot(agent, admitted, disk);
+    }
+    sessionSnapshot(agent, admitted, disk, inMaintenance = false) {
         const role = resolveAdmittedDsmmRole(agent, admitted.settings, this.mode.active(agent, admitted.settings.defaultActive));
         const profileModel = role === undefined ? undefined : admitted.settings.roleRouting[role]?.primary;
         const deepwork = this.mode.describe(agent, admitted.settings.defaultActive);
-        return { sessionId: agent.id, globalDefault: this.observedSelection(this.current), selection: selectionState(disk), admittedSelection: selectionState(admitted), scope: admitted.scope,
+        return { sessionId: agent.id, globalDefault: this.observedSelection(this.current), selection: selectionState(disk), admittedSelection: this.observedSelection(admitted), scope: admitted.scope,
             rolePolicy: structuredClone(roleRouteRuntimeState(agent, admitted.settings, role, admitted.epoch)), deepwork,
             modules: projectDsmmModules(this.baseline, admitted.deployment, admitted, false, this.options.getMountedPermission), configuration: deploymentAdmissionView(admitted),
             warnings: structuredClone(admitted.warnings ?? []), roles: structuredClone(admitted.roleAvailability ?? []), subagentRuntime: this.runtimeView(),
             ...(profileModel === undefined ? {} : { profileModel: structuredClone(profileModel) }), admissionEpoch: admitted.epoch,
-            ...this.sessionActions(agent, admitted, deepwork, profileModel !== undefined), switchAllowed: false, switchUnavailableReason: "unavailable" };
+            ...this.sessionActions(agent, admitted, deepwork, profileModel !== undefined, inMaintenance), switchAllowed: false, switchUnavailableReason: "unavailable" };
     }
     async selectMode(request, agent, signal, authority) {
         this.assertRoot(agent);
@@ -168,9 +220,68 @@ export class DsmmProfileRuntime {
             throw new DsmmProfileError("maintenance", "The native session refused the Deepwork change.");
         }
     }
-    async selectSession(_request, agent, _signal, _authority) {
+    async selectSession(request, agent, signal, authority) {
         this.assertRoot(agent);
-        throw new DsmmProfileError("unavailable", "Live Apply is unavailable; save and select a default for new sessions.");
+        if (this.historyAdmissions.has(this.admission(agent)))
+            throw new DsmmProfileError("unavailable", "A continued historical Agent is not a blank configuration target.");
+        if (request.sessionId !== agent.id)
+            throw new DsmmProfileError("not-owned", "The native session does not match the captured Agent.");
+        const previous = this.admission(agent);
+        const owner = this.ctx.get?.("dsmmNativeAdmission");
+        const check = (maintenanceSignal) => {
+            this.assertRoot(agent);
+            if (signal?.aborted || maintenanceSignal?.aborted)
+                throw new DsmmProfileError("cancelled", "The session configuration change was cancelled.");
+            if (this.admission(agent) !== previous || previous.epoch !== request.expectedAdmissionEpoch || this.ctx.get?.("dsmmNativeAdmission") !== owner) {
+                throw new DsmmProfileError("conflict", "The admitted session configuration changed; refresh before selecting again.");
+            }
+            authority?.();
+        };
+        check();
+        if (owner?.beginBlank === undefined || agent.runMaintenance === undefined)
+            throw new DsmmProfileError("unavailable", "Native blank-session configuration maintenance is unavailable.");
+        if (agent.status === "running")
+            throw new DsmmProfileError("busy", "Wait for the session to become idle.");
+        try {
+            return await agent.runMaintenance(async (maintenanceSignal) => {
+                check(maintenanceSignal);
+                const transaction = owner.beginBlank(agent, signal === undefined ? maintenanceSignal : AbortSignal.any([maintenanceSignal, signal]), () => check(maintenanceSignal));
+                const assertCurrent = () => transaction.assertCurrent();
+                let next, response;
+                try {
+                    const epoch = newEpoch();
+                    const result = await this.store.selectSession(request, epoch, async (document) => {
+                        const deployment = await this.options.readDesired?.();
+                        assertCurrent();
+                        const candidate = this.prepare(document, { selectedId: request.id, appliedRevision: null, selectionRevision: "unavailable" }, epoch, request.id === null ? "deployment-baseline" : "session-override", deployment ?? previous.deployment);
+                        await this.validate(candidate.settings);
+                        assertCurrent();
+                        return { candidate, document };
+                    }, {
+                        assertCurrent,
+                        prepare: async (selection, prepared) => {
+                            assertCurrent();
+                            const candidate = prepared.candidate;
+                            next = this.profileAdmission(selection, candidate.settings, selection.admissionEpoch, candidate.scope, candidate.baseline, candidate.deployment, candidate.restartRequired, prepared.document, selection.warnings);
+                            await transaction.prepare(next, () => { response = this.sessionSnapshot(agent, next, selection, true); });
+                            assertCurrent();
+                        },
+                        committed: () => { this.bound.set(agent, next); transaction.committed(); },
+                    });
+                    this.observations.set(next, selectionState(result.selection));
+                    return { ...response, selection: selectionState(result.selection), admittedSelection: selectionState(result.selection),
+                        ...(result.selection.refreshRequired ? { refreshRequired: true } : {}) };
+                }
+                finally {
+                    await transaction.close();
+                }
+            });
+        }
+        catch (error) {
+            if (error instanceof DsmmProfileError)
+                throw error;
+            throw new DsmmProfileError("maintenance", "The native session refused the configuration change.");
+        }
     }
     assertRoot(agent) {
         this.assertCurrent();
@@ -324,7 +435,7 @@ export class DsmmProfileRuntime {
             return { id: role.id, label: role.name, enabled: admission.settings.roles[role.id], availability: admission.roleAvailability?.find(row => row.id === role.id), ...(Object.keys(runtimePolicy).length === 0 ? {} : { runtimePolicy }) };
         });
     }
-    sessionActions(agent, admission, mode, hasProfileModel) {
+    sessionActions(agent, admission, mode, hasProfileModel, inMaintenance = false) {
         const llm = agent.ctx?.get?.("llm") ?? this.ctx.get?.("llm");
         const selectModelUnavailableReason = !hasProfileModel ? "model-unconfigured" : llm?.resolveCallConfig === undefined ? "model-service-unavailable" : undefined;
         const owner = this.ctx.get?.("dsmmNativeAdmission");
@@ -332,9 +443,10 @@ export class DsmmProfileRuntime {
         const toggleModeUnavailableReason = agent.status === "running" || hasOpenTurn(sessionEvents(agent.session)) ? "busy"
             : agent.runMaintenance === undefined ? "maintenance" : !mode.active && (!this.baseline.modules.deepwork.enabled || !admission.settings.modules.deepwork.enabled) ? "module-off"
                 : mode.locked || !mode.active && !ready ? "runtime-unavailable" : undefined;
+        const applyOverlayUnavailableReason = this.historyAdmissions.has(admission) ? "new-session-required" : this.store.readOnly ? "runtime-unavailable" : owner?.blankReason?.(agent, inMaintenance) ?? (owner?.blankReason === undefined ? "runtime-unavailable" : undefined);
         return { canSelectModel: selectModelUnavailableReason === undefined, ...(selectModelUnavailableReason === undefined ? {} : { selectModelUnavailableReason }),
             canToggleMode: toggleModeUnavailableReason === undefined, ...(toggleModeUnavailableReason === undefined ? {} : { toggleModeUnavailableReason }),
-            canApplyOverlay: false, applyOverlayUnavailableReason: "new-session-required" };
+            canApplyOverlay: applyOverlayUnavailableReason === undefined, ...(applyOverlayUnavailableReason === undefined ? {} : { applyOverlayUnavailableReason }) };
     }
     async validate(settings) {
         if (!settings.modules.deepwork.enabled)

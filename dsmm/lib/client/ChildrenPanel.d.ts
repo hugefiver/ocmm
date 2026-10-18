@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { InjectFace, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { DsmmInvocationView, RoleControlAvailability, RoleControlChildView } from "../role-control-types.js";
 import type { DsmmRoleRouteComparison } from "../profile-types.js";
@@ -11,6 +12,7 @@ export type ChildrenInjected = ChildrenActions & {
 };
 export type ChildrenPanelProps = InjectFace<ChildrenInjected> & Locale & {
     sessionId?: string;
+    renderChildPermissions?: (child: RoleControlChildView) => ReactNode;
 };
 export declare function ControlAvailability({ value, label, t }: Locale & {
     value?: RoleControlAvailability;
@@ -28,11 +30,12 @@ export declare function ChildComposer({ child, state, actions, t }: Locale & {
     state: ChildrenSnapshot;
     actions: ChildrenActions;
 }): import("react").JSX.Element;
-export declare function ChildDetails({ child, state, actions, t, inspection }: Locale & {
+export declare function ChildDetails({ child, state, actions, t, inspection, renderChildPermissions }: Locale & {
     child: RoleControlChildView;
     state: ChildrenSnapshot;
     actions: ChildrenActions;
     inspection?: boolean;
+    renderChildPermissions?: ChildrenPanelProps["renderChildPermissions"];
 }): import("react").JSX.Element;
 /** Native session-scoped Conversation View, not a replacement composer or navigation shell. */
 export declare function ChildrenPanel(props: ChildrenPanelProps): import("react").JSX.Element;

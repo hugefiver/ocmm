@@ -20,6 +20,8 @@ Apply this additive layer only to a Claude Opus 5 or 5.5 orchestrator (including
 
 - Reuse passing evidence while it still covers the claim and no change materially affects tested behavior or interfaces; rerun only affected or missing checks.
 - Preserve every required final review and required evidence; efficiency never removes them.
+- Prefer a path, a commit, or the uncommitted working-tree change over an invented hash, checksum, or revision stamp. Treat RED/GREEN as evidence at a real deterministic seam rather than a universal gate.
+- Opus 5 tends to expand process: scale it to the request rather than defaulting upward, and recheck only what the current step depends on when runtime or path state drifts.
 
 ## Communication
 

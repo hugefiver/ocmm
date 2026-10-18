@@ -1,0 +1,119 @@
+diff --git a/lib/index.js b/lib/index.js
+index c70ab83154ee2a69f0c44507f1dd161ce8b7e38f..4c6da3afa0a31986713bb8e6992388def61d0a82 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -1,4 +1,4 @@
+-import { Service } from "@deepseek-ai/cordis";
++import { Service, symbols } from "@deepseek-ai/cordis";
+ import z from "@deepseek-ai/schemastery";
+ import { HarnessError } from "@deepseek-ai/dsh-llm";
+ //#region lib/types/types.js
+@@ -17,6 +17,8 @@ import { HarnessError } from "@deepseek-ai/dsh-llm";
+ * structured error metadata.
+ */
+ var WebError = class extends HarnessError {};
++const preparedFetches = new WeakMap();
++const serviceOwner = value => value?.[symbols.original] ?? value;
+ //#endregion
+ //#region lib/types/index.js
+ /**
+@@ -51,6 +53,8 @@ var WebRuntime = class extends Service {
+ 	});
+ 	searchProviders = /* @__PURE__ */ new Map();
+ 	fetchProviders = /* @__PURE__ */ new Map();
++	fetchRegistrations = new Map();
++	fetchRegistryState = { revision: {} };
+ 	searchProviderEnv;
+ 	fetchProviderEnv;
+ 	constructor(ctx, config) {
+@@ -81,9 +85,13 @@ var WebRuntime = class extends Service {
+ 	}
+ 	registerProvider(store, provider) {
+ 		if (store.has(provider.id)) throw new WebError(`a web provider with id "${provider.id}" is already registered`, "WEB_DUPLICATE_PROVIDER");
++		const registrations = store === this.fetchProviders ? this.fetchRegistrations : undefined;
++		const registryState = registrations && this.fetchRegistryState;
+ 		const dispose = this.ctx.effect(function* () {
+ 			store.set(provider.id, provider);
+-			yield () => store.delete(provider.id);
++			registrations?.set(provider.id, Object.freeze({}));
++			if (registryState) registryState.revision = {};
++			yield () => { store.delete(provider.id); registrations?.delete(provider.id); if (registryState) registryState.revision = {}; };
+ 		}, "web.registerProvider()");
+ 		return () => void dispose();
+ 	}
+@@ -118,6 +126,48 @@ var WebRuntime = class extends Service {
+ 			...configuredId !== void 0 ? { configuredId } : {}
+ 		}).fetch(request, signal);
+ 	}
++	/** Prepare a detached request without invoking fetch or resolving its URL. */
++	prepareFetch(request) {
++		const cloned = Object.freeze(structuredClone(request));
++		const revision = this.fetchRegistryState.revision;
++		const configuredId = this.config.fetchProvider.get() ?? this.fetchProviderEnv;
++		const provider = resolveProvider({ providers: this.fetchProviders, configuredId });
++		const registration = this.fetchRegistrations.get(provider.id);
++		if (!registration || this.fetchProviders.get(provider.id) !== provider || revision !== this.fetchRegistryState.revision) throw new WebError("fetch provider registration changed", "WEB_PREPARED_STALE");
++		const prepared = Object.freeze({ request: cloned, provider, registration });
++		preparedFetches.set(prepared, { owner: serviceOwner(this), configuredId, provider, registration, revision, fetch: provider.fetch, request: cloned });
++		return prepared;
++	}
++	/** One attempt, including failures. The final callback and provider handoff are synchronous. */
++	async fetchPrepared(prepared, { signal, beforeDispatch } = {}) {
++		const entry = preparedFetches.get(prepared);
++		if (!entry) throw new WebError("invalid or consumed fetch preparation", "WEB_PREPARED_STALE");
++		preparedFetches.delete(prepared);
++		const check = () => {
++			if (signal?.aborted) throw new WebError("web fetch aborted", "WEB_ABORTED");
++			if (serviceOwner(this) !== entry.owner || serviceOwner(this.ctx.get("web")) !== entry.owner
++				|| this.fetchRegistryState.revision !== entry.revision
++				|| this.fetchProviders.get(entry.provider.id) !== entry.provider
++				|| this.fetchRegistrations.get(entry.provider.id) !== entry.registration || entry.provider.fetch !== entry.fetch)
++				throw new WebError("fetch preparation is no longer current", "WEB_PREPARED_STALE");
++		};
++		check();
++		const selected = () => {
++			const configuredId = this.config.fetchProvider.get() ?? this.fetchProviderEnv;
++			if (configuredId !== entry.configuredId || resolveProvider({ providers: this.fetchProviders, configuredId }) !== entry.provider)
++				throw new WebError("fetch provider selection changed", "WEB_PREPARED_STALE");
++			check();
++		};
++		selected();
++		const result = beforeDispatch?.();
++		if (result !== null && (typeof result === "object" || typeof result === "function") && typeof result.then === "function") {
++			Promise.resolve(result).catch(() => {});
++			throw new WebError("beforeDispatch must be synchronous", "WEB_PREPARED_ASYNC_CALLBACK");
++		}
++		if ((this.config.fetchProvider.get() ?? this.fetchProviderEnv) !== entry.configuredId) throw new WebError("fetch provider selection changed", "WEB_PREPARED_STALE");
++		check();
++		return Reflect.apply(entry.fetch, entry.provider, [entry.request, signal]);
++	}
+ };
+ /** Resolve the selected provider or throw the matching {@link WebError}. */
+ function resolveProvider(selection) {
+diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
+index 4c8f6bde391e4961748b123b7f1717ffb1ec45f6..f84e434c1c7d68db6f879f82585c6cb0225028c8 100644
+--- a/lib/types/index.d.ts
++++ b/lib/types/index.d.ts
+@@ -41,6 +41,11 @@ export interface WebRuntimeConfig {
+  * - No id configured, multiple usable providers → `WEB_PROVIDER_AMBIGUOUS`.
+  * - No id configured, no usable provider → `WEB_PROVIDER_UNAVAILABLE`.
+  */
++export interface PreparedWebFetch {
++    readonly request: Readonly<WebFetchRequest>;
++    readonly provider: WebFetchProvider;
++    readonly registration: object;
++}
+ export declare class WebRuntime extends Service {
+     private readonly config;
+     /**
+@@ -96,6 +101,10 @@ export declare class WebRuntime extends Service {
+      * @returns the retrieval outcome; non-2xx responses resolve descriptively.
+      */
+     fetch(request: WebFetchRequest, signal?: AbortSignal): Promise<WebFetchResult>;
++    /** No fetch/DNS dispatch. Capability is bound to this live service and registration. */
++    prepareFetch(request: WebFetchRequest): PreparedWebFetch;
++    /** One dispatch attempt, with a synchronous final check. Failures consume the capability. */
++    fetchPrepared(prepared: PreparedWebFetch, options?: { signal?: AbortSignal; beforeDispatch?: () => unknown }): Promise<WebFetchResult>;
+ }
+ export default WebRuntime;
+ //# sourceMappingURL=index.d.ts.map

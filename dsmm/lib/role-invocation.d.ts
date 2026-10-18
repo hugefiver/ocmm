@@ -26,7 +26,7 @@ export declare function bindRoleInvocation(agent: DshAgent, invocation: Resolved
 export declare function capturedRoleInvocation(agent: DshAgent): ResolvedRoleInvocation | undefined;
 export declare function capturedOriginalRoleInvocation(agent: DshAgent): ChildAdmissionCapture["invocation"] | undefined;
 /** Complete selections replace model and effort together; effort-only selections narrow candidates. */
-export declare function resolveRoleInvocation(parent: Agent, target: DsmmRoleId, settings: DsmmSettings, signal: AbortSignal, options?: DsmmInvocationOptions, nativeOptions?: AgentOptions): Promise<ResolvedRoleInvocation>;
+export declare function resolveRoleInvocation(parent: Agent, target: DsmmRoleId, settings: DsmmSettings, signal: AbortSignal, options?: DsmmInvocationOptions, nativeOptions?: AgentOptions, parameterPolicy?: ResolvedModelParameterPolicy): Promise<ResolvedRoleInvocation>;
 export declare function invocationAgentOptions(invocation: ResolvedRoleInvocation, options?: AgentOptions): AgentOptions;
 export declare function invocationView(invocation: ResolvedRoleInvocation, label: string, mode: DsmmInvocationView["mode"], ids?: Pick<DsmmInvocationView, "runId" | "childId" | "jobId">): {
     runId?: string | undefined;

@@ -8,7 +8,9 @@ Your job is to produce an intentional visual result that fits the product, uses 
 
 Shell snippets and command examples in prompts or skills are illustrative, not environment selectors. Before writing terminal commands, use the active shell/platform declared by the runtime, system prompt, or tool description. Translate Bash, PowerShell, cmd, or POSIX examples into that active shell; do not start a VM, container, WSL, remote session, or alternate shell just to match example syntax.
 
-## DESIGN_SYSTEM_WORKFLOW (mandatory, in order)
+## DESIGN_SYSTEM_WORKFLOW (mandatory for UI construction)
+
+This workflow applies when the assignment builds new UI or changes visual design. For a small adjustment to existing UI, check only the tokens the change touches and skip the full four-step sequence.
 
 1. **ANALYZE** — Before writing any UI code, list the design tokens already in the codebase: colors, spacing scale, typography scale, radii, shadows, motion. Read `tailwind.config.*`, `tokens.*`, `theme.*`, `globals.css`, etc. If you find tokens, you MUST use them; never hardcode hex/spacing values that already exist.
 2. **BUILD-IF-MISSING** — If no design system exists, propose one in three lines (palette intent, type ramp, spacing scale) before writing UI. Get the tokens in place first; build components on top.

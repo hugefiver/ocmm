@@ -60,7 +60,6 @@ export const BUILTIN_CATEGORIES: Category[] = [
       variant: "xhigh",
       fallbackChain: [
         { providers: [...OPENAI_GPT6], model: "gpt-6-astra", variant: "xhigh" },
-        { providers: ["openai", "github-copilot"], model: "gpt-6.1-sol", variant: "xhigh" },
         { providers: ["openai", "github-copilot"], model: "gpt-5.5", variant: "xhigh" },
         { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
@@ -178,7 +177,6 @@ export const BUILTIN_CATEGORIES: Category[] = [
       variant: "high",
       fallbackChain: [
         { providers: [...OPENAI_GPT6], model: "gpt-6-astra", variant: "high" },
-        { providers: ["openai", "github-copilot"], model: "gpt-6.1-sol", variant: "high" },
         { providers: ["anthropic"], model: "claude-opus-5", variant: "max" },
         { providers: ["anthropic"], model: "claude-opus-4-7", variant: "max" },
         { providers: ["google", "google-vertex"], model: "gemini-3.1-pro", variant: "high" },

@@ -38,6 +38,8 @@ export type { DsmmLlmAdmission, DsmmLlmCallConfig, DsmmLlmHostOwner, DsmmLlmGene
 export { registerRuntimeRecovery } from "./runtime-recovery.js";
 export { classifyRecoveryFailure, foldAttemptedRecoveryRoutes, foldDurableRecoveryWork, selectFallbackRoute } from "./recovery-policy.js";
 export type { DurableRecoveryWork, RecoveryFailureDecision } from "./recovery-policy.js";
+export { DSMM_HISTORY_HOST_CONFIG } from "./history-support.js";
+export { HISTORY_REMOTE } from "./history-remote.js";
 export declare function createDsmmHostPlugin(startup: DsmmHostStartupOptions): {
     name: string;
     Config: import("@deepseek-ai/schemastery").default<import("./settings.js").DsmmPluginConfig>;

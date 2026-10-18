@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
+import type { HostObservable, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
+import type { TemporaryPermissionRemote } from "../permission-temporary-types.js";
 import type { ConfigForms } from "@deepseek-ai/dsh-client-ui-settings/client";
 import type { DsmmConfigRemote } from "../profile-remote.js";
 import type { SubagentRuntimeAdmissionView } from "../profile-types.js";
@@ -13,7 +14,7 @@ import type { ConfigModule } from "./deployment-modules.js";
 import { at, inspectorPaths, scopeSchema, visibleDeploymentPath } from "./deployment-data.js";
 import { Field, displayValue, permissionText } from "./DeploymentFields.js";
 import { configurationVersionState } from "./configuration-display.js";
-import { PermissionsPanel } from "./PermissionsPanel.js";
+import { PermissionPanelEntry } from "./PermissionPanelEntry.js";
 import { permissionEn } from "./permission-locales.js";
 import type { PermissionLocaleKey } from "./permission-locales.js";
 
@@ -24,6 +25,8 @@ export interface DeploymentPageProps extends Locale {
   remote: DsmmConfigRemote;
   workspace?: DeploymentWorkspace;
   permissions?: PermissionController;
+  temporaryPermissions?: HostObservable<TemporaryPermissionRemote | undefined>;
+  permissionsT?: PropsLocale<"settings.dsmm-permissions">["t"];
   forms?: ConfigForms;
 }
 export function ScopeSave({ controller, workspace, refreshOnly = false, t }: Locale & { controller: DeploymentController; workspace?: DeploymentWorkspace; refreshOnly?: boolean }) {
@@ -41,13 +44,11 @@ export function ScopeSave({ controller, workspace, refreshOnly = false, t }: Loc
   </section>;
 }
 export function NativeRuntimeState({ value, t }: Locale & { value?: SubagentRuntimeAdmissionView }) {
-  return <section className="dsmm-availability" aria-label={t("nativeRuntimeState")}>
-    <h3>{t("nativeRuntimeState")}</h3>
+  return <details className="dsmm-availability"><summary>{t("nativeRuntimeState")}</summary>
     <p>{t("nativeRuntimeBinding")}: {t(value?.binding === "stock" ? "nativeRuntimeStock" : value?.binding === "unavailable" ? "nativeRuntimeUnavailable" : "unknown")}</p>
     <p>{t("nativeRuntimeFence")}: {value === undefined ? t("unknown") : t(value.deliveryFenceReady ? "on" : "off")} · {t("nativeRuntimeRestart")}: {value === undefined ? t("unknown") : t(value.restartRequired ? "on" : "off")}</p>
     {value?.reason !== undefined && <p>{t(`nativeRuntimeReason-${value.reason}`)}</p>}
-    <p className="dsmm-hint">{t("nativeRuntimeReadinessHint")}</p>
-  </section>;
+  </details>;
 }
 export function StateInspector({ controller, t }: Locale & { controller: DeploymentController }) {
   const { snapshot, session, dirty, issue } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -81,6 +82,7 @@ export function DeploymentPage(props: DeploymentPageProps) {
   const id = useId(), heading = useRef<HTMLHeadingElement>(null), triggers = useRef(new Map<ConfigModule, HTMLButtonElement>()), previous = useRef<ConfigModule | null>(null);
   const scopeControl = useRef<HTMLSelectElement>(null), confirmation = useRef<HTMLButtonElement>(null);
   const resume = useRef<{ element: HTMLElement; scope: ConfigScope; module: ConfigModule | null } | null>(null);
+  const disclosures = useRef({ global: new Map<string, boolean>(), profile: new Map<string, boolean>() });
   const { t } = props, snapshot = state.snapshot ?? core.snapshot, active = navigation.module;
   useEffect(() => { if (props.view === "page") void props.core.refresh(); }, [props.core, props.view]);
   useEffect(() => { if (props.forms !== undefined) workspace.bindForms(props.forms); }, [workspace, props.forms]);
@@ -102,7 +104,7 @@ export function DeploymentPage(props: DeploymentPageProps) {
   const modules = CONFIG_MODULES.filter(module => module === "state" || module === "permissions" || snapshot === null || moduleFields(snapshot.schema, module, "global").length + moduleFields(scopeSchema(snapshot, "profile"), module, "profile").length > 0);
   const scopeActions = <ScopeSave controller={active === "state" ? props.core : controller} workspace={workspace} refreshOnly={active === "state" || workspace.controller() === null} t={t} />;
   return <section className="dsmm-profiles dsmm-deployment" data-dsmm-page aria-label={t("title")}>
-    <p>{t("description")}</p><p className="dsmm-hint">{t("boundaries")}</p>
+    <p className="dsmm-hint">{t("boundaries")}</p>
     <div className="dsmm-field"><label htmlFor={`${id}-scope`}>{t("scope")}</label><select ref={scopeControl} id={`${id}-scope`} value={navigation.scope} disabled={state.busy || navigation.pending !== null} onChange={event => {
       const scope = event.currentTarget.value; if (scope === "global" || scope === "profile") workspace.request({ scope, module: active });
     }}><option value="global">{t("global")}</option><option value="profile">{t("profile")}</option></select></div>
@@ -122,11 +124,11 @@ export function DeploymentPage(props: DeploymentPageProps) {
         {active === "state" ? <><StateInspector controller={props.core} t={t} />{scopeActions}</> : <>
           {navigation.scope === "profile" && navigation.native === null ? <p>{t("unavailableForm")}</p> : state.snapshot === null ? <p>{t(state.busy ? "loading" : "unavailable")}</p> : <div data-dsmm-layer={controller.layer} aria-busy={state.busy} className="dsmm-structured">
             {fields.length === 0 && <p className="dsmm-hint">{t("noModuleFields")}</p>}
-            {fields.map(([key, schema]) => <Field key={key} schema={schema} path={[key]} controller={controller} t={t} />)}
+            {fields.map(([key, schema]) => <Field key={`${navigation.scope}:${key}`} schema={schema} path={[key]} controller={controller} initiallyOpen={fields.length === 1 && active !== "permissions"} disclosures={disclosures.current[navigation.scope]} t={t} />)}
             {active === "run" && controller.layer === "profile" && <NativeRuntimeState value={state.snapshot.subagentRuntime} t={t} />}
           </div>}
           {scopeActions}
-          {active === "permissions" && <section className="dsmm-zone"><h3>{t("rootRules")}</h3><p className="dsmm-hint">{t("rootRulesHint")}</p>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionsPanel controller={workspace.permissions} t={key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key} />}</section>}
+           {active === "permissions" && <section className="dsmm-zone"><h3>{t("rootRules")}</h3><p className="dsmm-hint">{t("rootRulesHint")}</p>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionPanelEntry controller={workspace.permissions} temporary={props.temporaryPermissions} t={props.permissionsT ?? (key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key)} />}</section>}
         </>}
       </aside>}
     </div>

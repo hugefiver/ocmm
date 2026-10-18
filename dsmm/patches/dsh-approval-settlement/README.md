@@ -1,0 +1,41 @@
+# Native approval settlement support
+
+These four pnpm patches target DSH `0.2.1-rc.2`. Apply all four to the Host and Client package graph. `metadata.json` supplies the workspace patch entries and the existing SDK package that DSMM must directly declare for its public Client types. pnpm owns patch integrity and lockfile generation. Installing the DSMM plugin alone does not patch an embedded Desktop Host.
+
+## SDK contracts
+
+- `ApprovalService.request(req, { opened(requestId) })` supplies the service-generated identity for that exact borrowed request. `requestIdentity(req)` is available only for an unambiguous active request. `settlement(requestId)` returns a bounded, live-only final-audit receipt; `forgetSettlement` releases it. Historical events never recreate receipts.
+- `onSettlement` observes committed receipts. Receipt `source` describes proven continuity through the Host waterfall. `winner.automatic` independently records an actually accepted permit answer, including when a later layer destroys source continuity.
+- `TypertGateway.approvalDelivery(peer, requestId, deliveryId)` returns the actual live delivery or `undefined`. `registerApprovalPermits` installs one synchronous Host verifier. Issuance does not claim the native winner or consume a grant.
+- Client Gateway negotiates the `approval-settlement-1` capability before adding protocol fields. Old peers keep the original manual answer path without reusable provenance.
+- `PendingApproval` is a **type-only export from `@deepseek-ai/dsh-client-ui-approval/client`**, not a class exported by the package root. Its readonly `requestId`/`deliveryId` identify a negotiated delivery. `answer(outcome, { permit })` or `answer(outcome, { retention })` fixes sideband in the same first-wins critical section as the outcome. The Host-issued retention token binds the chosen duration to the actual winning answer; a competing native once-only answer cannot inherit an earlier retention intent.
+- Native UI owns the optional `conversation.approval.permissions` child slot. Its owner passes the exact public `pending` object. The existing detail slot and native answer/reject controls remain intact.
+
+Only the native Remote/UI producers and explicitly audited approval adapters can carry source. Unknown listeners always produce unknown source, even when returning an equal outcome or calling `next()` once. The approval-specific adapters preserve Cordis selection, filtering, callback tracing, order and `this`; they do not modify Cordis. Never register an unreviewed listener with `createForwarder` or `$approvalAnswerer`.
+
+## DSMM integration hooks
+
+The parent composition owns `src/index.ts`, `src/native-admission.ts` and `src/client/index.ts`.
+
+1. When permission rules are startup-mounted and patched `approval`/`typertGateway` and the Core/rules owners are live, call `installTemporaryPermissions(ctx, { core, roles, rules, argv })` from `permission-temporary-install.ts`. Pass the existing `createCorePermissionAuthority()` result, actual `DsmmRolePolicy`, and actual `PermissionRulesRuntimeSync`, not serialized policy or ownership booleans. This factory installs one grant store, native file adapters, authenticated RPC, and optional explicit argv tool. It refreshes the actual rule owner before capturing controlled calls. Do not separately install duplicate stores or RPC owners.
+2. The returned `grants` is revoked on native `agent/disposed`. The parent's admission lifecycle must also call `grants.revokeAgent(exactAgent)` when replacing or releasing that Agent's owner/generation. This clears reusable grants without cancelling a native manual pending. The RPC remains root-only until trusted explicit child authorization and a visible native route are available.
+3. Supply `argv` only in an authorized execution composition and before its role/tool ceiling is captured. `temporaryPermissionCapture()` uses the real Core physical-lifetime checks and calls `DsmmRolePolicy.assertToolExecution()` and `toolDenial()` for the actual registered tool. Automatic reuse additionally checks the captured Core generation and synchronized rules. `programKind()` is trusted Host classification: unknown programs and interpreters are once-only. Do not add `dsmm_exec_argv` to readonly role allowlists. Approval service shadows that differ from the factory's actual native service are refused.
+4. The argv tool requires canonical absolute executable/cwd paths, the verified native local subprocess provider and current sandbox policy. It never changes native mode. Confining modes require `sandbox.confine`; missing support refuses execution. Environment is controlled overrides/tombstones over `scrubbedParentEnv`, not a replacement snapshot. Canonical paths are rechecked after asynchronous confinement, then provider handoff follows the final synchronous check without an await. This is not an atomic OS-release revocation guarantee, final-inode guarantee or binary-content pin.
+5. Existing DSMM permission answerers use the explicitly audited `permissionApprovalAdapter` when the patch is available. Mount them after the patched ApprovalService; otherwise their source remains unknown and no scoped grant is created or consumed.
+6. On the Client, register the existing permission dictionaries, then call `registerTemporaryPermissionSlots(ctx, connection)`. For the existing permissions panel, pass a generation-scoped `temporaryPermissionClient(connection, signal)` in its optional `temporary` prop. Recreate it for a new connection generation. No new question queue or answer RPC is introduced.
+
+`permission-fs.ts` and `permission-fs-search.ts` wrap the actual native registration and body. Their reusable file adapter supports the exact native `LocalFileSystem`; search additionally requires the exact native `LocalSubprocessRuntime` in Node, the packaged ripgrep helper and its complete native argv template. Unknown providers and native sandbox-escalation requests retain native once-only behavior; they do not advertise reusable scopes. Native bash/pwsh remain once-only.
+
+File requests expose exact targets and explicit directory-tree choices. Read and write grants, and distinct native tool registrations, remain separate. The Host resolves every target through the real filesystem, uses its `contains()` relation for trees, and rechecks the canonical target/type after asynchronous preparation. File operations are fenced again at the actual provider call; search performs a synchronous canonical-path/type, argv, cwd, effective-environment, provider and lease check immediately before spawn. The native working-directory metadata check is preserved without granting content access to that directory. Revocation/TTL stop subsequent handoffs, including a write delayed inside native `fs/write-intent`.
+
+File grants never widen standing mode: read-only mutations and workspace-write mutations outside the resolved workspace are refused. There is no final-inode, Windows hardlink, binary-content, kernel filesystem or process-network guarantee. Website reuse and explicit child ask remain unsupported until their actual SDK provenance/selection boundaries are available; these four settlement patches do not provide them.
+
+## Isolated verification
+
+The SDK test supports task-owned editable package copies or an isolated pnpm-applied installation. Set `DSMM_APPROVAL_SDK_DIR` to the isolated project and `DSMM_APPROVAL_INSTALLED=1` to use its actual installed patched exports:
+
+```powershell
+node --import ./test/approval-settlement-sdk-loader.mjs --test ./test/approval-settlement-sdk.test.mjs
+```
+
+Run from `dsmm/`. The tests use in-memory Agents, native Gateway/Remote dispatch, native PendingApproval, synthetic operator Peers, actual local filesystem/ripgrep effects and a Go-built disposable argv program. They never use Desktop profiles, credentials, session files or model providers. The Go toolchain must already exist; no tool is installed. Tests remove their owned file/program/cache directories. The package-isolation directory is owned by the invoking verification run. `--test-name-pattern "temporary files|grants are created|operator Client RPC"` selects file and affected store/RPC coverage without rebuilding or rerunning the argv program.

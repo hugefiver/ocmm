@@ -69,9 +69,9 @@ test("GPT migration mixed-provider registration retains legacy promotions and GP
   })
   for (const [name, model] of [
     ["coding", "anthropic/claude-sonnet-4-6"],
-    ["orchestrator", "openai/gpt-6.2-sol"],
-    ["builder", "openai/gpt-6.2-sol"],
-    ["reviewer", "openai/gpt-6.2-sol"],
+    ["orchestrator", "openai/gpt-6.2-astra"],
+    ["builder", "openai/gpt-6.2-astra"],
+    ["reviewer", "openai/gpt-6.2-astra"],
     ["planner", "openai/gpt-6.2-astra"],
     ["plan-critic", "openai/gpt-6.2-astra"],
     ["hard-reasoning", "openai/gpt-6.2-astra"],

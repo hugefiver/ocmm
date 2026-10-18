@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type { PreToolDecision, ToolDefinition, ToolExecution } from "@deepseek-ai/dsh-tools";
-import { PermissionRefusal } from "./permission-control.js";
+import { PermissionRefusal, permissionApprovalAdapter } from "./permission-control.js";
 import type { PermissionExecutionIntegrity } from "./permission-control.js";
 import { permissionOutcome } from "./permission-errors.js";
 import { classifyPermissionShell, parsePermissionShellReadPaths } from "./permission-shell.js";
@@ -244,12 +244,12 @@ export function registerNativePermissionRules(ctx: Context, options: NativePermi
     }
     return downstream;
   }, { prepend: true, global: true });
-  const unapproval = ctx.on("approval/request", async (request, next) => {
+  const unapproval = ctx.on("approval/request", permissionApprovalAdapter(ctx, async (request, next) => {
     const ask = request.displayReason === undefined ? undefined : asks.get(request.displayReason);
     if (ask === undefined || request.agent !== ask.exec.agent || request.signal !== ask.exec.signal || request.callId !== ask.exec.callId || request.toolName !== ask.exec.name) return next();
     checkIntegrity(ask.exec, ask.binding);
     return permissionOutcome(next, ask.binding.signal, "cancelled");
-  }, { prepend: true, global: true });
+  }), { prepend: true, global: true });
   const unguard = tools.guard(exec => {
     const binding = bindings.get(exec.token); if (binding === undefined) return undefined;
     try { checkIntegrity(exec, binding); return undefined; } catch { return "Native tool execution identity is no longer current."; }

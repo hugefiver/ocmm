@@ -1,0 +1,374 @@
+diff --git a/lib/index.js b/lib/index.js
+index 730b8a4116b1a81ecb72273a9629ae55bebbb4c5..01166474848e341c1b5c905747382308b70c2a36 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -178,6 +178,50 @@ async function inspectApiSession(ctx, sessionId, signal) {
+ }
+ /** Owns every operation that may create, resume, or configure a Web Agent. */
+ var ApiSessionAgentController = class {
++    activations = new Map();
++    activationPending(sessionId) {
++        return this.activations.has(sessionId) || this.ctx.get('agentLoop')?.activationState?.(sessionId)?.phase === 'initializing';
++    }
++    activationError(sessionId) {
++        return new RemoteError('session/agent-busy', 'Session activation is in progress; retry only after it completes', { sessionId, reason: 'activation-in-progress' });
++    }
++    /** Host-only; the exact request object owns this operation and its result. */
++    activateSession(request) {
++        const active = this.activations.get(request.sessionId);
++        if (active !== undefined) {
++            if (active.request === request) return active.promise;
++            return Promise.reject(this.activationError(request.sessionId));
++        }
++        if (this.activationPending(request.sessionId) || this.resumes.has(request.sessionId) || this.claims.has(request.sessionId) || this.ctx.agents.get(request.sessionId)) return Promise.reject(this.activationError(request.sessionId));
++        const entry = { request };
++        this.activations.set(request.sessionId, entry);
++        entry.promise = (async () => {
++            request.signal.throwIfAborted();
++            const observation = await inspectApiSession(this.ctx, request.sessionId, request.signal);
++            if (hasApiSessionSubagentOwner(this.ctx, { header: observation.meta }, undefined)) throw new ApiSessionSubagentOwnership(request.sessionId);
++            const composition = await this.composeAgent(request.agentPreset);
++            request.signal.throwIfAborted();
++            const options = {
++                resumeSessionId: request.sessionId,
++                agentOptions: request.agentOptions ?? this.agentOptions(),
++                signal: request.signal,
++                processPending: request.processPending === true,
++                setup: async (agentCtx, agent) => {
++                    await composition.setup(agentCtx, agent);
++                    request.signal.throwIfAborted();
++                    const result = await request.setup(agentCtx, agent);
++                    request.signal.throwIfAborted();
++                    if (composition.agentPreset !== undefined) agent.session.append('agent-preset/selected', { agentPreset: composition.agentPreset });
++                    if (request.modelSelection !== undefined) this.selectForNextRequest(agent, request.modelSelection);
++                    return result;
++                },
++            };
++            request.authorize(options, this.ctx);
++            return await this.ctx.agents.resume(options);
++        })().finally(() => { if (this.activations.get(request.sessionId) === entry) this.activations.delete(request.sessionId); });
++        return entry.promise;
++    }
++
+ 	ctx;
+ 	resumes = /* @__PURE__ */ new Map();
+ 	claims = /* @__PURE__ */ new Map();
+@@ -219,6 +263,7 @@ var ApiSessionAgentController = class {
+ 		return this.resolve(observation.header.id, observation);
+ 	}
+ 	async resolve(sessionId, observation) {
++        if (this.activationPending(sessionId)) return { error: this.activationError(sessionId) };
+ 		const live = this.liveAgent(sessionId);
+ 		if (live !== void 0) return live;
+ 		const attached = this.ctx.sessions.get(sessionId);
+@@ -363,6 +408,7 @@ var ApiSessionAgentController = class {
+ 		};
+ 	}
+ 	liveAgent(sessionId) {
++        if (this.activationPending(sessionId)) return { error: this.activationError(sessionId) };
+ 		const agent = this.ctx.agents.get(sessionId);
+ 		if (agent === void 0) return void 0;
+ 		return hasApiSessionSubagentOwner(this.ctx, agent.session, agent) ? { error: apiSessionSubagentOwnershipError(sessionId) } : { agent };
+@@ -414,6 +460,7 @@ var ApiSessionAgentController = class {
+ 	}
+ 	/** @returns the reused Session, a new Session under `sessionId` when none is stored, or a new Session under a minted identity. */
+ 	async claim(sessionId, request) {
++        if (this.activationPending(sessionId)) throw this.activationError(sessionId);
+ 		const attached = this.ctx.sessions.get(sessionId);
+ 		const live = this.ctx.agents.get(sessionId);
+ 		if (attached !== void 0 && hasApiSessionSubagentOwner(this.ctx, attached, live)) throw new ApiSessionSubagentOwnership(sessionId);
+@@ -1447,9 +1494,10 @@ var SessionHistoryController = class {
+ 	* @param ctx - Host context carrying Session query and projection services.
+ 	* @param promote - starts ordinary Session activation after snapshot delivery.
+ 	*/
+-	constructor(ctx, promote) {
++	constructor(ctx, promote, activateOnFollow = true) {
+ 		this.ctx = ctx;
+ 		this.promote = promote;
++        this.activateOnFollow = activateOnFollow;
+ 		ctx.on("agent/assistant-stream", ({ agent, frame }) => {
+ 			let stream = this.assistantStreams.get(agent.session.id);
+ 			if (stream === void 0) {
+@@ -1583,7 +1631,7 @@ var SessionHistoryController = class {
+ 					} : projectionBlock(source.projections),
+ 					...assistantStream === void 0 ? {} : { assistantStream }
+ 				};
+-				if (address.kind === "session" && source.source === "prepared") {
++				if (this.activateOnFollow && address.kind === "session" && source.source === "prepared") {
+ 					const promotion = source.retain();
+ 					try {
+ 						this.promote(promotion);
+@@ -2929,6 +2977,7 @@ let SessionController = (() => {
+ 			"workspaceRegistry"
+ 		];
+ 		static Config = z.object({
++            activateOnFollow: z.boolean().default(true),
+ 			nativeOpen: z.boolean(),
+ 			listWorkSliceMs: z.natural().min(1).default(16)
+ 		});
+@@ -2964,9 +3013,8 @@ let SessionController = (() => {
+ 			ctx.effect(() => async () => {
+ 				await Promise.allSettled([...this.promotions]);
+ 			}, "session-controller.promotions");
+-			this.history = new SessionHistoryController(ctx, (observation) => {
+-				this.promote(observation);
+-			});
++			this.activateOnFollow = resolved.activateOnFollow;
++            this.history = new SessionHistoryController(ctx, (observation) => { this.promote(observation); }, resolved.activateOnFollow);
+ 			this.listState = new ApiSessionList(ctx, resolved.listWorkSliceMs);
+ 			this.fileApplications = internals.fileApplications ?? nativeFileApplications;
+ 			this.openFileApplication = internals.openFileApplication ?? openNativeFileApplication;
+@@ -2981,6 +3029,11 @@ let SessionController = (() => {
+ 				ctx.emit("api-session/added", this.listState.summaryFor(session));
+ 			});
+ 			ctx.on("session/disposed", (session) => {
++                const activation = ctx.get("agentLoop")?.activationState?.(session.id);
++                if (activation?.phase === "initializing" && activation.agent?.session === session) {
++                    ctx.emit("api-session/added", this.listState.summaryFor(session));
++                    return;
++                }
+ 				ctx.emit("api-session/removed", session.id);
+ 			});
+ 			const publishAgentAvailability = ({ agent }) => {
+@@ -3037,6 +3090,7 @@ let SessionController = (() => {
+ 		resolveAgent(sessionId) {
+ 			return this.agents.resolveAgent(sessionId);
+ 		}
++        activateSession(request) { return this.agents.activateSession(request); }
+ 		/**
+ 		* Inspect one attached or persisted Session without activating its Agent.
+ 		* @param sessionId - durable Session identity.
+diff --git a/lib/types/agent.d.ts b/lib/types/agent.d.ts
+index 2ba77b548ba5ee5a242386d775121c60554180f2..6318aa1af34fbd6a0e2dae872a17551f0908e0bf 100644
+--- a/lib/types/agent.d.ts
++++ b/lib/types/agent.d.ts
+@@ -1,6 +1,19 @@
+ /** Agent activation, composition, and model-selection policy owned by API Session. */
+ import type { Context } from '@deepseek-ai/cordis';
+ import type { Agent, AgentSetup, ModelSelection as AgentModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent';
++import type { AgentHandle, AgentOptions, ResumeAgentOptions } from '@deepseek-ai/dsh-agent';
++/** Host-only current composition and exact pre-write admission correlation. Never a wire request. */
++export interface ApiSessionActivationRequest {
++    readonly sessionId: SessionId;
++    readonly agentPreset: string;
++    readonly agentOptions?: AgentOptions;
++    readonly modelSelection?: AgentModelSelection;
++    readonly signal: AbortSignal;
++    /** Wake the existing inbox only after activation commits; never reinsert its messages. */
++    readonly processPending?: boolean;
++    readonly setup: AgentSetup;
++    readonly authorize: (options: ResumeAgentOptions & { readonly processPending?: boolean }, owner: Context) => void;
++}
+ import type { Session, SessionId } from '@deepseek-ai/dsh-session';
+ import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence';
+ import { type SessionObservation } from '@deepseek-ai/dsh-session-query';
+@@ -90,6 +103,7 @@ export declare function apiSessionSubagentOwnershipError(sessionId: SessionId):
+ export declare function inspectApiSession(ctx: Context, sessionId: SessionId, signal?: AbortSignal): Promise<SessionInspection>;
+ /** Owns every operation that may create, resume, or configure a Web Agent. */
+ export declare class ApiSessionAgentController {
++    activateSession(request: ApiSessionActivationRequest): Promise<AgentHandle>;
+     private readonly ctx;
+     private readonly resumes;
+     private readonly claims;
+diff --git a/lib/types/agent.js b/lib/types/agent.js
+index e2d3f717acb67e8ed9937cd375aea03135976f82..2d1a8f5045f7325d00ad0db62ec7aa42c0bb7514 100644
+--- a/lib/types/agent.js
++++ b/lib/types/agent.js
+@@ -163,6 +163,49 @@ export async function inspectApiSession(ctx, sessionId, signal) {
+ }
+ /** Owns every operation that may create, resume, or configure a Web Agent. */
+ export class ApiSessionAgentController {
++    activations = new Map();
++    activationPending(sessionId) {
++        return this.activations.has(sessionId) || this.ctx.get('agentLoop')?.activationState?.(sessionId)?.phase === 'initializing';
++    }
++    activationError(sessionId) {
++        return new RemoteError('session/agent-busy', 'Session activation is in progress; retry only after it completes', { sessionId, reason: 'activation-in-progress' });
++    }
++    /** Host-only; the exact request object owns this operation and its result. */
++    activateSession(request) {
++        const active = this.activations.get(request.sessionId);
++        if (active !== undefined) {
++            if (active.request === request) return active.promise;
++            return Promise.reject(this.activationError(request.sessionId));
++        }
++        if (this.activationPending(request.sessionId) || this.resumes.has(request.sessionId) || this.claims.has(request.sessionId) || this.ctx.agents.get(request.sessionId)) return Promise.reject(this.activationError(request.sessionId));
++        const entry = { request };
++        this.activations.set(request.sessionId, entry);
++        entry.promise = (async () => {
++            request.signal.throwIfAborted();
++            const observation = await inspectApiSession(this.ctx, request.sessionId, request.signal);
++            if (hasApiSessionSubagentOwner(this.ctx, { header: observation.meta }, undefined)) throw new ApiSessionSubagentOwnership(request.sessionId);
++            const composition = await this.composeAgent(request.agentPreset);
++            request.signal.throwIfAborted();
++            const options = {
++                resumeSessionId: request.sessionId,
++                agentOptions: request.agentOptions ?? this.agentOptions(),
++                signal: request.signal,
++                processPending: request.processPending === true,
++                setup: async (agentCtx, agent) => {
++                    await composition.setup(agentCtx, agent);
++                    request.signal.throwIfAborted();
++                    const result = await request.setup(agentCtx, agent);
++                    request.signal.throwIfAborted();
++                    if (composition.agentPreset !== undefined) agent.session.append('agent-preset/selected', { agentPreset: composition.agentPreset });
++                    if (request.modelSelection !== undefined) this.selectForNextRequest(agent, request.modelSelection);
++                    return result;
++                },
++            };
++            request.authorize(options, this.ctx);
++            return await this.ctx.agents.resume(options);
++        })().finally(() => { if (this.activations.get(request.sessionId) === entry) this.activations.delete(request.sessionId); });
++        return entry.promise;
++    }
+     ctx;
+     resumes = new Map();
+     claims = new Map();
+@@ -207,6 +250,7 @@ export class ApiSessionAgentController {
+         return this.resolve(observation.header.id, observation);
+     }
+     async resolve(sessionId, observation) {
++        if (this.activationPending(sessionId)) return { error: this.activationError(sessionId) };
+         const live = this.liveAgent(sessionId);
+         if (live !== undefined)
+             return live;
+@@ -383,6 +427,7 @@ export class ApiSessionAgentController {
+         };
+     }
+     liveAgent(sessionId) {
++        if (this.activationPending(sessionId)) return { error: this.activationError(sessionId) };
+         const agent = this.ctx.agents.get(sessionId);
+         if (agent === undefined)
+             return undefined;
+@@ -448,6 +493,7 @@ export class ApiSessionAgentController {
+     }
+     /** @returns the reused Session, a new Session under `sessionId` when none is stored, or a new Session under a minted identity. */
+     async claim(sessionId, request) {
++        if (this.activationPending(sessionId)) throw this.activationError(sessionId);
+         const attached = this.ctx.sessions.get(sessionId);
+         const live = this.ctx.agents.get(sessionId);
+         if (attached !== undefined && hasApiSessionSubagentOwner(this.ctx, attached, live)) {
+diff --git a/lib/types/history.d.ts b/lib/types/history.d.ts
+index 4cc313d5551bf3d0a8073a44db2f5734b945b0e6..a5bf2f16f6a81b98f8b92a5013ada8acce07929e 100644
+--- a/lib/types/history.d.ts
++++ b/lib/types/history.d.ts
+@@ -12,7 +12,7 @@ export declare class SessionHistoryController {
+      * @param ctx - Host context carrying Session query and projection services.
+      * @param promote - starts ordinary Session activation after snapshot delivery.
+      */
+-    constructor(ctx: Context, promote: (observation: SessionObservation) => void);
++    constructor(ctx: Context, promote: (observation: SessionObservation) => void, activateOnFollow?: boolean);
+     /**
+      * Read one message-aligned history page without activating an Agent.
+      * @param request - durable address and backwards-page cursor.
+diff --git a/lib/types/history.js b/lib/types/history.js
+index e825463410e6a8adad91700c3e79a719c6bd24dc..f5ed21b27a21d92e8513e759c61f9d4726f13910 100644
+--- a/lib/types/history.js
++++ b/lib/types/history.js
+@@ -68,9 +68,10 @@ export class SessionHistoryController {
+      * @param ctx - Host context carrying Session query and projection services.
+      * @param promote - starts ordinary Session activation after snapshot delivery.
+      */
+-    constructor(ctx, promote) {
++    constructor(ctx, promote, activateOnFollow = true) {
+         this.ctx = ctx;
+         this.promote = promote;
++        this.activateOnFollow = activateOnFollow;
+         ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+             let stream = this.assistantStreams.get(agent.session.id);
+             if (stream === undefined) {
+@@ -218,7 +219,7 @@ export class SessionHistoryController {
+                         : projectionBlock(source.projections),
+                     ...assistantStream === undefined ? {} : { assistantStream },
+                 };
+-                if (address.kind === 'session' && source.source === 'prepared') {
++                if (this.activateOnFollow && address.kind === 'session' && source.source === 'prepared') {
+                     const promotion = source.retain();
+                     try {
+                         this.promote(promotion);
+diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
+index 08bb851544825573cafc632ff9616d0c4c493790..41e1601b5bedaa4590469bbe4990a99136a56c65 100644
+--- a/lib/types/index.d.ts
++++ b/lib/types/index.d.ts
+@@ -6,6 +6,9 @@ import type { SessionId } from '@deepseek-ai/dsh-session';
+ import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence';
+ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
+ import { type ApiSessionAgentResult } from './agent.ts';
++import type { ApiSessionActivationRequest } from './agent.ts';
++import type { AgentHandle } from '@deepseek-ai/dsh-agent';
++export type { ApiSessionActivationRequest } from './agent.ts';
+ import { buildModelCatalog } from './catalog.ts';
+ import type { ModelCatalog, SessionWorkspacePathApplication, SessionAttachmentRequest, SessionAttachmentValue, SessionCancelRequest, SessionCancelValue, SessionControlFrame, SessionCreateRequest, SessionCreateValue, SessionFollowFrame, SessionFollowRequest, SessionForkRequest, SessionForkValue, SessionListRequest, SessionListValue, SessionOpenWorkspacePathRequest, SessionOpenWorkspacePathValue, SessionPage, SessionPageRequest, SessionPromptRequest, SessionPromptValue, SessionRenameRequest, SessionRenameValue, SessionSearchRequest, SessionSearchValue, SessionSelectModelRequest, SessionSelectModelValue, SessionProjectionsRequest, SessionProjectionsValue, SessionUpdateQueueRequest, SessionUpdateQueueValue } from './types.ts';
+ export type * from './types.ts';
+@@ -20,6 +23,8 @@ declare module '@deepseek-ai/cordis' {
+ }
+ /** Session Controller deployment policy. */
+ export interface Config {
++    /** Whether following stored history implicitly promotes it. Defaults to true. */
++    readonly activateOnFollow?: boolean;
+     /** Override platform desktop-opener detection. */
+     readonly nativeOpen?: boolean;
+     /** Positive integral milliseconds of list work before yielding between complete rows. */
+@@ -27,6 +32,7 @@ export interface Config {
+ }
+ /** Deployment policy after schema defaults have been applied. */
+ type ResolvedConfig = Config & {
++    readonly activateOnFollow: boolean;
+     readonly listWorkSliceMs: number;
+ };
+ /** Host integrations replaceable by direct unit tests. */
+@@ -44,6 +50,9 @@ export interface SessionControllerInternals {
+ }
+ /** Host service backing the generated `ctx.remote.session` namespace. */
+ export declare class SessionController extends TypertRemoteService {
++    readonly activateOnFollow: boolean;
++    /** Host-only; not exposed as a Client remote. */
++    activateSession(request: ApiSessionActivationRequest): Promise<AgentHandle>;
+     static inject: string[];
+     static Config: z<Config, ResolvedConfig>;
+     private readonly agents;
+diff --git a/lib/types/index.js b/lib/types/index.js
+index 3001f900ed59d1f133512e7a27ad1af9c69b7c2a..b904437563acf3ff5f980e7c51cecefe1e2f32e0 100644
+--- a/lib/types/index.js
++++ b/lib/types/index.js
+@@ -198,6 +198,7 @@ let SessionController = (() => {
+             'workspaceRegistry',
+         ];
+         static Config = z.object({
++            activateOnFollow: z.boolean().default(true),
+             nativeOpen: z.boolean(),
+             listWorkSliceMs: z.natural().min(1).default(16),
+         });
+@@ -236,7 +237,8 @@ let SessionController = (() => {
+             ctx.effect(() => async () => {
+                 await Promise.allSettled([...this.promotions]);
+             }, 'session-controller.promotions');
+-            this.history = new SessionHistoryController(ctx, (observation) => { this.promote(observation); });
++            this.activateOnFollow = resolved.activateOnFollow;
++            this.history = new SessionHistoryController(ctx, (observation) => { this.promote(observation); }, resolved.activateOnFollow);
+             this.listState = new ApiSessionList(ctx, resolved.listWorkSliceMs);
+             this.fileApplications = internals.fileApplications ?? nativeFileApplications;
+             this.openFileApplication = internals.openFileApplication ?? openNativeFileApplication;
+@@ -255,6 +257,11 @@ let SessionController = (() => {
+                 ctx.emit('api-session/added', this.listState.summaryFor(session));
+             });
+             ctx.on('session/disposed', (session) => {
++                const activation = ctx.get('agentLoop')?.activationState?.(session.id);
++                if (activation?.phase === 'initializing' && activation.agent?.session === session) {
++                    ctx.emit('api-session/added', this.listState.summaryFor(session));
++                    return;
++                }
+                 ctx.emit('api-session/removed', session.id);
+             });
+             const publishAgentAvailability = ({ agent }) => {
+@@ -312,6 +319,10 @@ let SessionController = (() => {
+         resolveAgent(sessionId) {
+             return this.agents.resolveAgent(sessionId);
+         }
++        /** Host-only activation; deliberately not a Typert remote. */
++        activateSession(request) {
++            return this.agents.activateSession(request);
++        }
+         /**
+          * Inspect one attached or persisted Session without activating its Agent.
+          * @param sessionId - durable Session identity.

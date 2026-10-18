@@ -1,0 +1,10 @@
+{
+  "patchedDependencies": {
+    "@deepseek-ai/dsh-user-approval@0.2.1-rc.2": "dsmm/patches/dsh-approval-settlement/@deepseek-ai__dsh-user-approval@0.2.1-rc.2.patch",
+    "@deepseek-ai/dsh-api-gateway@0.2.1-rc.2": "dsmm/patches/dsh-approval-settlement/@deepseek-ai__dsh-api-gateway@0.2.1-rc.2.patch",
+    "@deepseek-ai/dsh-api-remotes@0.2.1-rc.2": "dsmm/patches/dsh-approval-settlement/@deepseek-ai__dsh-api-remotes@0.2.1-rc.2.patch",
+    "@deepseek-ai/dsh-client-ui-approval@0.2.1-rc.2": "dsmm/patches/dsh-approval-settlement/@deepseek-ai__dsh-client-ui-approval@0.2.1-rc.2.patch"
+  },
+  "dsmmPeerDependencies": { "@deepseek-ai/dsh-client-ui-approval": "0.2.1-rc.2" },
+  "dsmmDevDependencies": { "@deepseek-ai/dsh-client-ui-approval": "0.2.1-rc.2" }
+}

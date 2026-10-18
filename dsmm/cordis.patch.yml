@@ -1,3 +1,10 @@
+# The targeted native entries must be patched rc.2 implementations. Apply before Host startup.
+- id: agent-loop
+  config:
+    activationAdmissionRequired: true
+- id: api-session-controller
+  config:
+    activateOnFollow: false
 - insert:
     - id: dsmm
       name: '@dsmm/dsmm'

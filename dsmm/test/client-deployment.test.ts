@@ -12,7 +12,7 @@ import type { ConnectionGenerationState } from "@deepseek-ai/dsh-client-connecti
 import type { DsmmConfigRemote } from "../src/profile-remote.js";
 import type { DeploymentAdmissionView, DeploymentEditorSnapshot, SessionProfileSnapshot } from "../src/profile-types.js";
 import type { DeploymentPageProps } from "../src/client/DeploymentPage.js";
-import { deploymentEn } from "../src/client/deployment-locales.js";
+import { deploymentEn, deploymentZh } from "../src/client/deployment-locales.js";
 import { deploymentEditorSchema, resolveConfig } from "../src/settings.js";
 import { DeploymentController } from "../src/client/deployment-controller.js";
 import type { NativePageForm } from "../src/client/deployment-controller.js";
@@ -57,9 +57,10 @@ function fixture() {
 const currentClient = await build({ entryPoints: [fileURLToPath(new URL("../src/client/index.ts", import.meta.url))], bundle: true, write: false, platform: "browser", format: "cjs", target: "es2022", external: ["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-ui-primitives"] });
 async function compiledNativePage(remote: DsmmConfigRemote) {
   const require = createRequire(import.meta.url);
+  const refs: Array<{ current: unknown }> = []; let refIndex = 0;
   const module = { exports: {} as { apply(ctx: Context): Promise<void> } };
   runInThisContext(`(function(require,module,exports){${currentClient.outputFiles[0].text}\n})`)((id: string) => {
-    if (id === "react") return { ...require(id), useEffect() {}, useId: () => "deployment-fixture", useRef: (current: unknown) => ({ current }), useMemo: (factory: () => unknown) => factory(), useState: (value: unknown) => [value, () => {}], useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get() };
+    if (id === "react") return { ...require(id), useEffect() {}, useId: () => "deployment-fixture", useRef: (current: unknown) => refs[refIndex++] ?? (refs[refIndex - 1] = { current }), useMemo: (factory: () => unknown) => factory(), useState: (value: unknown) => [value, () => {}], useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get() };
     if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button: (props: Record<string, unknown>) => createElement("button", props), Input: (props: Record<string, unknown>) => createElement("input", props) };
     assert.equal(id, "react/jsx-runtime"); return require(id);
   }, module, module.exports);
@@ -76,13 +77,13 @@ async function compiledNativePage(remote: DsmmConfigRemote) {
   };
   await module.exports.apply(context as unknown as Context);
   for (let round = 0; round < 100 && core.getSnapshot().busy; round++) await setImmediate();
-  const tree = () => component({ ...injected, view: "page", t });
+  const tree = (translate = t) => { refIndex = 0; return component({ ...injected, view: "page", t: translate }); };
   const open = (label: string) => { const button = elements(tree()).find(node => typeof node.props.onClick === "function" && text(node) === label); assert.ok(button, label); (button.props.onClick as () => void)(); };
   const inspector = () => {
     const node = elements(tree()).find(node => typeof node.type === "function" && node.type.name === "StateInspector")!;
     assert.ok(node); return (node.type as (props: unknown) => unknown)(node.props);
   };
-  return { core, inspector, open, tree: () => render(tree()), workspace: injected.workspace!, dispose() { injected.workspace!.dispose(); core.dispose(); } };
+  return { core, inspector, open, tree: (translate?: DeploymentPageProps["t"]) => render(tree(translate)), workspace: injected.workspace!, dispose() { injected.workspace!.dispose(); core.dispose(); } };
 }
 function render(tree: unknown): unknown {
   if (Array.isArray(tree)) return tree.map(render);
@@ -99,6 +100,54 @@ function text(tree: unknown): string {
   if (Array.isArray(tree)) return tree.map(text).join("");
   return isValidElement<Record<string, unknown>>(tree) ? text(tree.props.children) : typeof tree === "string" || typeof tree === "number" ? String(tree) : "";
 }
+
+test("single-section drawer opens controls initially and keeps the user's collapse through save, locale and reopening", async () => {
+  const f = fixture(), page = await compiledNativePage(f.remote);
+  const group = (path: string, translate?: DeploymentPageProps["t"]) => {
+    const node = elements(page.tree(translate)).find(node => node.type === "details" && node.props["data-field"] === path);
+    assert.ok(node, path); return node;
+  };
+  try {
+    page.open(deploymentEn["module:subagents"]);
+    assert.equal(group("subagents").props.open, true);
+    const field = elements(group("subagents")).find(node => node.props["data-field"] === "subagents.maxDepth");
+    assert.ok(field);
+    const input = elements(field).find(node => node.type === "input"); assert.ok(input);
+    (input.props.onChange as (event: unknown) => void)({ currentTarget: { value: "2" } });
+    (group("subagents").props.onToggle as (event: unknown) => void)({ currentTarget: { open: false } });
+    assert.equal(group("subagents").props.open, false);
+    await page.workspace.save();
+    assert.equal(f.writes.length, 1);
+    assert.equal(group("subagents").props.open, false);
+    assert.equal(group("subagents", key => deploymentZh[key as keyof typeof deploymentZh] ?? key).props.open, false);
+    page.workspace.request({ scope: "global", module: null });
+    page.open(deploymentEn["module:subagents"]);
+    assert.equal(group("subagents").props.open, false);
+    (group("subagents").props.onToggle as (event: unknown) => void)({ currentTarget: { open: true } });
+    assert.equal(group("subagents").props.open, true);
+    page.open(deploymentEn["module:run"]);
+    assert.equal(group("modules").props.open, false);
+    assert.equal(group("modelParameters").props.open, false);
+    page.open(deploymentEn["module:routes"]);
+    assert.equal(group("roleRouting").props.open ?? false, false, "advanced JSON stays collapsed");
+  } finally { page.dispose(); }
+});
+
+test("a lone JSON editor opens without expanding its optional schema and inheritance details", async () => {
+  const f = fixture();
+  f.change({ schema: { type: "object", fields: { roleRouting: f.get().schema.fields!.roleRouting! } } });
+  const page = await compiledNativePage(f.remote);
+  try {
+    page.open(deploymentEn["module:routes"]);
+    const groups = () => elements(page.tree()).filter(node => node.type === "details");
+    const editor = groups().find(node => node.props["data-field"] === "roleRouting"); assert.ok(editor);
+    assert.equal(editor.props.open, true);
+    assert.ok(elements(editor).some(node => node.type === "textarea"));
+    assert.ok(groups().filter(node => node.props["data-field"] !== "roleRouting").every(node => node.props.open !== true));
+    (editor.props.onToggle as (event: unknown) => void)({ currentTarget: { open: false } });
+    assert.equal(groups().find(node => node.props["data-field"] === "roleRouting")?.props.open, false);
+  } finally { page.dispose(); }
+});
 
 test("source-bundled native drawer distinguishes known admission-unavailable and includes sorted named-only next/session fields", async () => {
   const f = fixture(), page = await compiledNativePage(f.remote);
