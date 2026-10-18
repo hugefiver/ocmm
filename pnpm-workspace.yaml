@@ -3,6 +3,7 @@ packages:
   - packages/*
   - dsmm
 
+minimumReleaseAge: 0
 strictDepBuilds: true
 allowBuilds:
   esbuild@0.25.12: true
