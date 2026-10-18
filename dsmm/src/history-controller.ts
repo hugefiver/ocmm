@@ -58,6 +58,17 @@ export class HistoryContinuations extends Service {
         return () => { this.guardedLoop = undefined; remove(); };
       }, "dsmm: history activation admission");
     }
+    const controller = ctx.get("sessionController");
+    if (typeof controller?.registerHistoryOpenGuard === "function") {
+      const owner = original(controller);
+      ctx.effect(() => controller.registerHistoryOpenGuard({
+        signal: AbortSignal.any([this.lifetime.signal, admission.lifetime.signal, candidates.signal]),
+        assertCurrent: () => {
+          this.ready();
+          if (original(this.ctx.sessionController) !== owner) throw new HistoryRefusal("unsupported-host");
+        },
+      }), "dsmm: history opening readiness");
+    }
     scopeLifetime(ctx, "dsmm: revoke history intents", () => {
       this.lifetime.abort();
       for (const intent of this.intents.values()) {

@@ -6,6 +6,8 @@
   config:
     activateOnFollow: false
 - insert:
+    - id: dsmm-history-bootstrap
+      name: '@dsmm/dsmm/history-support'
     - id: dsmm
       name: '@dsmm/dsmm'
       inject: [profileContext, agents]

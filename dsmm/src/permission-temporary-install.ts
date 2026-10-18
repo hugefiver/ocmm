@@ -68,7 +68,16 @@ export function installTemporaryPermissions(ctx: Context, options: TemporaryPerm
   };
   const files = installTemporaryFilePermissions(ctx, { grants, capture, refresh: () => options.rules.refresh() });
   const web = installTemporaryWebPermissions(ctx, { grants, capture, refresh: () => options.rules.refresh() });
-  const argv = options.argv && installPermissionExecArgv(ctx, { ...options.argv, grants, capture });
+  const argv = options.argv && installPermissionExecArgv(ctx, { ...options.argv, grants, capture(exec) {
+    const authority = capture(exec);
+    return { ...authority, assertProgramAllowed() {
+      authority.assertProgramAllowed();
+      const { policy } = options.rules.getPolicy();
+      // Arbitrary argv cannot prove shell-rule equivalence or confined file reads.
+      if (policy.outsideReads === "deny" || policy.rules.some(rule => !rule.revoked && rule.action === "deny"
+        && (rule.match.kind === "shell" || rule.match.kind === "outside-read"))) throw new PermissionRefusal("unavailable");
+    } };
+  } });
   const argvDefinition = argv && ctx.tools.get("dsmm_exec_argv");
   const refreshArgv = argvDefinition && ctx.on("tools/pre-execute", async (exec, next) => {
     if (ctx.tools.get(exec.name, exec.agent) === argvDefinition) await options.rules.refresh();

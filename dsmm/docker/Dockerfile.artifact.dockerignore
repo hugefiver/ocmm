@@ -1,6 +1,0 @@
-*
-!Cargo.toml
-!Cargo.lock
-!crates/
-!crates/ocmm-lsp/
-!crates/ocmm-lsp/**

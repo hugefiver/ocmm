@@ -1,6 +1,6 @@
 {
   "name": "@dsmm/dsmm",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "DeepSeek Harness deepwork mode bundle for ocmm-style agentic workflows.",
   "author": "Hugefiver",
   "license": "LicenseRef-AAAPL",
@@ -23,6 +23,10 @@
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {
+    "./history-support": {
+      "types": "./lib/history-support.d.ts",
+      "default": "./lib/history-support.js"
+    },
     "./managed-settings": {
       "types": "./lib/managed-settings.d.ts",
       "default": "./lib/managed-settings.js"
@@ -110,17 +114,13 @@
   "scripts": {
     "build": "node scripts/materialize-frontend.mjs --check && tsc -p tsconfig.json && node scripts/build-client.mjs",
     "build:client": "node scripts/build-client.mjs",
-    "check:release": "node scripts/check-release-readiness.mjs",
     "sync:source": "node --experimental-strip-types scripts/sync-source-assets.mjs",
     "generate:roles": "node scripts/generate-role-assets.mjs",
     "check:source": "node --experimental-strip-types scripts/check-source-assets.mjs",
     "sync:frontend": "node scripts/materialize-frontend.mjs --sync",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "pnpm run build && tsc -p tsconfig.test.json --noEmit",
-    "test": "pnpm run build && node --test --experimental-strip-types --import ./test/prompt-source-loader.mjs --test-concurrency=1 test/*.test.ts",
-    "smoke:docker:build": "docker build --build-arg DSH_PACKAGE=@deepseek-ai/dsh@0.2.1-rc.2 -f docker/Dockerfile.smoke -t dsmm-dsh-smoke:0.2 ..",
-    "smoke:docker:run": "docker run --rm dsmm-dsh-smoke:0.2",
-    "smoke:docker": "node scripts/docker-smoke.mjs"
+    "test": "pnpm run build && node --test --experimental-strip-types --import ./test/prompt-source-loader.mjs --test-concurrency=1 test/*.test.ts"
   },
   "engines": {
     "node": ">=22",

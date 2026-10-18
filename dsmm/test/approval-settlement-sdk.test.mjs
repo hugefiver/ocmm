@@ -36,6 +36,9 @@ import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local';
 import * as ManagedFs from '../src/permission-fs.ts';
 import * as ManagedSearch from '../src/permission-fs-search.ts';
 import { installTemporaryFilePermissions } from '../src/permission-temporary-files.ts';
+import { installTemporaryPermissions } from '../src/permission-temporary-install.ts';
+import { PermissionRulesRuntimeSync } from '../src/permission-rules.ts';
+import { resolvePermissionControl } from '../src/permission-settings.ts';
 
 const require = createRequire(import.meta.url);
 const uiPath = join(dirname(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-client-ui-approval/package.json'))), 'lib/client.js');
@@ -60,7 +63,7 @@ export async function fixture(t, cwd = process.cwd(), beforeAgent) {
   handles.push(handle); const agent = handle.agent;
   agent.session.append('turn/start', { turn: 1 });
   t.after(async () => { for (const tab of clients) await tab.close(); await browserPeer.dispose(); for (const h of handles) await h.dispose(); await host.fiber.dispose(); });
-  async function tab({ legacy = false } = {}) {
+  async function tab({ legacy = false, historyRequired = false } = {}) {
     const client = new Context(), abort = new AbortController(), ready = Promise.withResolvers(), pending = [], waiters = [];
     const peer = browserPeer;
     let transportError, observedFailure = false;
@@ -87,7 +90,7 @@ export async function fixture(t, cwd = process.cwd(), beforeAgent) {
     }; } });
     client.provide('slots', { inject() {}, register() {} });
     client.provide('locale', { register() { return () => {}; } });
-    await client.plugin(RemoteClient).await();
+    await client.plugin(RemoteClient, { historyRequired }).await();
     const uiFiber = client.plugin(await nativeUi()); await uiFiber.await();
     await ready.promise; offReady();
     const value = { client, peer, pending, uiFiber, next() { return pending.length ? Promise.resolve(pending.shift()) : new Promise(resolve => waiters.push(resolve)); },
@@ -119,6 +122,58 @@ test('native first-wins and Gateway actual delivery bind final audit receipt acr
   assert.equal(bp.answerable, false);
   await bp2.answer('rejected'); assert.equal(await second.done, 'rejected');
   assert.equal(ap2.answerable, false);
+});
+
+test('required Client keeps the native approval delivery pending until scope preparation succeeds', { timeout: 15000 }, async t => {
+  const f = await fixture(t), a = await f.tab({ historyRequired: true });
+  assert.equal(typeof a.client.remote.$registerHistoryPreparation, 'function');
+  const reached = Promise.withResolvers(), proceed = Promise.withResolvers();
+  let lookups = 0;
+  const get = a.client.typert.contexts.getClient;
+  a.client.typert.contexts.getClient = function (...args) {
+    const adapter = get.apply(this, args);
+    return { ...adapter, resolve(id) { lookups++; return adapter.resolve(id); } };
+  };
+  const remove = a.client.remote.$registerHistoryPreparation({ assertCurrent() {}, async prepare(signal) {
+    reached.resolve(); await proceed.promise; signal.throwIfAborted();
+    return { support: { protocol: 'dsmm-history-open-1', host: 'synthetic-host', guard: 'synthetic-guard' }, signal,
+      assertCurrent() { signal.throwIfAborted(); } };
+  } });
+  const request = f.request();
+  let settled = false;
+  void request.done.then(() => { settled = true; });
+  await reached.promise;
+  assert.equal(lookups, 0); assert.equal(a.pending.length, 0);
+  assert.equal(settled, false);
+  proceed.resolve();
+  const pending = await a.next();
+  assert.equal(lookups, 1);
+  await pending.answer('allowed-once');
+  assert.equal(await request.done, 'allowed-once');
+  assert.equal(request.receipt().winner.source, 'operator');
+  remove();
+  const unavailable = f.request();
+  assert.equal(await unavailable.done, 'unavailable');
+  assert.equal(lookups, 1); assert.equal(a.pending.length, 0);
+});
+
+test('required Client cancels native scope preparation without resolving an Agent or answering next', { timeout: 15000 }, async t => {
+  const f = await fixture(t), a = await f.tab({ historyRequired: true });
+  assert.equal(typeof a.client.remote.$registerHistoryPreparation, 'function');
+  const reached = Promise.withResolvers();
+  let lookups = 0;
+  a.client.typert.contexts.getClient = () => ({ resolve() { lookups++; throw new Error('Unexpected scope lookup'); } });
+  a.client.remote.$registerHistoryPreparation({ assertCurrent() {}, async prepare(signal) {
+    reached.resolve();
+    await new Promise((_, reject) => {
+      signal.throwIfAborted(); signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  } });
+  const abort = new AbortController(), request = f.request(abort.signal);
+  await reached.promise;
+  abort.abort();
+  assert.equal(await request.done, 'cancelled');
+  assert.equal(lookups, 0); assert.equal(a.pending.length, 0);
 });
 
 test('unknown Host layers break continuity without changing native outcomes; never and cancellation remain native', { timeout: 15000 }, async t => {
@@ -311,6 +366,57 @@ test('structured argv executes through native local provider and consumes exact 
   setSandboxMode(f.agent.session, 'workspace-write');
   const confined = invoke(), cp = await pendingFor(confined); await cp.answer('allowed-once');
   assert.equal((await confined).isError, true);
+});
+
+test('composed argv refuses unresolved command and file denies before requesting native approval', { timeout: 15000 }, async t => {
+  const f = await fixture(t);
+  await f.host.plugin(LocalSubprocessRuntime).await();
+  await f.host.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: process.cwd() }).await();
+  const session = new AbortController(), owner = {};
+  const rules = new PermissionRulesRuntimeSync({ revision: '0', policy: resolvePermissionControl() }, () => {});
+  const installed = installTemporaryPermissions(f.host, {
+    core: { authority: {
+      current() { return { owner, permissionRevision: 1 }; },
+      captureIntegrity() { return { signal: session.signal, assertCurrent() {} }; },
+      assertCurrent() {},
+    } },
+    roles: { assertToolExecution() {}, toolDenial() {} },
+    rules, argv: { programKind: () => 'unknown' },
+  });
+  t.after(() => { installed.dispose(); rules.retire(); session.abort(); });
+  let approvals = 0;
+  f.host.on('approval/request', () => { approvals++; return 'rejected'; }, { prepend: true, global: true });
+  const executable = await realpath(process.execPath), cwd = await realpath(process.cwd());
+  const invoke = () => f.host.tools.execute({ name: 'dsmm_exec_argv', arguments: { executable, args: ['--version'], cwd },
+    agent: f.agent, callId: 'composed-argv', signal: new AbortController().signal });
+  const rule = (match, revoked = false, action = 'deny') => ({ id: 'restriction', action, match, revoked, revision: 1,
+    source: { kind: 'user-import', label: 'operator rules' } });
+  let revision = 0;
+  const policy = async input => {
+    const update = rules.begin(String(revision));
+    await rules.commit(update, { revision: String(++revision), policy: resolvePermissionControl(input) }, async () => {});
+  };
+  for (const restriction of [
+    { outsideReads: 'deny' },
+    { rules: [rule({ kind: 'outside-read', path: cwd, scope: 'tree' })] },
+    { rules: [rule({ kind: 'shell', executable: 'operator-shell', command: 'restricted command', workingDirectory: cwd })] },
+  ]) {
+    await policy(restriction);
+    const before = approvals;
+    assert.equal((await invoke()).isError, true);
+    assert.equal(approvals, before, 'an unresolved hard restriction must not become an answerable argv request');
+  }
+  for (const permitted of [
+    {},
+    { rules: [rule({ kind: 'outside-read', path: cwd, scope: 'tree' }, true)] },
+    { rules: [rule({ kind: 'shell', executable: 'operator-shell', command: 'unrelated question', workingDirectory: cwd }, false, 'ask')] },
+    { rules: [rule({ kind: 'webFetch' })] },
+  ]) {
+    await policy(permitted);
+    const before = approvals;
+    assert.equal((await invoke()).isError, true, 'the native operator still rejects this request');
+    assert.equal(approvals, before + 1);
+  }
 });
 
 test('effective argv environment uses overrides and tombstones and refuses ambiguous Windows inherited keys', () => {

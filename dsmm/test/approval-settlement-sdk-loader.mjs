@@ -4,10 +4,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const root = createRequire(new URL('../package.json', import.meta.url));
 const anchors = [new URL('../package.json', import.meta.url).href, pathToFileURL(root.resolve('@deepseek-ai/dsh-api-session-controller')).href];
+const installedSessionSdk = createRequire(anchors[1]);
 const gatewayEntry = pathToFileURL(root.resolve('@deepseek-ai/dsh-api-gateway')).href;
 const folders = { 'dsh-user-approval': 'approval', 'dsh-api-gateway': 'gateway', 'dsh-api-remotes': 'remotes', 'dsh-client-ui-approval': 'ui' };
 const patched = process.env.DSMM_APPROVAL_SDK_DIR;
 const permissionSdk = process.env.DSMM_PERMISSION_SDK_DIR;
+const sessionSdk = process.env.DSMM_SESSION_SDK_DIR;
+const historyGatewaySdk = process.env.DSMM_HISTORY_GATEWAY_SDK_DIR;
 const installed = new Map();
 if (patched && process.env.DSMM_APPROVAL_INSTALLED === '1') {
   const local = createRequire(resolve(patched, 'package.json'));
@@ -18,6 +21,18 @@ if (patched && process.env.DSMM_APPROVAL_INSTALLED === '1') {
 }
 const { transformSync } = root('esbuild');
 registerHooks({ resolve(specifier, context, next) {
+  if (historyGatewaySdk && specifier.startsWith('@deepseek-ai/dsh-api-gateway')) {
+    const tail = specifier.slice('@deepseek-ai/dsh-api-gateway'.length);
+    const entry = { '': 'lib/index.js', '/package.json': 'package.json', '/client': 'lib/client.node.js',
+      '/types': 'lib/types/types.js', '/stream-protocol': 'lib/types/stream-protocol.js' }[tail];
+    if (entry) return { url: pathToFileURL(resolve(historyGatewaySdk, entry)).href, shortCircuit: true };
+  }
+  if (sessionSdk && specifier.startsWith('@deepseek-ai/dsh-api-session-controller')) {
+    const tail = specifier.slice('@deepseek-ai/dsh-api-session-controller'.length);
+    const entry = { '': 'lib/index.js', '/package.json': 'package.json', '/client': 'lib/client.js',
+      '/types': 'lib/types/types.js', '/typert': 'lib/typert.host.js', '/remote': 'lib/typert.remote-client.js' }[tail];
+    if (entry) return { url: pathToFileURL(resolve(sessionSdk, entry)).href, shortCircuit: true };
+  }
   if (permissionSdk) {
     for (const name of ['web', 'subagent']) {
       if (specifier === `@deepseek-ai/dsh-${name}`) return { url: pathToFileURL(resolve(permissionSdk, name, 'lib/index.js')).href, shortCircuit: true };
@@ -39,8 +54,11 @@ registerHooks({ resolve(specifier, context, next) {
   }
   try { return next(specifier, context); }
   catch (error) {
+    if (sessionSdk && context.parentURL?.startsWith(pathToFileURL(resolve(sessionSdk)).href + '/') && !specifier.startsWith('.')) {
+      return { url: pathToFileURL(installedSessionSdk.resolve(specifier)).href, shortCircuit: true };
+    }
     if (specifier === 'ws') return next(specifier, { ...context, parentURL: gatewayEntry });
-    if (!specifier.startsWith('@deepseek-ai/')) throw error;
+    if (!specifier.startsWith('@deepseek-ai/') && !(sessionSdk && context.parentURL?.startsWith(pathToFileURL(resolve(sessionSdk)).href + '/'))) throw error;
     for (const parentURL of anchors) { try { return next(specifier, { ...context, parentURL }); } catch {} }
     throw error;
   }

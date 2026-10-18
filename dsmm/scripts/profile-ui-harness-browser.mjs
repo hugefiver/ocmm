@@ -25,17 +25,17 @@ export function compositionBundle() {
   }});`;
 }
 
-export function bootstrapFacade() {
+export function bootstrapFacade(libraries = []) {
   return `window.__ModuleLoader__={mode:'queue',pendingQueue:[],load(row){this.pendingQueue.push(row)},create(options){
     const at=this.pendingQueue.findIndex(row=>row.id==='@deepseek-ai/dsh-client-modules');
     if(at<0)throw new Error('Native modules bootstrap missing');
     const row=this.pendingQueue.splice(at,1)[0];
     const exports=row.factory(()=>{throw new Error('Bootstrap requested an unseeded module')});
     const system=exports.createClientModuleSystem(this,{id:row.id,exports},options);
-    // These two libraries are consumed by the owned composition, not activated
-    // as their ordinary Web plugins. The native module table remains intact.
-    system.manifest={...system.manifest,plugins:system.manifest.plugins.filter(row=>
-      row.id!=='@deepseek-ai/dsh-client-connection'&&row.id!=='@deepseek-ai/dsh-client-locale')};
+     // The composition activates selected libraries itself; their native
+     // exports remain in the module table.
+     system.manifest={...system.manifest,plugins:system.manifest.plugins.filter(row=>
+       !${JSON.stringify(["@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", ...libraries])}.includes(row.id))};
     window.__dsmmNativeModules=system;
     return system;
   }};`;

@@ -1,0 +1,29 @@
+diff --git a/lib/client.js b/lib/client.js
+index 91354c1003b5d794f8ecb91aa5ccc450866a92dc..57c72bb14051576dda79d160a18dc8701b529d7d 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -759,11 +759,23 @@ window.__ModuleLoader__.load({
+ 					const address = parseSubagentChatAddress(resourceAddress);
+ 					if (address === void 0) throw new Error(`ui-subagent: invalid chat resource address "${resourceAddress}"`);
+ 					if (isAbortRequested(signal)) return;
++					let history;
++					if (sessions.historyRequired) {
++						try {
++							history = await sessions.prepareHistoryOpen(address, { signal });
++						} catch (error) {
++							if (isAbortRequested(signal)) return;
++							throw error;
++						}
++						if (isAbortRequested(signal)) return;
++					}
+ 					const reference = sessions.retain(address, {
+ 						source: "sidebarChat",
+-						signal
++						signal,
++						...history === void 0 ? {} : { history }
+ 					});
+ 					try {
++						if (isAbortRequested(signal)) return;
+ 						yield {
+ 							ok: true,
+ 							value: {

@@ -77,7 +77,8 @@ test('real DSMM candidate installs fresh admission and current native policy bef
     const before = await inspect(f.ctx, coldId);
     await assert.rejects(f.ctx.agents.resume({ resumeSessionId: coldId }));
     assert.equal(f.writes, 0);
-    const stream = f.ctx.sessionController.follow({ address: { kind: 'session', sessionId: coldId } }, abort.signal);
+    const support = f.ctx.sessionController.historyOpenSupport();
+    const stream = f.ctx.sessionController.followReadOnly({ address: { kind: 'session', sessionId: coldId }, history: support }, abort.signal);
     const snapshot = await stream.next();
     assert.equal(snapshot.value.type, 'snapshot');
     assert.ok(snapshot.value.records.some(row => row.type === 'session/title' || row.event?.type === 'session/title'));

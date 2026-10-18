@@ -22,6 +22,16 @@ Stores use separate CAS and atomic-write boundaries. Committed saves aren't roll
 
 ## Execution and recovery
 
+### Native history composition
+
+History protection requires the matching Session/Agent-loop, Gateway, aggregate `api-remotes` browser descriptor and workspace/subagent UI patches, not only the DSMM plugin. The bundle mounts `@dsmm/dsmm/history-support` independently of Core. It supplies `__DSMM_HISTORY_REQUIRED__` through native `webserver/index-inject` before Client initialization; Core failure does not remove that bootstrap. Non-browser integrations must supply `historyRequired: true` when initializing both patched Gateway and Session Clients.
+
+Required Clients obtain generation-bound readiness and an opaque full-address lease before retention. The actual receiving Host validates protected RPC/stream requests before native lookup; unsupported Hosts and missing or retired readiness owners fail closed without falling back to ordinary follow. Main navigation waits for a ready replacement before releasing the old reference, and child sidebar resources prepare before retaining. These preparations authorize only browsing, not migration, continuation or execution.
+
+Empty-browser component coverage uses the native Renderer, workspace navigation, child resource and failure Toast with test-owned layout, controls and a logical carrier. Separate loopback HTTP/WebSocket coverage exercises socket-wait guard retirement, native Session transport retry under a separately owned stable Connection generation, and actual receiving-Host replacement with native authentication and reconnect. Full application/Desktop carrier verification remains outstanding; see the [roadmap](roadmap.md).
+
+### Execution ownership
+
 Role calls wait for native activation results by default; only `completed` is normal completion. Cancellation after publication uses activation disposal and cleanup. Enabled background execution selects `delivery: 'parent'` before start. The accepted child/message receipt and interrupt acknowledgment aren't completion. Running waiting tasks can't transfer to background.
 
 Queue/Steer/interrupt apply only to supported live direct children under exact-parent/operator authority. Descendant views are read-only. Missing native capability disables that operation with a reason; unknown sends aren't automatically resent. Requested role/model data isn't actual execution identity. See [Agent presets](agent-presets.md).

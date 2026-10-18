@@ -22,7 +22,7 @@ export async function resolveNativeClientBundle(nativeRequire, id) {
 }
 
 /** Serve only run-owned test HTML and exact installed, unmodified artifacts. */
-export async function startProfileUiServer({ nativeRequire, packageRoot, sha256, composition = compositionBundle() }) {
+export async function startProfileUiServer({ nativeRequire, packageRoot, sha256, composition = compositionBundle(), libraries = [], renderIndex = html => html }) {
   const frontendManifest = nativeRequire.resolve("@deepseek-ai/dsh-web-frontend/package.json");
   const frontendRoot = await realpath(join(dirname(frontendManifest), "dist"));
   const assets = await readdir(join(frontendRoot, "assets"));
@@ -34,7 +34,8 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256,
   const themeStyles = extractNativeThemeStyles(themeSource);
   bundles.set("/bundles/native-theme.css", Buffer.from(themeStyles));
   const rows = [];
-  for (const [index, id] of NATIVE_IDS.entries()) {
+  const nativeIds = [...new Set([...NATIVE_IDS, ...libraries])];
+  for (const [index, id] of nativeIds.entries()) {
     const url = `/bundles/native-${index}.js`;
     const { filename, manifest } = await resolveNativeClientBundle(nativeRequire, id);
     bundles.set(url, await readFile(filename));
@@ -52,7 +53,7 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256,
   rows.push({ id: "@dsmm/dsmm", url: "/bundles/dsmm.js", inject: [COMPOSITION_ID, "@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-ui-renderer"] });
   const graph = createBootGraph(rows, sha256);
   const escapeJson = (value) => JSON.stringify(value).replaceAll("<", "\\u003c");
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DSMM native profile component acceptance</title><link rel="icon" href="/native/favicon.svg">${styles.map((name) => `<link rel="stylesheet" href="/native/assets/${name}">`).join("")}<link rel="stylesheet" href="/bundles/native-theme.css"><script>${bootstrapFacade()}${carrierBootstrap()}window.__DSH_BOOT__=${escapeJson(graph)};</script>${rows.map(({ url }) => `<script src="${url}"></script>`).join("")}</head><body><div id="root"></div><script type="module" src="/native/assets/${indexFiles[0]}"></script></body></html>`;
+  const html = renderIndex(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DSMM native profile component acceptance</title><link rel="icon" href="/native/favicon.svg">${styles.map((name) => `<link rel="stylesheet" href="/native/assets/${name}">`).join("")}<link rel="stylesheet" href="/bundles/native-theme.css"><script>${bootstrapFacade(libraries)}${carrierBootstrap()}window.__DSH_BOOT__=${escapeJson(graph)};</script>${rows.map(({ url }) => `<script src="${url}"></script>`).join("")}</head><body><div id="root"></div><script type="module" src="/native/assets/${indexFiles[0]}"></script></body></html>`);
   const errors = [];
   const server = createServer((request, response) => {
     void (async () => {
@@ -75,7 +76,7 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256,
   const address = server.address();
   assert.ok(address && typeof address === "object");
   return { origin: `http://127.0.0.1:${address.port}`, errors, graph, nativeFrontend: frontendRoot,
-    bundleProof: { nativeIds: NATIVE_IDS, dsmmClient: join(packageRoot, "lib", "client.js"), rewrittenProductionBundles: false },
+    bundleProof: { nativeIds, dsmmClient: join(packageRoot, "lib", "client.js"), rewrittenProductionBundles: false },
     async close() { server.closeAllConnections(); await new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose())); } };
 }
 
