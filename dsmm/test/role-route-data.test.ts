@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { modelRouteFromCall, modelRouteFromHeader, modelRouteToCall, projectModelRouteParameters, withRouteEffort } from "../src/role-llm.ts";
-import { applyModelRoute, orderedModelRoutes, rolePolicyIdentity } from "../src/role-routing.ts";
+import { applyModelRoute, orderedModelRoutes, liveRolePolicyIdentity, pinRoleRoute, roleRouteLock, persistedRoleRoute } from "../src/role-routing.ts";
+import type { DshAgent } from "../src/dsh-types.ts";
 import { resolveConfig, resolveDeployment, validateSparseConfig, validateDeploymentPath, DSMM_NATIVE_CONFIG_SCHEMA } from "../src/settings.ts";
 import { resolveProfileSettings, parseProfileDocument } from "../src/profiles.ts";
 import { configuredModelParameterPolicy } from "../src/model-parameter-policy.ts";
@@ -106,21 +106,49 @@ test("header route extraction excludes only declared adapter defaults and reject
   assert.throws(() => modelRouteToCall({ ...primary, reasoning_effort: "high" }));
 });
 
-test("three-field persisted policy identity retains its legacy endpoint-deduplicated encoding", () => {
-  const route = { provider: "apai", model: "gpt-6.1-sol", reasoningEffort: "medium" };
-  const fallback = { provider: "apai", model: "gpt-5.6-terra", reasoningEffort: "high" };
-  const rateLimit = { maxRetries: 2, initialDelayMs: 0, maxDelayMs: 10, maxTotalDelayMs: 20, switchAfterRateLimits: 1, maxSwitches: 1 };
-  const settings = resolveConfig({ roleRouting: { "dsmm-reviewer": { primary: route,
-    fallbackRoutes: [{ ...route, reasoningEffort: "high" }, fallback, { ...fallback, reasoningEffort: "max" }], strategy: "rate-limit-fallback", rateLimit } } });
-  const encoded = JSON.stringify({ version: 2, role: "dsmm-reviewer", epoch: "original-admission", primary: route,
-    fallbackSource: "role", fallbackRoutes: [fallback], strategy: "rate-limit-fallback", rateLimit });
-  assert.equal(rolePolicyIdentity(settings, "dsmm-reviewer", "original-admission"), createHash("sha256").update(encoded).digest("hex"));
-});
-
 test("extended policy identity is key-order independent and binds parameter-only changes", () => {
-  const identity = (parameters: { a: null; b: boolean }) => rolePolicyIdentity(resolveConfig({ roleRouting: {
+  const agent: DshAgent = { session: { events: [], append() {} } };
+  const identity = (parameters: { a: null; b: boolean }) => liveRolePolicyIdentity(agent, resolveConfig({ roleRouting: {
     "dsmm-reviewer": { primary: { ...primary, parameters }, fallbackRoutes: [] },
   } }), "dsmm-reviewer", "original-admission");
   assert.equal(identity({ a: null, b: false }), identity({ b: false, a: null }));
   assert.notEqual(identity({ a: null, b: false }), identity({ a: null, b: true }));
+});
+
+test("route locks follow relevant policy and admission lifecycle, not unrelated settings", () => {
+  const agent: DshAgent = { session: { events: [], append() {} } };
+  const settings = resolveConfig({ roleRouting: { "dsmm-reviewer": { primary } } });
+  const first = liveRolePolicyIdentity(agent, settings, "dsmm-reviewer", "epoch")!;
+  const lock = pinRoleRoute(agent, first, primary, [primary]);
+  const unrelated = resolveConfig({ ...settings, locale: "zh-Hans" });
+  assert.equal(roleRouteLock(agent, liveRolePolicyIdentity(agent, unrelated, "dsmm-reviewer", "epoch")!), lock);
+  assert.equal(roleRouteLock(agent, liveRolePolicyIdentity(agent, settings, "dsmm-reviewer", "next-epoch")!), undefined);
+  assert.notEqual(liveRolePolicyIdentity({ session: { events: [], append() {} } }, settings, "dsmm-reviewer", "epoch"), first);
+});
+
+test("historical policy markers cannot authorize a current persisted route and remain untouched", () => {
+  const events = [{ type: "dsmm/role-policy", data: { version: 1, role: "dsmm-reviewer", policy: "a".repeat(64) } },
+    { type: "request/header", data: { reason: "initial", header: { config: { provider: "native", model: "historical-fallback" } } } }];
+  const original = structuredClone(events), agent: DshAgent = { session: { events, append() {} } };
+  assert.equal(persistedRoleRoute({ agent }, primary, [], "a".repeat(64)), undefined);
+  assert.equal(persistedRoleRoute({ agent }, primary, [], liveRolePolicyIdentity(agent, resolveConfig(), "dsmm-reviewer", "epoch")), undefined);
+  assert.deepEqual(events, original);
+});
+
+test("persisted route decisions require the same Agent's current policy identity", () => {
+  const fallback = { provider: "native", model: "fallback" };
+  const events: { type: string; data: unknown }[] = [];
+  const agent: DshAgent = { session: { events, append() {} } };
+  const settings = resolveConfig({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [fallback] } } });
+  const identity = liveRolePolicyIdentity(agent, settings, "dsmm-reviewer", "epoch")!;
+  events.push({ type: "dsmm/role-policy", data: { version: 1, role: "dsmm-reviewer", policy: identity } },
+    { type: "request/header", data: { reason: "initial", header: { config: fallback } } });
+  assert.deepEqual(persistedRoleRoute({ agent }, primary, [fallback], identity), fallback);
+  const unrelated = liveRolePolicyIdentity(agent, resolveConfig({ ...settings, locale: "zh-Hans" }), "dsmm-reviewer", "epoch");
+  assert.deepEqual(persistedRoleRoute({ agent }, primary, [fallback], unrelated), fallback);
+  const other: DshAgent = { session: { events, append() {} } };
+  assert.equal(persistedRoleRoute({ agent: other }, primary, [fallback], identity), undefined);
+  const next = liveRolePolicyIdentity(agent, settings, "dsmm-reviewer", "next-epoch");
+  assert.equal(persistedRoleRoute({ agent }, primary, [fallback], identity), undefined);
+  assert.equal(persistedRoleRoute({ agent }, primary, [fallback], next), undefined);
 });

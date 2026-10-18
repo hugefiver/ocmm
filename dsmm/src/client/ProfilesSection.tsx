@@ -7,6 +7,7 @@ import { StructuredEditor } from "./StructuredEditor.js";
 import { SessionScope } from "./SessionProfiles.js";
 import { structuredDocument } from "./structured.js";
 import { draftWarnings, IssueDetails, ProfileWarnings } from "./diagnostics.js";
+import { configurationVersionState, sourceRelationship } from "./configuration-display.js";
 
 export type ProfilesInjected = ProfilesActions & { hooks: { profiles: ProfilesController["store"] } };
 export type ProfilesSectionProps = InjectFace<ProfilesInjected> & PropsLocale<"settings.dsmm-profiles">;
@@ -34,7 +35,7 @@ export function ProfilesSection(props: ProfilesSectionProps) {
   const snapshot = state.snapshot;
   const editor = state.editor;
   const readOnly = snapshot?.readOnly === true;
-  const editorDisabled = disabled || readOnly;
+  const editorDisabled = disabled || readOnly || editor?.refreshRequired === true || editor?.revision === "unavailable";
   const reconcilable = canReconcileSelection(snapshot);
   const selectionConflict = reconcilable && snapshot?.selectionError?.code === "conflict";
   const invalid = state.issue?.kind === "domain" && state.issue.code === "validation";
@@ -60,10 +61,11 @@ export function ProfilesSection(props: ProfilesSectionProps) {
       }
     }
   }, [state.issue, state.busy, state.validationEpoch]);
-  const applied = editor?.revision != null && editor.id === snapshot?.selectedId && editor.revision === snapshot?.appliedRevision;
+  const relationship = editor?.revision != null && editor.id === snapshot?.selectedId ? sourceRelationship(snapshot, editor.revision) : "changed";
+  const applied = relationship === "current";
   let selection = t(snapshot === null ? "unavailable" : "baseline");
   if (snapshot?.selectionError !== undefined && !selectionConflict) selection = t("appliedInvalid");
-  else if (snapshot?.selectedId !== null && snapshot?.selectedId !== undefined) selection = t("appliedProfile", { id: snapshot.selectedId, revision: snapshot.appliedRevision ?? "—" });
+  else if (snapshot?.selectedId !== null && snapshot?.selectedId !== undefined) selection = t("appliedProfile", { id: snapshot.selectedId, revision: t(configurationVersionState(snapshot.sourceRevision)) });
   const notice = state.notice === null ? "" : t(state.notice.key === "reset" ? "resetDone" : state.notice.key, { id: state.notice.id });
   const warnings = editor === null ? [] : draftWarnings(editor.content);
   return <section className="dsmm-profiles" aria-labelledby={`${prefix}-title`} aria-busy={state.busy !== null}>
@@ -87,7 +89,7 @@ export function ProfilesSection(props: ProfilesSectionProps) {
     </div>}
     {snapshot !== null && snapshot.profiles.length > 0 && <ul className="dsmm-profile-list" aria-label={t("savedInventory")}>{snapshot.profiles.map((profile, index) => <li key={`${index}:${profile.id}`}>
       <p>{profile.label?.trim() ? `${profile.label} (${profile.id})` : profile.id}</p>
-      <p className="dsmm-hint">{t("savedRevision", { revision: profile.revision ?? "—" })}</p>
+      <p className="dsmm-hint">{t("savedRevision", { revision: t(configurationVersionState(profile.revision)) })}</p>
       <ProfileWarnings warnings={profile.warnings} t={t} />
       {profile.error !== undefined && <IssueDetails issue={profile.error} t={t} />}
     </li>)}</ul>}
@@ -100,8 +102,8 @@ export function ProfilesSection(props: ProfilesSectionProps) {
     <h3 id={`${prefix}-edit`}>{t("editZone")}</h3>
     {editor === null && <p className="dsmm-hint">{t("noEditor")}</p>}
     {editor !== null && <div className="dsmm-editor">
-      <p data-dsmm-editor-state>{t(state.dirty ? "dirty" : applied ? "savedApplied" : "savedNotApplied")}</p>
-      <p className="dsmm-hint">{t("savedRevision", { revision: editor.revision ?? "—" })}</p>
+      <p data-dsmm-editor-state>{t(editor.refreshRequired ? "savedRefreshRequired" : state.dirty ? "dirty" : applied ? "savedApplied" : relationship === "unknown" ? "savedRelationshipUnknown" : "savedNotApplied")}</p>
+      <p className="dsmm-hint">{t("savedRevision", { revision: t(editor.revision === null ? "versionAbsent" : configurationVersionState(editor.revision)) })}</p>
       <div className="dsmm-actions">
         <Button type="button" variant="primary" disabled={editorDisabled || !state.dirty || snapshot === null || state.invalidFields.length > 0} onClick={() => { void props.save(); }}>{t(state.busy === "save" ? "saving" : "save")}</Button>
         {editor.revision !== null && <Button type="button" variant="outline" disabled={disabled} onClick={() => { void props.reload(); }}>{t("reload")}</Button>}
@@ -121,7 +123,7 @@ export function ProfilesSection(props: ProfilesSectionProps) {
       <StructuredEditor key={`structured:${state.editorEpoch}`} state={state} actions={props} disabled={editorDisabled} t={t} />
       <details ref={advancedRef} key={`advanced:${state.editorEpoch}`} className="dsmm-advanced"><summary>{t("advanced")}</summary><div className="dsmm-field">
         <label htmlFor={`${prefix}-content`}>{t("configuration")}</label>
-        <textarea ref={editorRef} id={`${prefix}-content`} rows={12} spellCheck={false} value={editor.content} readOnly={readOnly} disabled={disabled} aria-invalid={rawInvalid || (invalid && !idInvalid) || undefined} aria-describedby={`${prefix}-content-hint ${prefix}-structural-hint${invalid && !idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editContent(event.currentTarget.value)} />
+        <textarea ref={editorRef} id={`${prefix}-content`} rows={12} spellCheck={false} value={editor.content} readOnly={readOnly} disabled={editorDisabled} aria-invalid={rawInvalid || (invalid && !idInvalid) || undefined} aria-describedby={`${prefix}-content-hint ${prefix}-structural-hint${invalid && !idInvalid ? ` ${prefix}-issue` : ""}`} onChange={(event) => props.editContent(event.currentTarget.value)} />
         <p id={`${prefix}-content-hint`} className="dsmm-hint">{t("configurationHint")}</p>
         <p id={`${prefix}-structural-hint`} className="dsmm-hint">{t("structuralHint")}</p>
       </div></details>
@@ -132,7 +134,8 @@ export function ProfilesSection(props: ProfilesSectionProps) {
       <h3 id={`${prefix}-global`}>{t("globalScope")}</h3>
       <p className="dsmm-hint">{t("newSessions")}</p>
       <p data-dsmm-selection>{selection}</p>
-      <p className="dsmm-hint">{t("futurePin", { revision: snapshot?.selectionRevision ?? "—" })}</p>
+      <p className="dsmm-hint">{t("futurePin", { revision: t(configurationVersionState(snapshot?.selectionRevision)) })}</p>
+      {snapshot?.refreshRequired && <p role="status">{t("savedRefreshRequired")}</p>}
       {snapshot?.selectedWarnings?.length ? <div><p>{t("futureWarnings")}</p><ProfileWarnings warnings={snapshot.selectedWarnings} t={t} /></div> : null}
       <p className="dsmm-hint">{t("savedOnlyHint")}</p>
       <p id={`${prefix}-global-action`} className="dsmm-hint">{t("globalActionHint")}</p>

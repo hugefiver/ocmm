@@ -1,9 +1,9 @@
 import { useId, useRef } from "react";
 import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { InjectFace, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
-import type { ChildAdmissionEvidenceView, DsmmInvocationView, RoleControlAvailability, RoleControlChildView } from "../role-control-types.js";
+import type { DsmmInvocationView, RoleControlAvailability, RoleControlChildView } from "../role-control-types.js";
 import type { DsmmRoleRouteComparison } from "../profile-types.js";
-import { childActionKey, EMPTY_CHILD_DRAFT, enabled, runActionKey } from "./children-controller.js";
+import { childActionKey, EMPTY_CHILD_DRAFT, enabled } from "./children-controller.js";
 import type { ChildrenActions, ChildrenController, ChildrenIssue, ChildrenSnapshot, ChildOutcome } from "./children-controller.js";
 import type { ChildrenLocaleKey } from "./children-locales.js";
 
@@ -43,20 +43,6 @@ export function InvocationDetails({ value, t, showComparison = true }: Locale & 
     {value.jobId !== undefined && <><dt>{t("jobId")}</dt><dd>{value.jobId}</dd></>}
   </dl></>;
 }
-export function EvidenceDetails({ value, t }: Locale & { value?: ChildAdmissionEvidenceView }) {
-  if (value === undefined) return <p className="dsmm-hint">{t("evidenceMissing")}</p>;
-  const codes = { "missing-evidence": "missingEvidence", "not-persisted": "notPersisted", unverified: "unverified", "parent-denied": "parentDenied" } as const;
-  const effects = { "capability-denied": "capabilityDenied", "native-default": "nativeDefault", "display-only": "displayOnly" } as const;
-  return <section className="dsmm-availability" aria-label={t("evidence")}>
-    <p>{t(value.mode === "captured" ? "captured" : "legacy")}</p>
-    {value.originalAdmissionEpoch !== undefined && <p>{t("originalEpoch")}: {value.originalAdmissionEpoch}</p>}
-    <p>{t("epoch")}: {value.parentAdmissionEpoch}</p>
-    <p>{t("proven")}: {value.provenFields.length ? value.provenFields.join(", ") : t("noneProven")}</p>
-    <p>{t("limitations")}</p>
-    {value.limitations.length === 0 ? <p className="dsmm-hint">{t("noLimitations")}</p> : <ul className="dsmm-profile-list">{value.limitations.map((item, index) => <li key={`${item.field}-${index}`}>
-      <p>{item.field} · {item.code} · {t(codes[item.code])}</p><p>{item.effect} · {t(effects[item.effect])}</p></li>)}</ul>}
-  </section>;
-}
 function Issue({ value, t }: Locale & { value?: ChildrenIssue | null }) {
   if (!value) return null;
   return <div className="dsmm-issue" role="alert"><p>{t(value.unknown ? "unknownAction" : "error", { code: value.code })}</p>
@@ -66,8 +52,7 @@ function Outcome({ value, t }: Locale & { value?: ChildOutcome }) {
   if (!value) return null;
   return <div className="dsmm-availability" role="status" aria-live="polite">
     {value.kind === "prompt" ? <p>{t("promptAccepted", { id: value.receipt.messageId })}</p>
-      : value.kind === "interrupt" ? <p>{t("interruptAccepted")}</p> : <><p>{t("backgroundReceipt", { status: value.receipt.status, id: value.receipt.runId })}</p>
-        {value.receipt.jobId !== undefined && <p>{t("jobId")}: {value.receipt.jobId}</p>}</>}
+      : <p>{t("interruptAccepted")}</p>}
   </div>;
 }
 export function ChildComposer({ child, state, actions, t }: Locale & { child: RoleControlChildView; state: ChildrenSnapshot; actions: ChildrenActions }) {
@@ -113,7 +98,7 @@ export function ChildDetails({ child, state, actions, t, inspection = false }: L
   return <fieldset><legend>{child.label?.trim() ? child.label : child.id}</legend>
     <p>{t("childId")}: {child.id}</p><p>{t("parentId")}: {child.parentSessionId}</p><p>{t("mode")}: {child.mode}</p><p>{t("activity")}: {child.activity}</p>
     {(inspection || child.readonly) && <p>{t("readonly")}</p>}{child.mode === "one-shot" && <p className="dsmm-hint">{t("oneShot")}</p>}
-    <RouteComparisonDetails value={child.routeComparison} t={t} /><InvocationDetails value={child.invocation} t={t} showComparison={false} /><EvidenceDetails value={child.evidence} t={t} />
+    <RouteComparisonDetails value={child.routeComparison} t={t} /><InvocationDetails value={child.invocation} t={t} showComparison={false} />
     {(!inspection || !child.controls.prompt.enabled) && <ControlAvailability value={child.controls.prompt} label="promptAvailability" t={t} />}
     {(!inspection || !child.controls.interrupt.enabled) && <ControlAvailability value={child.controls.interrupt} label="interruptAvailability" t={t} />}
     {!inspection && child.mode === "continuable" && !child.readonly && <ChildComposer child={child} state={state} actions={actions} t={t} />}
@@ -134,22 +119,10 @@ export function ChildrenPanel(props: ChildrenPanelProps) {
     {data !== null && <>
       <p>{t("epoch")}: {data.admissionEpoch}</p>
       <section className="dsmm-availability"><p>{t("runtime")}: {data.capabilities.runtime.binding}</p><p>{t("fence")}: {t(data.capabilities.runtime.deliveryFenceReady ? "yes" : "no")}</p><p>{t("restart")}: {t(data.capabilities.runtime.restartRequired ? "yes" : "no")}</p>
-        {data.capabilities.runtime.reason !== undefined && <p>{t(data.capabilities.runtime.reason === "explicit-composition-required" ? "composition" : data.capabilities.runtime.reason === "duplicate-provider" ? "duplicate" : "authority")}</p>}
-        <ControlAvailability value={data.capabilities.background} label="backgroundAvailability" t={t} /><ControlAvailability value={data.capabilities.prompt} label="promptAvailability" t={t} /><ControlAvailability value={data.capabilities.interrupt} label="interruptAvailability" t={t} />
+        {data.capabilities.runtime.reason !== undefined && <p>{t("authority")}</p>}
+         <ControlAvailability value={data.capabilities.prompt} label="promptAvailability" t={t} /><ControlAvailability value={data.capabilities.interrupt} label="interruptAvailability" t={t} />
       </section>
-      <section className="dsmm-zone" aria-label={t("runs")}><h3>{t("runs")}</h3>
-        {data.runs.length === 0 ? <p className="dsmm-hint">{t("emptyRuns")}</p> : data.runs.map(run => {
-          const runId = run.invocation?.runId, key = runId === undefined ? null : runActionKey(run.toolCallId, runId);
-          const disabled = !state.fresh || state.reading || run.state !== "running" || !enabled(run.background) || !enabled(data.capabilities.background)
-            || key === null || state.pending.has(key) || state.outcomes.get(key)?.kind === "background";
-          return <fieldset key={run.toolCallId}><legend>{run.invocation?.label ?? t(run.state === "starting" ? "starting" : "invocationUnavailable")}</legend><p>{t("toolCallId")}: {run.toolCallId}</p><p>{t("runState")}: {run.state}</p>
-            {run.invocation !== undefined && <InvocationDetails value={run.invocation} t={t} />}<ControlAvailability value={run.background} label="backgroundAvailability" t={t} />
-            <p className="dsmm-hint">{t("backgroundHint")}</p>
-            {runId !== undefined && <Button type="button" variant="outline" disabled={disabled} onClick={() => void props.background(generation, run.toolCallId, runId)}>{t("background")}</Button>}
-            {key !== null && <><p className="dsmm-status" role="status" aria-live="polite">{state.pending.has(key) ? t("pending") : ""}</p><Issue value={state.issues.get(key)} t={t} /><Outcome value={state.outcomes.get(key)} t={t} /></>}
-          </fieldset>;
-        })}
-      </section>
+      <p className="dsmm-hint">{t("backgroundHint")}</p>
       <section className="dsmm-zone" aria-label={t("children")}><h3>{t("children")}</h3>{data.children.length === 0 ? <p className="dsmm-hint">{t("emptyChildren")}</p>
         : data.children.map(child => <ChildDetails key={child.id} child={child} state={state} actions={props} t={t} />)}</section>
     </>}

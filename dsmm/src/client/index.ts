@@ -19,18 +19,16 @@ import { SessionProfiles } from "./SessionProfiles.js";
 import type {} from "./plugins-contract.js";
 import { DeploymentController } from "./deployment-controller.js";
 import { DeploymentPage } from "./DeploymentPage.js";
+import { deploymentWorkspace } from "./deployment-workspace.js";
 import { DEPLOYMENT_NS, deploymentEn, deploymentZh } from "./deployment-locales.js";
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
 import { ROLE_CONTROL_REMOTE } from "../role-control-remote.js";
-import { ChildrenController } from "./children-controller.js";
-import { ChildrenPanel } from "./ChildrenPanel.js";
-import { CHILDREN_NS, childrenLocaleEn, childrenLocaleZh } from "./children-locales.js";
 import { PERMISSION_REMOTE } from "../permission-remote.js";
 import { permissionClient } from "./permission-client.js";
 import { PermissionController } from "./permission-controller.js";
-import { PermissionsPanel } from "./PermissionsPanel.js";
 import { PERMISSIONS_NS, permissionEn, permissionZh } from "./permission-locales.js";
 import type { SessionBinding } from "@deepseek-ai/dsh-api-session-controller/client";
+import { registerRoleToolViews } from "./RoleToolView.js";
 
 export { ProfilesController, NEW_PROFILE_CONTENT } from "./controller.js";
 export type { ProfilesActions, ProfilesViewSnapshot, ProfilesIssue, SessionApplyOptions, ProfileModelSelectorRemote } from "./controller.js";
@@ -49,21 +47,13 @@ export { ROLE_CONTROL_REMOTE } from "../role-control-remote.js";
 export const inject = ["slots", "locale", "remote"] as const;
 
 export async function apply(ctx: Context): Promise<void> {
+  registerRoleToolViews(ctx);
   await ctx.remote.$mount(TYPERT_REMOTE);
   await ctx.remote.$mount(ROLE_CONTROL_REMOTE);
   await ctx.remote.$mount(PERMISSION_REMOTE);
   const permissions = new PermissionController();
   ctx.effect(() => () => permissions.dispose(), "dsmm: permission controls");
   ctx.effect(() => ctx.locale.register(PERMISSIONS_NS, { en: permissionEn, zh: permissionZh }), "dsmm: permission locale");
-  ctx.effect(() => {
-    const style = document.createElement("style"); style.dataset.dsmmPermissions = ""; style.textContent = PROFILE_STYLES;
-    document.head.append(style); return () => style.remove();
-  }, "dsmm: permission styles");
-  const permissionInject = () => ({ controller: permissions }), permissionT = ctx.locale.bind(PERMISSIONS_NS);
-  ctx.slots.inject("settings.section", () => ctx.slots.register({ name: "settings.section", id: "dsmm-permissions", order: 35,
-    label: () => permissionT("title"), locale: PERMISSIONS_NS, inject: permissionInject }, PermissionsPanel));
-  ctx.slots.inject("conversation.view", () => ctx.slots.register({ name: "conversation.view", id: "dsmm-permissions", order: 35,
-    label: () => permissionT("title"), locale: PERMISSIONS_NS, inject: permissionInject }, PermissionsPanel));
   void ctx.inject(["connection"], connectionCtx => {
     const handle = connectionCtx.connection as unknown as ConnectionHandle, invoke = permissionClient(handle);
     const update = () => { const generation = handle.generation.getSnapshot(); permissions.bindConnection(generation === undefined ? null : invoke, generation); };
@@ -87,73 +77,35 @@ export async function apply(ctx: Context): Promise<void> {
   });
   let deployment: DeploymentController | null = null;
   let profiles: ProfilesController | null = null;
-  let children: ChildrenController | null = null;
-  const observeChildAdmission = () => {
-    const session = profiles?.store.getSnapshot().session;
-    if (session !== null && session !== undefined) children?.observeAdmission(session.sessionId, session.admissionEpoch);
-  };
-  await ctx.inject(["remote.dsmmChildren"], childCtx => {
-    const controller = new ChildrenController(childCtx.remote.dsmmChildren); children = controller;
-    childCtx.effect(() => () => { children = null; controller.dispose(); }, "dsmm: child controls");
-    childCtx.effect(() => childCtx.locale.register(CHILDREN_NS, { en: childrenLocaleEn, zh: childrenLocaleZh }), "dsmm: child locale");
-    childCtx.effect(() => {
-      const style = document.createElement("style"); style.dataset.dsmmChildren = ""; style.textContent = PROFILE_STYLES;
-      document.head.append(style); return () => style.remove();
-    }, "dsmm: child styles");
-    const t = childCtx.locale.bind(CHILDREN_NS);
-    childCtx.slots.inject("conversation.view", () => childCtx.slots.register({ name: "conversation.view", id: "dsmm-children", order: 30,
-      label: () => t("title"), locale: CHILDREN_NS, inject: () => ({ hooks: { children: controller.store }, ...controller.actions }) }, ChildrenPanel));
-    void childCtx.inject(["connection"], connectionCtx => {
-      const handle = connectionCtx.connection as unknown as ConnectionHandle;
-      const update = () => { const generation = handle.generation.getSnapshot(); controller.bindConnection(generation === undefined ? null : handle, generation); };
-      update(); connectionCtx.effect(() => handle.generation.subscribe(update));
-      connectionCtx.effect(() => () => controller.bindConnection(null), "dsmm: child connection withdrawal");
-    });
-    void childCtx.inject(["uiSession", "sessions"], sessionCtx => {
-      const source = sessionCtx.uiSession.adapter.current, nativeSessions = sessionCtx.sessions as unknown as ISessions;
-      const update = () => { const id = source.getSnapshot().key; controller.bindScope(id ?? null, id === undefined ? null : nativeSessions.binding(id as SessionId) ?? null); observeChildAdmission(); };
-      update(); sessionCtx.effect(() => source.subscribe(update));
-      sessionCtx.effect(() => () => controller.bindScope(null, null), "dsmm: child session withdrawal");
-    });
-    observeChildAdmission();
-  });
   // This core-owned graph must not depend on DW, named profiles or a session.
   await ctx.inject(["remote.dsmmConfig"], (coreCtx) => {
     const core = new DeploymentController(coreCtx.remote.dsmmConfig, "global");
+    const workspace = deploymentWorkspace(core, permissions);
     void coreCtx.inject(["connection"], connectionCtx => {
       core.bindConnection((connectionCtx.connection as unknown as ConnectionHandle).generation);
       void core.refresh();
     });
     deployment = core;
     if (profiles !== null) core.setSession(profiles.store.getSnapshot().session);
-    coreCtx.effect(() => () => { deployment = null; core.dispose(); }, "dsmm: core settings editor");
+    coreCtx.effect(() => () => { deployment = null; workspace.dispose(); core.dispose(); }, "dsmm: core settings editor");
     coreCtx.effect(() => coreCtx.locale.register(DEPLOYMENT_NS, { en: deploymentEn, zh: deploymentZh }), "dsmm: core locale");
     coreCtx.effect(() => {
       const style = document.createElement("style"); style.dataset.dsmmSettings = ""; style.textContent = PROFILE_STYLES;
       document.head.append(style); return () => style.remove();
     }, "dsmm: core styles");
-    const t = coreCtx.locale.bind(DEPLOYMENT_NS);
-    const inject = () => ({ core, remote: coreCtx.remote.dsmmConfig });
-    coreCtx.slots.inject("plugins.item", () => coreCtx.slots.register({ name: "plugins.item", id: "dsmm", label: () => t("title"), order: 30, locale: DEPLOYMENT_NS, inject }, DeploymentPage));
-    // Native ConfigForms owns its transport/authority; absent service leaves only core controls.
+    const inject = () => ({ core, remote: coreCtx.remote.dsmmConfig, workspace });
+    coreCtx.slots.inject("plugins.bundle.config", () => coreCtx.slots.register({ name: "plugins.bundle.config", key: "@dsmm/dsmm", locale: DEPLOYMENT_NS, inject }, DeploymentPage));
+    // The canonical bundle owner passes only view. Namespace comes from the authenticated snapshot.
     void coreCtx.inject(["configForms"], formCtx => {
-      const injectProfile = () => ({ ...inject(), forms: formCtx.configForms, profilePage: true });
-      formCtx.slots.inject("plugins.bundle.config", () => formCtx.slots.register({ name: "plugins.bundle.config", key: "@dsmm/dsmm", locale: DEPLOYMENT_NS, inject: injectProfile }, DeploymentPage));
-      let namespace: string | null = null, disposeRow: (() => void) | undefined;
-      const registerRow = () => {
-        const next = core.getSnapshot().snapshot?.namespace ?? null;
-        if (next === namespace) return;
-        disposeRow?.(); namespace = next;
-        if (next !== null) disposeRow = formCtx.slots.inject("plugins.row.config", () => formCtx.slots.register({ name: "plugins.row.config", key: `@dsmm/dsmm#${next}`, locale: DEPLOYMENT_NS, inject: () => ({ ...injectProfile(), rowNamespace: next }) }, DeploymentPage));
-      };
-      registerRow(); formCtx.effect(() => core.subscribe(registerRow)); formCtx.effect(() => () => disposeRow?.());
+      workspace.bindForms(formCtx.configForms);
+      formCtx.effect(() => () => workspace.bindForms(null));
     });
     void core.refresh();
   });
   await ctx.inject(["remote.dsmmProfiles"], (profileCtx) => {
     const controller = new ProfilesController(profileCtx.remote.dsmmProfiles);
     profiles = controller;
-    profileCtx.effect(() => controller.store.subscribe(() => { deployment?.setSession(controller.store.getSnapshot().session); observeChildAdmission(); }));
+    profileCtx.effect(() => controller.store.subscribe(() => { deployment?.setSession(controller.store.getSnapshot().session); }));
     profileCtx.effect(() => () => { profiles = null; deployment?.setSession(null); });
     profileCtx.effect(() => () => controller.dispose(), "dsmm: profile editor");
     profileCtx.effect(() => profileCtx.locale.register(NS, { en, zh }), "dsmm: profile locale");

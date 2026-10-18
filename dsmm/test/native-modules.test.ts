@@ -13,13 +13,15 @@ import { snapshotSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import type { StreamChunk } from "@deepseek-ai/dsh-llm";
 import type { DshAgent as PackageDshAgent } from "../lib/dsh-types.js";
-import type { DsmmDeploymentConfig, GlobalConfigSnapshot } from "../lib/deployment-config.js";
+import type { GlobalConfigSnapshot } from "../lib/deployment-config.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import type { DsmmModuleState } from "../lib/modules.js";
 import type { DeploymentEditorSnapshot } from "../lib/profile-types.js";
 import { at } from "../lib/client/deployment-data.js";
 import { DSMM_ROLE_IDS } from "../lib/roles.js";
 import { classifyDsmmAgent } from "../lib/runtime-integration.js";
+import { appendModeRecord } from "../src/session-metadata.ts";
+import { sessionEvents } from "../src/session-scope.ts";
 import { nativeFixturePlugin, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
 type DshAgent = Omit<PackageDshAgent, "ctx">;
@@ -78,7 +80,9 @@ test("real Loader module admission preserves busy captures, fences off work, and
     assert.deepEqual(moduleStates.map(module => module.descriptor.id), ["deepwork", "permission-control"]);
     const editor = await invoke<DeploymentEditorSnapshot>("describeSettings");
     assert.deepEqual(editor.modules, moduleStates);
-    const entry = await (mounted.ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig).readDesired();
+    const deployment = mounted.ctx.get("dsmmDeploymentConfig");
+    assert.ok(deployment);
+    const entry = await deployment.readDesired();
     assert.equal(editor.entryId, entry.entryId);assert.equal(editor.namespace, entry.nativeNamespace);
     assert.equal(editor.globalRevision, "absent");assert.equal(editor.schema.fields?.modules.type, "object");
     assert.equal(editor.schema.fields?.sessionPersistence, undefined);
@@ -111,30 +115,23 @@ test("real Loader module admission preserves busy captures, fences off work, and
     assert.equal(runtime.admission(parent as DshAgent), captured);
     const childAgent = await mounted.createAuxiliary("dsmm-coding", undefined, "one-shot", parent);
     const childAdmission = runtime.admission(childAgent as DshAgent);
-    const childCapture = childAdmission.childCapture!;
-    assert.ok(childCapture);
+    const childInvocation = mounted.ctx.dsmmNativeAdmission.invocation(childAgent)!;
+    assert.ok(childInvocation);
     assert.notEqual(childAdmission, captured);
-    const inheritedSettings = { ...captured.settings, subagents: { ...captured.settings.subagents, maxDepth: childCapture.authorityCeiling.maxDepth } };
+    const inheritedSettings = captured.settings;
     assert.deepEqual(childAdmission.settings, inheritedSettings);
-    for (const key of ["modules", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery"] as const) {
-      assert.deepEqual(childCapture.runtimePolicyCapture[key], captured.settings[key]);
-    }
     assert.deepEqual(childAdmission.profile, captured.profile);
-    assert.deepEqual(childCapture.profilePin, captured.profile);
     assert.equal(childAdmission.epoch, captured.epoch);
-    assert.equal(childCapture.originalAdmissionEpoch, captured.epoch);
-    assert.equal(childCapture.childSessionId, childAgent.id);
-    assert.equal(childCapture.parentSessionId, parent.id);
-    assert.equal(childCapture.role, "dsmm-coding");
-    assert.equal(childCapture.invocation.level, "normal");
-    assert.equal(childCapture.invocation.routeSource, "primary");
-    assert.equal(childCapture.invocation.initialRoute.provider, "fixture");
-    assert.equal(childCapture.invocation.initialRoute.model, "owned-child");
+    assert.equal(childInvocation.target, "dsmm-coding");
+    assert.equal(childInvocation.effectiveLevel, "normal");
+    assert.equal(childInvocation.routeSource, "primary");
+    assert.equal(childInvocation.initialRoute.provider, "fixture");
+    assert.equal(childInvocation.initialRoute.model, "owned-child");
     assert.equal(mounted.agents.isOwnedBy(childAgent.id, parent), true);
     assert.equal(Reflect.set(childAdmission.settings.modules.deepwork, "enabled", false), false);
-    assert.equal(Reflect.set(childCapture, "originalAdmissionEpoch", "not-an-admitted-epoch"), false);
+    assert.equal(Reflect.set(childInvocation, "target", "dsmm-reviewer"), false);
     assert.equal(childAdmission.settings.modules.deepwork.enabled, true);
-    assert.equal(childCapture.originalAdmissionEpoch, captured.epoch);
+    assert.equal(childAdmission.epoch, captured.epoch);
     await t.test("global save preserves exact live root and immutable owned child captures", async () => {
       const previousRevision = offGlobal.revision;
       offGlobal = await invoke<GlobalConfigSnapshot>("save", { request: { expectedRevision: previousRevision,
@@ -144,7 +141,7 @@ test("real Loader module admission preserves busy captures, fences off work, and
       assert.equal(runtime.admission(parent as DshAgent), captured);
       assert.equal(runtime.admission(childAgent as DshAgent), childAdmission);
       assert.deepEqual(childAdmission.settings, inheritedSettings);
-      assert.equal(childCapture.originalAdmissionEpoch, captured.epoch);
+      assert.equal(mounted.ctx.dsmmNativeAdmission.invocation(childAgent), childInvocation);
       assert.equal(mounted.agents.isOwnedBy(childAgent.id, parent), true);
     });
     release(); await parent.whenIdle(); mounted.adapter.beforeStream = undefined;
@@ -160,18 +157,18 @@ test("real Loader module admission preserves busy captures, fences off work, and
     assert.equal(off.ctx.tools.get("dsmm_coding", off), undefined);
     const beforeDenied = mounted.adapter.calls.length;
     await assert.rejects(mounted.subagents.startActivation({ provider: "dsmm-role-coding", label: "Disabled module", delivery: "caller", signal: new AbortController().signal,
-      request: { parent: off, prompt: [] } }), /cannot delegate|disabled/u);
+       request: { parent: off, prompt: [] } }), { code: "UNAUTHORIZED" });
     const deniedTool = await off.ctx.tools.execute({ agent: off, name: "dsmm_coding", arguments: { description: "Off", prompt: "Must not dispatch" }, callId: ToolCallId("module-off-alias"), signal: new AbortController().signal });
     assert.equal(deniedTool.isError, true);
     const offSnapshot = await runtime.getSession(off as DshAgent);
-    await assert.rejects(runtime.selectMode({ sessionId: off.id, active: true, expectedModeRevision: offSnapshot.deepwork!.revision, expectedAdmissionEpoch: offSnapshot.admissionEpoch }, off as DshAgent), /not admitted/u);
+    await assert.rejects(runtime.selectMode({ sessionId: off.id, active: true, expectedModeRevision: offSnapshot.deepwork!.revision, expectedAdmissionEpoch: offSnapshot.admissionEpoch }, off as DshAgent), { code: "unavailable" });
     // Historical mode intent remains recorded but is not effective authority.
-    off.session.append("deepwork/mode", { active: true });
+    appendModeRecord(off.session, true);
     await t.test("native mode-off replaces dormant persisted on intent under admission CAS", async () => {
       const before = await runtime.getSession(off as DshAgent);
       const selected = await runtime.selectMode({ sessionId: off.id, active: false, expectedModeRevision: before.deepwork!.revision, expectedAdmissionEpoch: before.admissionEpoch }, off as DshAgent);
       assert.notEqual(selected.deepwork!.revision, before.deepwork!.revision);
-      assert.deepEqual(off.session.snapshotEvents().filter((event) => event.type === "deepwork/mode").at(-1)!.data, { active: false });
+      assert.deepEqual(sessionEvents(off.session).filter((event) => event.type === "deepwork/mode").at(-1)!.data, { active: false });
       const count = off.session.snapshotEvents().length;
       await runtime.selectMode({ sessionId: off.id, active: false, expectedModeRevision: selected.deepwork!.revision, expectedAdmissionEpoch: selected.admissionEpoch }, off as DshAgent);
       assert.equal(off.session.snapshotEvents().length, count);
@@ -183,43 +180,39 @@ test("real Loader module admission preserves busy captures, fences off work, and
     let standingBody = 0, standingRequest = 0;
     mounted.ctx.on("system-prompt/assemble", async (_assembly, _options, next) => { standingBody++; return next(); });
     mounted.ctx.on("agent/request", async (_frame, next) => { standingRequest++; return next(); });
-    await assert.rejects(mounted.create({ agentPreset: "dsmm-planner" }), { code: "activation", field: "settings.roles.dsmm-planner", reason: "deployment-ceiling" });
+    await assert.rejects(mounted.create({ agentPreset: "dsmm-planner" }), { code: "activation" });
     await mounted.ctx.agentPresets.register({ id: "dsmm-fake", name: "Invalid root", description: "Native picker residue", plugins: [] });
-    await assert.rejects(mounted.create({ agentPreset: "dsmm-fake" }), { code: "UNAUTHORIZED" });
+    await assert.rejects(mounted.create({ agentPreset: "dsmm-fake" }), { code: "activation" });
     const resume = Session.create(SessionId("module-off-child-resume"));
     resume.append("subagent/descriptor", snapshotSubagentDescriptor({ mode: "continuable", provider: "dsmm-role-coding", label: "Captured DW child" }));
-    await assert.rejects(mounted.create({ origin: "subagent" }, undefined, { seed: JSON.parse(JSON.stringify(resume.snapshotEvents())) }), { code: "not-owned" });
+    await assert.rejects(mounted.create({ origin: "subagent" }, undefined, { seed: JSON.parse(JSON.stringify(resume.snapshotEvents())) }), { code: "UNAUTHORIZED" });
     assert.equal(standingBody, 0); assert.equal(standingRequest, 0);
     assert.equal(mounted.adapter.calls.length, beforeDenied + 1);
 
     const overlay = await runtime.save({ id: "module-overlay", expectedRevision: null, content: '{"version":1,"id":"module-overlay","settings":{"workflow":{"reviewCap":2}}}' });
     const parentSession = await runtime.getSession(parent as DshAgent);
-    await runtime.selectSession({ sessionId: parent.id, id: overlay.id, expectedRevision: overlay.revision, expectedSelectionRevision: parentSession.selection.selectionRevision, expectedAdmissionEpoch: parentSession.admissionEpoch }, parent as DshAgent);
+    await assert.rejects(runtime.selectSession({ sessionId: parent.id, id: overlay.id, expectedRevision: overlay.revision, expectedSelectionRevision: parentSession.selection.selectionRevision, expectedAdmissionEpoch: parentSession.admissionEpoch }, parent as DshAgent), { code: "unavailable" });
+    await runtime.select({ id: overlay.id, expectedRevision: overlay.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
     assert.equal(runtime.getSettings(parent as DshAgent).modules.deepwork.enabled, true);
-    assert.equal(runtime.getSettings(parent as DshAgent).workflow.reviewCap, 2);
-    const appliedParent = runtime.admission(parent as DshAgent);
-    assert.deepEqual(appliedParent.profile, { id: overlay.id, revision: overlay.revision });
-    assert.notEqual(appliedParent.epoch, captured.epoch);
+    assert.equal(runtime.getSettings(parent as DshAgent).workflow.reviewCap, captured.settings.workflow.reviewCap);
+    const fixedParent = runtime.admission(parent as DshAgent);
+    assert.equal(fixedParent, captured);
     assert.equal(runtime.admission(childAgent as DshAgent), childAdmission);
     assert.equal(childAdmission.settings.workflow.reviewCap, captured.settings.workflow.reviewCap);
-    assert.deepEqual(childCapture.profilePin, captured.profile);
+    assert.deepEqual(childAdmission.profile, captured.profile);
     const pinnedAgent = await mounted.createAuxiliary("dsmm-coding", undefined, "one-shot", parent);
     const pinnedAdmission = runtime.admission(pinnedAgent as DshAgent);
-    assert.deepEqual(pinnedAdmission.profile, appliedParent.profile);
-    assert.deepEqual(pinnedAdmission.childCapture!.profilePin, appliedParent.profile);
-    assert.equal(pinnedAdmission.epoch, appliedParent.epoch);
-    assert.equal(pinnedAdmission.childCapture!.originalAdmissionEpoch, appliedParent.epoch);
-    assert.equal(pinnedAdmission.childCapture!.parentSessionId, parent.id);
-    assert.deepEqual(pinnedAdmission.settings, { ...appliedParent.settings,
-      subagents: { ...appliedParent.settings.subagents, maxDepth: pinnedAdmission.childCapture!.authorityCeiling.maxDepth } });
-    await t.test("idle parent Apply preserves old child capture while new owned child inherits the exact named pin", async () => {
+    assert.deepEqual(pinnedAdmission.profile, fixedParent.profile);
+    assert.equal(pinnedAdmission.epoch, fixedParent.epoch);
+    assert.deepEqual(pinnedAdmission.settings, fixedParent.settings);
+    await t.test("future overlay selection preserves existing parent and every new delegation's fixed snapshot", async () => {
       assert.equal(runtime.admission(childAgent as DshAgent), childAdmission);
-      assert.deepEqual(childCapture.profilePin, captured.profile);
-      assert.equal(childCapture.originalAdmissionEpoch, captured.epoch);
-      assert.equal(pinnedAdmission.childCapture!.childSessionId, pinnedAgent.id);
+      assert.deepEqual(childAdmission.profile, captured.profile);
+      assert.equal(childAdmission.epoch, captured.epoch);
+      assert.equal(mounted.ctx.dsmmNativeAdmission.get(pinnedAgent), pinnedAdmission);
       assert.equal(mounted.agents.isOwnedBy(pinnedAgent.id, parent), true);
       assert.equal(mounted.agents.isOwnedBy(pinnedAgent.id, off), false);
-      assert.equal(pinnedAdmission.settings.workflow.reviewCap, 2);
+      assert.equal(pinnedAdmission.settings.workflow.reviewCap, captured.settings.workflow.reviewCap);
     });
     const originalBytes = readFileSync(join(mounted.home, "plugins", "dsmm", "config.json"));
     await assert.rejects(invoke("save", { request: { expectedRevision: "absent", edits: [{ op: "unset", path: ["modules", "deepwork", "enabled"] }] } }), refused("conflict"));
@@ -241,7 +234,8 @@ test("real Loader module admission preserves busy captures, fences off work, and
     });
     fixtures.push(cold);
     const coldRuntime = cold.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
-    const coldDeployment = cold.ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig;
+    const coldDeployment = cold.ctx.get("dsmmDeploymentConfig");
+    assert.ok(coldDeployment);
     const coldInvoke = <T>(method: string, args: Record<string, unknown> = {}) => cold.ctx.typertGateway.invoke({ namespace: "dsmmConfig", method, args, peer }) as Promise<T>;
     const module = (await coldInvoke<DsmmModuleState[]>("describeModules"))[0];
     assert.equal(module.startupMounted, false); assert.equal(module.desired.enabled, false); assert.equal(module.hostBundleEnabled, "unknown");
@@ -265,7 +259,7 @@ test("real Loader module admission preserves busy captures, fences off work, and
     assert.ok(foreignAgent);
     try {
       assert.equal(classifyDsmmAgent(foreignAgent), "native");
-      assert.equal(coldRuntime.hasAdmission(foreignAgent as DshAgent), false);
+      assert.equal(coldRuntime.hasAdmission(foreignAgent as DshAgent), true);
       await t.test("cold-off real native foreign child performs useful read through the native loop", async () => {
         foreignAgent.ctx.tools.register({ name: "read", description: "Public native read stub; no filesystem access", parameters: {}, output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: String(value) }] }, async execute() { readBodies++; return "FOREIGN_CHILD_READ_PROOF"; } });
         let turns = 0;
@@ -285,6 +279,7 @@ test("real Loader module admission preserves busy captures, fences off work, and
           }
         };
         try {
+          await cold.subagents.sendMessage(coldRoot, foreignAgent.id, [{ type: "text", text: "Read the task-owned fixture value" }], { signal: t.signal });
           assert.equal((await foreignChild.result).stopReason, "completed");
           const result = foreignAgent.session.snapshotEvents().filter((event) => event.type === "tool/result").at(-1);
           t.diagnostic(`foreign child read bodies=${readBodies}; native tool/result=${JSON.stringify(result)}`);
@@ -310,7 +305,7 @@ test("real Loader module admission preserves busy captures, fences off work, and
     cold.ctx.on("system-prompt/assemble", async (_assembly, _options, next) => { coldBody++; return next(); });
     cold.ctx.on("agent/request", async (_frame, next) => { coldRequest++; return next(); });
     const calls = cold.adapter.calls.length;
-    await assert.rejects(cold.create({ agentPreset: "dsmm-planner" }), { code: "activation", field: "settings.roles.dsmm-planner", reason: "deployment-ceiling" });
+    await assert.rejects(cold.create({ agentPreset: "dsmm-planner" }), { code: "activation" });
     assert.equal(coldBody, 0); assert.equal(coldRequest, 0); assert.equal(cold.adapter.calls.length, calls);
     let coldUpdates = 0, coldDisposals = 0;
     cold.ctx.on("internal/update", function (_config, _noSave, next) { if (this === cold.dsmmFiber) coldUpdates++; next(); });
@@ -346,13 +341,13 @@ test("real Loader module admission preserves busy captures, fences off work, and
     const restoredRoot = await mounted.create();
     assert.equal(runtime.getSettings(restoredRoot as DshAgent).modules.deepwork.enabled, true);
     assert.equal(runtime.admission(off as DshAgent), offCapture, "global restore never rebinds an old root");
-    assert.equal(runtime.admission(parent as DshAgent), appliedParent);
+    assert.equal(runtime.admission(parent as DshAgent), fixedParent);
     assert.equal(runtime.admission(childAgent as DshAgent), childAdmission);
     assert.equal(runtime.admission(pinnedAgent as DshAgent), pinnedAdmission);
-    assert.equal(childCapture.originalAdmissionEpoch, captured.epoch);
-    assert.deepEqual(pinnedAdmission.childCapture!.profilePin, appliedParent.profile);
+    assert.equal(childAdmission.epoch, captured.epoch);
+    assert.deepEqual(pinnedAdmission.profile, fixedParent.profile);
     const offNow = await runtime.getSession(off as DshAgent);
-    await runtime.selectSession({ sessionId: off.id, id: overlay.id, expectedRevision: overlay.revision, expectedSelectionRevision: offNow.selection.selectionRevision, expectedAdmissionEpoch: offNow.admissionEpoch }, off as DshAgent);
+    await assert.rejects(runtime.selectSession({ sessionId: off.id, id: overlay.id, expectedRevision: overlay.revision, expectedSelectionRevision: offNow.selection.selectionRevision, expectedAdmissionEpoch: offNow.admissionEpoch }, off as DshAgent), { code: "unavailable" });
     assert.equal(runtime.getSettings(off as DshAgent).modules.deepwork.enabled, false, "idle overlay does not pull a newer master state");
     assert.equal((await runtime.getSession(off as DshAgent)).deepwork!.active, false);
     const restarted = await nativeRoutingFixture(config, { nativePresets: true, home: mounted.home, profileDir: mounted.profileDir, beforeDsmm });
@@ -362,21 +357,21 @@ test("real Loader module admission preserves busy captures, fences off work, and
     await runFixtureTurn(first);
     assert.match(JSON.stringify(restarted.adapter.calls.at(-1)!.messages), /DEEPWORK MODE ENABLED!/u);
     assert.ok(restarted.subagents.getProvider("dsmm-role-coding"));
-    const reopened = await restarted.create({}, undefined, { seed: JSON.parse(JSON.stringify(off.session.snapshotEvents())) });
-    const reopenedRuntime = restarted.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
-    assert.equal(reopenedRuntime.getSettings(reopened as DshAgent).modules.deepwork.enabled, true);
-    assert.equal((await reopenedRuntime.getSession(reopened as DshAgent)).deepwork!.active, false, "saved off intent survives independent module-on startup");
-    await runFixtureTurn(reopened);
-    assert.doesNotMatch(JSON.stringify(restarted.adapter.calls.at(-1)!.messages), /DEEPWORK MODE ENABLED!/u);
+    const restartedRuntime = restarted.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+    const firstState = await restartedRuntime.getSession(first as DshAgent);
+    await restartedRuntime.selectMode({ sessionId: first.id, active: false, expectedModeRevision: firstState.deepwork!.revision, expectedAdmissionEpoch: firstState.admissionEpoch }, first as DshAgent);
+    await restarted.disposeAgent(first);
+    await restarted.ctx.sessionPersistence.flush();
+    await assert.rejects(restarted.agents.resume({ resumeSessionId: first.id, agentOptions: first.options,
+      async setup(scope) { await restarted.ctx.agentPresets.mount(scope, "standard"); } }), { code: "UNAUTHORIZED" });
+    assert.equal(restarted.agents.get(first.id), undefined);
     for (const agent of [childAgent, pinnedAgent]) {
-      const ended = new Promise<string>(resolve => {
-        const remove = mounted.ctx.on("subagent/end", info => { if (info.id === agent.id) { remove(); resolve(info.stopReason); } }, { global: true });
-      });
       await runFixtureTurn(agent);
-      assert.equal(await ended, "completed");
+      assert.equal(agent.session.snapshotEvents().filter(event => event.type === "turn/end").at(-1)?.data.reason.kind, "completed");
+      await mounted.releaseAuxiliary(agent);
       assert.equal(agent.session.requestHeader()!.config.model, "owned-child");
     }
-    t.diagnostic(`real Loader/native loop: busy capture/future-child preserved; off standing body/request=0/0; cold-off DW providers/skills/materialization/MCP=0; foreign child read bodies=${readBodies}; git push body=0; saved mode-off survives independent module-on startup; desired-on pending until independent startup; save updates/disposals=${updates}/${disposals},${coldUpdates}/${coldDisposals}`);
+    t.diagnostic(`real Loader/native loop: immutable parent/child snapshots; off standing body/request=0/0; foreign child read bodies=${readBodies}; git push body=0; cold recovery rejected; desired-on pending until independent startup; save updates/disposals=${updates}/${disposals},${coldUpdates}/${coldDisposals}`);
   } finally {
     release?.(); t.signal.removeEventListener("abort", release);
     for (const fixture of [...fixtures].reverse()) await fixture.dispose();

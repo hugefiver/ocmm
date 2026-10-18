@@ -26,8 +26,6 @@ export { resolveRoleRuntimePolicy } from "./routing-policy.js";
 export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
 export type { DsmmSkillName, MvpSkillName } from "./skills.js";
 
-export type DeepseekCalibration = "off" | "auto" | "strict";
-export type DeepseekDefaultReasoningEffort = "off" | "low" | "high";
 export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer-only" | "off";
 export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
@@ -119,14 +117,8 @@ export interface DsmmPluginConfig {
   locale?: DsmmLocale;
   /** Only global deployment input; native/legacy profile transport rejects it. */
   modules?: { deepwork?: { enabled?: boolean } };
-  /** Startup-only native storage binding; never a runtime-profile field. */
-  sessionPersistence?: { root: string; compression?: "zstd" | "none" };
   modeName?: string;
   section?: string;
-  deepseekV4ProCalibration?: DeepseekCalibration;
-  deepseekV4ProDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
-  deepseekFlashCalibration?: DeepseekCalibration;
-  deepseekFlashDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
   defaultActive?: boolean;
   promptOrder?: number;
   skills?: Partial<Record<DsmmSkillName, boolean>>;
@@ -141,6 +133,8 @@ export interface DsmmPluginConfig {
   lsp?: Partial<DsmmLspSettings>;
 }
 
+export type DsmmNativeConfig = DsmmPluginConfig;
+
 export interface DsmmSettings {
   permissionControl: PermissionControlSettings;
   modelParameters: { passthrough: boolean };
@@ -149,10 +143,6 @@ export interface DsmmSettings {
   modeName: string;
   defaultActive: boolean;
   promptOrder: number;
-  deepseekV4ProCalibration: DeepseekCalibration;
-  deepseekV4ProDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
-  deepseekFlashCalibration: DeepseekCalibration;
-  deepseekFlashDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
   skills: Record<DsmmSkillName, boolean>;
   roles: Record<DsmmRoleId, boolean>;
   roleRouting: DsmmRoleRouting;
@@ -235,10 +225,6 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   modeName: "deepwork",
   defaultActive: false,
   promptOrder: 50,
-  deepseekV4ProCalibration: "auto",
-  deepseekV4ProDefaultReasoningEffort: "high",
-  deepseekFlashCalibration: "auto",
-  deepseekFlashDefaultReasoningEffort: "high",
   skills: createDefaultSkillSettings(),
   roles: createDefaultRoleSettings(),
   roleRouting: {},
@@ -429,18 +415,6 @@ const RUNTIME_RECOVERY_SCHEMA = Schema.object({
   idleContinuation: RUNTIME_RECOVERY_IDLE_CONTINUATION_SCHEMA
 });
 
-const DEEPSEEK_CALIBRATION_SCHEMA = Schema.union([
-  Schema.const("off"),
-  Schema.const("auto"),
-  Schema.const("strict")
-]).default(DEFAULT_DSMM_SETTINGS.deepseekV4ProCalibration);
-
-const DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA = Schema.union([
-  Schema.const("off"),
-  Schema.const("low"),
-  Schema.const("high")
-]).default(DEFAULT_DSMM_SETTINGS.deepseekV4ProDefaultReasoningEffort);
-
 const LSP_SCHEMA = Schema.object({
   enabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.lsp.enabled),
   serverName: Schema.string().default(DEFAULT_DSMM_SETTINGS.lsp.serverName),
@@ -456,18 +430,10 @@ const CONFIG_FIELDS_SCHEMA = Schema.object({
   permissionControl: permissionControlSchema,
   modelParameters: Schema.object({ passthrough: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.modelParameters.passthrough) }),
   locale: LOCALE_SCHEMA,
-  sessionPersistence: Schema.union([Schema.const(undefined), Schema.object({
-    root: Schema.string().required(),
-    compression: Schema.union([Schema.const("zstd"), Schema.const("none")])
-  })]),
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
   section: Schema.string(),
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
-  deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-  deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-  deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-  deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA,
   roleRouting: ROLE_ROUTING_SCHEMA,
@@ -482,15 +448,16 @@ const CONFIG_FIELDS_SCHEMA = Schema.object({
 
 const MODULES_SCHEMA = Schema.object({ deepwork: Schema.object({ enabled: Schema.boolean() }) });
 const GLOBAL_FIELDS_SCHEMA = Schema.object({ ...CONFIG_FIELDS_SCHEMA.dict, modules: MODULES_SCHEMA });
+const NATIVE_FIELDS_SCHEMA = CONFIG_FIELDS_SCHEMA;
 
 /** Only data is transported. Defaults remain resolved by the existing authority. */
-export function deploymentEditorSchema(): DeploymentSchemaNode {
+export function deploymentEditorSchema(native = false): DeploymentSchemaNode {
   const project = (schema: Schema): DeploymentSchemaNode => schema === permissionControlSchema && schema.type === "transform"
     ? project(schema.inner!) : schema === permissionControlSchema.inner!.dict!.rules
     ? { type: "array", inner: { type: "object", fields: {}, additionalProperties: "json" } } : schema === MODEL_ROUTE_SCHEMA
     ? { ...project(MODEL_ROUTE_FIELDS_SCHEMA), additionalProperties: "json" } : ({
     type: schema.type,
-    ...(schema.dict === undefined ? {} : { fields: Object.fromEntries(Object.entries(schema.dict).filter(([key]) => key !== "sessionPersistence").map(([key, child]) => {
+    ...(schema.dict === undefined ? {} : { fields: Object.fromEntries(Object.entries(schema.dict).map(([key, child]) => {
       const node = project(child);
       if (schema === MODEL_ROUTE_FIELDS_SCHEMA && ["provider", "model", "reasoningEffort"].includes(key)) node.nonempty = true;
       if (schema === RATE_LIMIT_CONFIG_SCHEMA) {
@@ -509,7 +476,7 @@ export function deploymentEditorSchema(): DeploymentSchemaNode {
     ...(schema === ROLE_ROUTING_SCHEMA ? { keys: [...DSMM_ROLE_IDS] } : {}),
     ...(schema === ROLE_FALLBACK_ROUTES_SCHEMA ? { max: ROLE_FALLBACK_ROUTE_LIMIT } : {})
   });
-  return project(GLOBAL_FIELDS_SCHEMA);
+  return project(native ? NATIVE_FIELDS_SCHEMA : GLOBAL_FIELDS_SCHEMA);
 }
 
 /** Transport nodes carry no business defaults. Only deployment input is volatile. */
@@ -521,29 +488,37 @@ function sparseSchema(schema: Schema): Schema {
     ...(schema.inner === undefined ? {} : { inner: sparseSchema(schema.inner) }),
     ...(schema.list === undefined ? {} : { list: schema.list.map(sparseSchema) }) });
 }
-const TRANSPORT_FIELDS_SCHEMA = sparseSchema(CONFIG_FIELDS_SCHEMA);
+const TRANSPORT_FIELDS_SCHEMA = sparseSchema(NATIVE_FIELDS_SCHEMA);
 export const DSMM_CONFIG_SCHEMA = Schema.intersect([
-  Schema.transform(Schema.any(), (input: unknown) => { resolveConfig(validateSparseConfig(input ?? {})); return {}; }),
-  sparseSchema(CONFIG_FIELDS_SCHEMA)
-]).default({}) as Schema<DsmmPluginConfig>;
+  Schema.transform(Schema.any(), (input: unknown) => { resolveConfig(validateNativeConfig(input ?? {})); return {}; }),
+  sparseSchema(NATIVE_FIELDS_SCHEMA)
+]).default({}) as Schema<DsmmNativeConfig>;
 for (const [key, schema] of Object.entries(TRANSPORT_FIELDS_SCHEMA.dict!)) {
-  if (key !== "sessionPersistence") TRANSPORT_FIELDS_SCHEMA.set(key, schema.volatile());
+  TRANSPORT_FIELDS_SCHEMA.set(key, schema.volatile());
 }
 // Native forms require a fixed object root: volatile nodes cannot sit under an
 // intersection. Keep that schema intact and validate through the public protocol.
 export const DSMM_NATIVE_CONFIG_SCHEMA = new Proxy(TRANSPORT_FIELDS_SCHEMA.default({}), {
   apply(target, receiver, args) {
-    validateSparseConfig(args[0] ?? {});
+    validateNativeConfig(args[0] ?? {});
     return Reflect.apply(target, receiver, args);
   },
   get(target, key, receiver) {
     if (key !== "~standard") return Reflect.get(target, key, receiver);
     return { version: 1, vendor: "schemastery", validate(input: unknown) {
-      validateSparseConfig(input ?? {});
+      validateNativeConfig(input ?? {});
       return target["~standard"].validate(input);
     } };
   }
-}) as unknown as Schema<DsmmPluginConfig>;
+}) as unknown as Schema<DsmmNativeConfig>;
+
+export function validateNativeConfig(input: unknown): DsmmNativeConfig {
+  const config = copyJson(input) as DsmmNativeConfig;
+  if (typeof config === "object" && config !== null) rejectDeprecatedFields(config);
+  validateShape(config, NATIVE_FIELDS_SCHEMA);
+  validateSparseConfig(config);
+  return config;
+}
 
 export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SCHEMA, Schema.object({
   permissionControl: permissionControlSchema,
@@ -553,10 +528,6 @@ export const DSMM_SETTINGS_SCHEMA = Schema.intersect([ROLE_ROUTING_VALIDATION_SC
   modeName: Schema.string().default(DEFAULT_DSMM_SETTINGS.modeName),
   defaultActive: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.defaultActive),
   promptOrder: Schema.number().default(DEFAULT_DSMM_SETTINGS.promptOrder),
-  deepseekV4ProCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-  deepseekV4ProDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
-  deepseekFlashCalibration: DEEPSEEK_CALIBRATION_SCHEMA,
-  deepseekFlashDefaultReasoningEffort: DEEPSEEK_DEFAULT_REASONING_EFFORT_SCHEMA,
   skills: SKILLS_SCHEMA,
   roles: ROLES_SCHEMA as Schema<Record<DsmmRoleId, boolean>>,
   roleRouting: ROLE_ROUTING_SCHEMA,
@@ -583,10 +554,6 @@ export function resolveConfig(config: DsmmPluginConfig = {}): DsmmSettings {
     modeName: normalizeModeName(config.modeName),
     defaultActive: config.defaultActive ?? DEFAULT_DSMM_SETTINGS.defaultActive,
     promptOrder: config.promptOrder ?? DEFAULT_DSMM_SETTINGS.promptOrder,
-    deepseekV4ProCalibration: config.deepseekV4ProCalibration ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProCalibration,
-    deepseekV4ProDefaultReasoningEffort: config.deepseekV4ProDefaultReasoningEffort ?? DEFAULT_DSMM_SETTINGS.deepseekV4ProDefaultReasoningEffort,
-    deepseekFlashCalibration: config.deepseekFlashCalibration ?? DEFAULT_DSMM_SETTINGS.deepseekFlashCalibration,
-    deepseekFlashDefaultReasoningEffort: config.deepseekFlashDefaultReasoningEffort ?? DEFAULT_DSMM_SETTINGS.deepseekFlashDefaultReasoningEffort,
     skills: { ...DEFAULT_DSMM_SETTINGS.skills, ...config.skills },
     roles: { ...DEFAULT_DSMM_SETTINGS.roles, ...config.roles },
     roleRouting: resolveRoleRouting(config.roleRouting),
@@ -688,7 +655,6 @@ export function validateSparseConfig(input: unknown, global = false): DsmmPlugin
     }
   }
   validateShape(config, global ? GLOBAL_FIELDS_SCHEMA : CONFIG_FIELDS_SCHEMA);
-  if (global && Object.hasOwn(config, "sessionPersistence")) throw new TypeError("Native session storage is not a global deployment field");
   // A deployment layer may override one primary-route member and inherit the
   // others. Validate its present members here; resolveDeployment validates the
   // complete route only after both sparse layers have merged.
@@ -705,7 +671,7 @@ export function validateDeploymentPath(path: readonly string[]): void {
   const deprecated = path.find(key => (DEPRECATED_DSMM_FIELDS as readonly string[]).includes(key));
   if (deprecated !== undefined) throw new DsmmConfigValidationError("deprecated-field", path);
   let schema: Schema = GLOBAL_FIELDS_SCHEMA;
-  if (path.length === 0 || path[0] === "sessionPersistence") throw new TypeError("Not an editable deployment field");
+  if (path.length === 0) throw new TypeError("Not an editable deployment field");
   for (const key of path) {
     if (schema.type === "union") schema = schema.list?.find((node) => node === MODEL_ROUTE_SCHEMA || node.type === "object") ?? schema;
     if (schema === MODEL_ROUTE_SCHEMA) {

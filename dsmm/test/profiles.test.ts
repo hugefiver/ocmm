@@ -100,8 +100,6 @@ test("profiles validate every supported nested enum, type, finite bound, role an
 test("all allowed runtime families round-trip through the existing resolver", () => {
   const document = parseProfileDocument(content({
     defaultActive: true,
-    deepseekV4ProCalibration: "strict", deepseekV4ProDefaultReasoningEffort: "low",
-    deepseekFlashCalibration: "off", deepseekFlashDefaultReasoningEffort: "off",
     roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "review", reasoningEffort: "max" }, fallbackRoutes: [] } },
     workflow: { policy: "risk-based", strictGates: false, reviewCap: 0, finalReviewPolicy: "off" },
     guards: { scope: "always", shellCommandSafety: false, gitWriteGuard: "deny", toolOutputTruncation: { enabled: false, maxInlineBytes: 512 }, questionLabelHelper: { enabled: false, maxLabelChars: 20 }, planFormatValidation: false, todoDisciplineHelper: false },
@@ -112,7 +110,7 @@ test("all allowed runtime families round-trip through the existing resolver", ()
   assert.equal(settings.guards.toolOutputTruncation.enabled, false);
   assert.equal(settings.runtimeRecovery.maxFallbackAttempts, 0);
   assert.equal(settings.runtimeRecovery.fallbackRoutes[0]?.reasoningEffort, "xhigh");
-  assert.equal(settings.deepseekV4ProDefaultReasoningEffort, "low");
+  assert.equal(settings.roleRouting["dsmm-reviewer"]?.primary?.reasoningEffort, "max");
 });
 
 test("overlay merge preserves false, explicit empty arrays, nested baseline and absent fallback inheritance", () => {

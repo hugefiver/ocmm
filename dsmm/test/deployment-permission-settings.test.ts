@@ -53,7 +53,7 @@ test("permission schemas retain dynamic rules and validate nested edit paths wit
 });
 
 test("native SettingsForms saves permission desired state with CAS while admissions retain startup policy", async () => {
-  const run = nativeConfigRun();
+  const run = nativeConfigRun({ managedRuntime: true });
   try {
     const profile = await run.createProfile("permission-live", { roles: { "dsmm-orchestrator": true } });
     const root = admissionAgent(await profile.create());
@@ -92,7 +92,7 @@ test("native SettingsForms saves permission desired state with CAS while admissi
 });
 
 test("global permission saves retain running startup state and a stale revision cannot overwrite it", async () => {
-  const run = nativeConfigRun();
+  const run = nativeConfigRun({ managedRuntime: true });
   try {
     const profile = await run.createProfile("permission-global", { roles: { "dsmm-orchestrator": true } });
     const root = admissionAgent(await profile.create());

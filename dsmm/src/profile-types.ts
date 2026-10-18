@@ -34,10 +34,11 @@ export interface DsmmInvocationView {
 }
 
 export interface SubagentRuntimeAdmissionView {
-  binding: "stock" | "dsmm" | "unavailable";
+  binding: "stock" | "unavailable";
+  /** Native execution admission readiness; not an inbox-acceptance veto. */
   deliveryFenceReady: boolean;
   restartRequired: boolean;
-  reason?: "explicit-composition-required" | "duplicate-provider" | "authority-not-ready";
+  reason?: "authority-not-ready";
 }
 export interface DsmmRoleAvailabilityState {
   id: DsmmRoleId;
@@ -94,6 +95,8 @@ export interface DeploymentEditorSnapshot {
   startupSources?: Record<string, string>;
   defaults: Record<string, unknown>;
   schema: DeploymentSchemaNode;
+  nativeSchema?: DeploymentSchemaNode;
+  subagentRuntime?: SubagentRuntimeAdmissionView;
   nextRoot: DeploymentAdmissionView | null;
   modules: DsmmModuleState[];
 }
@@ -119,6 +122,8 @@ export interface ProfileSummary {
 }
 
 export interface ProfileSelectionState {
+  sourceRevision?: string;
+  refreshRequired?: true;
   selectedId: string | null;
   appliedRevision: string | null;
   selectionRevision: string;
@@ -137,6 +142,7 @@ export interface ProfileSnapshot extends ProfileSelectionState {
 }
 
 export interface ProfileReadResult {
+  refreshRequired?: true;
   warnings?: ProfileDiagnostic[];
   id: string;
   label?: string;
@@ -176,13 +182,16 @@ export interface DsmmRoleRuntimeState {
   totalDelayMs: number;
 }
 
+export type SessionActionUnavailableReason = "busy" | "maintenance" | "module-off" | "runtime-unavailable" | "model-unconfigured" | "model-service-unavailable" | "new-session-required";
+
 export interface SessionProfileSnapshot {
+  refreshRequired?: true;
   warnings?: ProfileDiagnostic[];
   roles?: DsmmRoleAvailabilityState[];
   subagentRuntime?: SubagentRuntimeAdmissionView;
   sessionId: string;
   globalDefault: ProfileSelectionState;
-  /** Current sidecar state: the authority for session-selection CAS. */
+  /** Current selection state: the authority for session-selection CAS. */
   selection: ProfileSelectionState;
   /** Exact live admission, for display only; may differ from the future global default. */
   admittedSelection?: ProfileSelectionState;
@@ -190,10 +199,16 @@ export interface SessionProfileSnapshot {
   admissionEpoch: string;
   switchAllowed: boolean;
   switchUnavailableReason?: "busy" | "maintenance" | "disposed" | "not-owned" | "unavailable";
+  canSelectModel: boolean;
+  selectModelUnavailableReason?: SessionActionUnavailableReason;
+  canToggleMode: boolean;
+  toggleModeUnavailableReason?: SessionActionUnavailableReason;
+  canApplyOverlay: boolean;
+  applyOverlayUnavailableReason?: SessionActionUnavailableReason;
   rolePolicy?: DsmmRoleRuntimeState;
   /** Declared profile primary for the current ordinary root role, not an applied native selection. */
   profileModel?: DsmmModelRoute;
-  /** Optional for older Hosts; explicit session intent always beats defaults. */
+  /** Explicit session intent always beats defaults. */
   deepwork?: SessionDeepworkState;
   /** Safe captured module admission; not a read of the current global editor. */
   modules?: DsmmModuleState[];

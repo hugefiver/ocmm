@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { createRequire, registerHooks } from "node:module";
 import { after } from "node:test";
 import { pathToFileURL } from "node:url";
 import { Context } from "@deepseek-ai/cordis";
 import { AgentRegistry, installModelSelection } from "@deepseek-ai/dsh-agent";
-import { DsmmAgentRegistry } from "../lib/agent-registry.js";
 import type { Agent, AgentHandle, CreateAgentOptions, ModelSelectionRef } from "@deepseek-ai/dsh-agent";
 import { AgentLoop } from "@deepseek-ai/dsh-agent-loop";
-import { LlmAdapter, LlmError, LlmRuntime, ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";
+import { LlmAdapter, LlmError, LlmRuntime, ReasoningEffortId, ToolCallId, createUserMessage } from "@deepseek-ai/dsh-llm";
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from "@deepseek-ai/dsh-llm";
 import { SessionId, SessionStore } from "@deepseek-ai/dsh-session";
 import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
@@ -20,6 +19,7 @@ import type { SubagentStartRequest } from "@deepseek-ai/dsh-subagent";
 import * as nativeSpawn from "@deepseek-ai/dsh-subagent-spawn-in-process";
 import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
+import { JobRegistry } from "@deepseek-ai/dsh-jobs";
 import type { ToolDefinition } from "@deepseek-ai/dsh-tools";
 import { AgentPresetRegistry } from "@deepseek-ai/dsh-agent-preset-registry";
 import DsmmPlugin from "../lib/index.js";
@@ -27,11 +27,8 @@ import { apply } from "../lib/index.js";
 import type { DsmmPluginConfig } from "../src/settings.ts";
 import type { DshContext } from "../lib/dsh-types.js";
 import type { DsmmRoleId } from "../lib/roles.js";
-import SubagentRuntimePlugin from "../lib/runtime-integration.js";
-import DsmmSessionPersistence from "../lib/session-persistence.js";
-import { duringRoleInvocation, invocationAgentOptions, resolveRoleInvocation } from "../lib/role-invocation.js";
-import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
-import type { DshAgent } from "../lib/dsh-types.js";
+import * as NativeSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import { DSMM_ROLES } from "../lib/roles.js";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 
 useIsolatedDshEnvironment();
@@ -90,17 +87,22 @@ export class RoutingFixtureAdapter extends LlmAdapter {
 }
 
 let fixtureSequence = 0;
-const initialAuxiliaryTurns = new WeakMap<Agent, { release(): void }>();
+const initialAuxiliaryTurns = new WeakMap<Agent, { release(): void; entered: Promise<void> }>();
 function holdAuxiliaryTurn(agent: Agent, selection?: ModelSelectionRef): void {
   if (selection !== undefined) installModelSelection(agent.ctx, selection);
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
+  let enter!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
   const removeStep = agent.ctx.on("agent/pre-step", async (frame, next) => {
+    if (frame.agent !== agent) return next();
+    frame.signal.throwIfAborted();
+    enter();
     frame.signal.addEventListener("abort", release, { once: true });
     try { await held; } finally { frame.signal.removeEventListener("abort", release); removeStep(); }
     return next();
   });
-  initialAuxiliaryTurns.set(agent, { release });
+  initialAuxiliaryTurns.set(agent, { release, entered });
 }
 const require = createRequire(import.meta.url);
 const skillSdk = createRequire(require.resolve("@deepseek-ai/dsh-skill-filesystem"));
@@ -118,6 +120,9 @@ export async function nativeFixturePlugin(name: string, peer?: string) {
 export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, options: { headless?: boolean; spawn?: boolean; profileDir?: string; home?: string; nativePresets?: boolean; isolatedPrompt?: boolean; persistence?: boolean;
   adapter?: RoutingFixtureAdapter;
   managedRuntime?: boolean;
+  nativePermissionSettings?: boolean;
+  nativeControls?: boolean;
+  deferPresets?: boolean;
   fixtureTools?: readonly ToolDefinition[];
   nativeFs?: boolean;
   fixtureShells?: boolean;
@@ -125,6 +130,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
   nativeSubagents?: { maxDepth?: number; maxActiveSubagents?: number };
   beforeDsmm?: (ctx: Context, create: (meta?: CreateAgentOptions["meta"], selection?: ModelSelectionRef, extra?: Partial<CreateAgentOptions>) => Promise<Agent>) => Promise<void>;
 } = {}) {
+  options = { ...options, nativePresets: options.nativePresets ?? options.spawn !== false };
   const host = new Context();
   const ctx = (options.isolatedPrompt ? host.isolate("systemPrompt") : host).extend({ baseUrl: new URL("../", import.meta.url).href });
   // Filesystem ownership is per Host even when a test deliberately shares profiles.
@@ -145,17 +151,52 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
     rmSync(fixtureDir, { recursive: true, force: true });
   };
   try {
+    const permissionHost = options.nativePermissionSettings ? await import("./permission-host-fixture.ts") : undefined;
     const adapter = options.adapter ?? new RoutingFixtureAdapter();
     const managedRuntime = options.managedRuntime ?? options.spawn !== false;
     const fibers = [
-      ctx.plugin(managedRuntime ? DsmmAgentRegistry : AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
+      ctx.plugin(AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
       ctx.plugin(LlmRuntime), ctx.plugin(SystemPrompt, {}), ctx.plugin(ToolRuntime, { mode: "native" }),
-      ctx.plugin(managedRuntime ? SubagentRuntimePlugin : SubagentRuntime, options.nativeSubagents ?? {}), ctx.plugin(SkillRegistry, {})
+      ctx.plugin(SubagentRuntime, options.nativeSubagents ?? {}), ctx.plugin(SkillRegistry, {})
     ];
     await Promise.all(fibers.map((fiber) => fiber.await()));
-    const fsLocal = await nativeFixturePlugin("@deepseek-ai/dsh-fs-local");
-    await ctx.plugin(fsLocal.default, { cwd: fixtureDir }).await();
-    const directory = await nativeFixturePlugin("@deepseek-ai/dsh-working-directory");
+    if (options.nativeFs || process.env.DSMM_TEST_DSH_ENTRY) {
+      const fsLocal = await nativeFixturePlugin("@deepseek-ai/dsh-fs-local");
+      await ctx.plugin(fsLocal.default, { cwd: fixtureDir }).await();
+    } else {
+      const { FileSystem, FsError } = await nativeFixturePlugin("@deepseek-ai/dsh-fs", "@deepseek-ai/dsh-subagent-spawn-in-process");
+      class FixtureDirectory extends FileSystem {
+        async resolve(path: string, options: { cwd?: string; signal?: AbortSignal } = {}) {
+          options.signal?.throwIfAborted(); const target = resolve(options.cwd ?? fixtureDir, path);
+          return { targetKey: target, displayPath: target };
+        }
+        async stat(target: { displayPath: string }) {
+          if (!existsSync(target.displayPath)) return undefined;
+          const value = lstatSync(target.displayPath);
+          return { type: value.isDirectory() ? "directory" : "file", size: value.size, version: String(value.mtimeMs) };
+        }
+        async readText(target: { displayPath: string }) {
+          if (!existsSync(target.displayPath)) throw new FsError("No fixture file", "FS_NOT_FOUND");
+          const exact = realpathSync(target.displayPath);
+          if (![fixtureDir, profileDir].some(root => exact.startsWith(`${realpathSync(root)}${sep}`))) throw new FsError("Outside fixture storage", "FS_SANDBOX_DENIED");
+          return readFileSync(exact, "utf8");
+        }
+        async *streamText(target: { displayPath: string }) { yield await this.readText(target); }
+        fileUrl(target: { displayPath: string }) { return pathToFileURL(target.displayPath).href; }
+        contains(parent: { displayPath: string }, child: { displayPath: string }) { return child.displayPath === parent.displayPath || child.displayPath.startsWith(`${parent.displayPath}${sep}`); }
+        async lstat(path: string, options: { cwd?: string; signal?: AbortSignal } = {}) { return this.stat(await this.resolve(path, options)); }
+        async listDir(target: { displayPath: string }, signal?: AbortSignal) {
+          signal?.throwIfAborted();
+          const exact = realpathSync(target.displayPath);
+          if (![fixtureDir, profileDir].some(root => exact === realpathSync(root) || exact.startsWith(`${realpathSync(root)}${sep}`))) throw new FsError("Outside fixture storage", "FS_SANDBOX_DENIED");
+          return readdirSync(exact, { withFileTypes: true }).map(entry => ({ name: entry.name, type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
+            target: { targetKey: join(exact, entry.name), displayPath: join(exact, entry.name) } }));
+        }
+        processPath(target: { displayPath: string }) { return target.displayPath; }
+      }
+      await ctx.plugin(FixtureDirectory).await();
+    }
+    const directory = await nativeFixturePlugin("@deepseek-ai/dsh-working-directory", "@deepseek-ai/dsh-subagent-spawn-in-process");
     await ctx.plugin(directory.default, { defaultDirectory: fixtureDir }).await();
     await Promise.all(fibers.map((fiber) => fiber.await()));
     if (managedRuntime) {
@@ -166,8 +207,8 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       }
       await ctx.plugin(ExactQuery).await();
     }
-    if (options.persistence) {
-      await ctx.plugin(DsmmSessionPersistence, { root: join(fixtureDir, "sessions"), compression: "none" }).await();
+    if (options.persistence ?? options.spawn !== false) {
+      await ctx.plugin(NativeSessionPersistence, { root: join(fixtureDir, "sessions"), compression: "none" }).await();
     }
     if (options.nativeJobs) {
       const jobs = await nativeFixturePlugin("@deepseek-ai/dsh-jobs-local");
@@ -195,9 +236,20 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       });
     }
     for (const definition of options.fixtureTools ?? []) tools.register(definition);
-    ctx.provide("profileContext", { home, dir: profileDir, installAnchor: process.env.DSMM_TEST_DSH_ENTRY,
+    ctx.provide("profileContext", { ...(permissionHost ? permissionHost.permissionHostProfile(profileDir, home, config)
+      : { home, dir: profileDir, installAnchor: options.nativeControls ? require.resolve("@deepseek-ai/dsh-tool-subagent-control") : process.env.DSMM_TEST_DSH_ENTRY }),
       baseUrl: new URL("../", import.meta.url).href, startedBundles: options.headless ? ["@deepseek-ai/dsh-headless"] : [] });
     let loader: Context["loader"] | undefined;
+    const mountPresets = async () => {
+      assert.ok(loader);
+      await loader.create({ name: "cordis:parity-presets", config: { default: "standard" } });
+      await loader.await();
+      const presets = ctx.get("agentPresets")!;
+      await presets.register({ id: "standard", name: "Ordinary", description: "Native parity fixture", plugins: [] });
+      if (config.roles?.["dsmm-planner"] === false) {
+        await presets.register({ id: "dsmm-planner", name: "DW Planner", description: "Native persona/restriction fixture", plugins: [{ name: "cordis:parity-persona", config: { prefix: "ROLE_PERSONA_SENTINEL" } }] });
+      }
+    };
     if (options.nativePresets) {
       const loaderFiber = ctx.plugin(Loader, { baseUrl: new URL("../", import.meta.url).href });
       await loaderFiber.await();
@@ -206,13 +258,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       loader.builtins["parity-presets"] = { default: AgentPresetRegistry };
       loader.builtins["parity-persona"] = require("@deepseek-ai/dsh-persona");
       loader.builtins["parity-dsmm"] = { default: DsmmPlugin };
-      await loader.create({ name: "cordis:parity-presets", config: { default: "standard" } });
-      await loader.await();
-      const presets = ctx.get("agentPresets")!;
-      await presets.register({ id: "standard", name: "Ordinary", description: "Native parity fixture", plugins: [] });
-      if (config.roles?.["dsmm-planner"] === false) {
-        await presets.register({ id: "dsmm-planner", name: "DW Planner", description: "Native persona/restriction fixture", plugins: [{ name: "cordis:parity-persona", config: { prefix: "ROLE_PERSONA_SENTINEL" } }] });
-      }
+      if (!options.deferPresets) await mountPresets();
     }
     const loopFiber = ctx.plugin(AgentLoop, {});
     await loopFiber.await();
@@ -239,6 +285,26 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
     };
     await options.beforeDsmm?.(ctx, create);
     if (options.nativePresets) {
+      const denied = async (): Promise<never> => { throw new Error("Routing fixture forbids external I/O"); };
+      if (ctx.get("web") === undefined) ctx.provide("web", { search: denied, fetch: denied });
+      if (ctx.get("subprocess") === undefined) ctx.provide("subprocess", { spawn: denied });
+      if (ctx.get("shell") === undefined) ctx.provide("shell", { execute: denied });
+      if (ctx.get("shellEnv") === undefined) ctx.provide("shellEnv", { resolve: denied });
+      if (ctx.get("jobs") === undefined) {
+        class InertJobs extends JobRegistry {
+          events = { subscribe: () => () => {} };
+          start(): never { throw new Error("Routing fixture has no jobs backend"); }
+          list() { return []; }
+          get(): never { throw new Error("No fixture job"); }
+          read(): never { throw new Error("No fixture job"); }
+          readAt(): never { throw new Error("No fixture job"); }
+          wait(): never { throw new Error("No fixture job"); }
+          kill(): never { throw new Error("No fixture job"); }
+          remove(): never { throw new Error("No fixture job"); }
+          attachController() { return () => {}; }
+        }
+        await ctx.plugin(InertJobs).await();
+      }
       // Standard preset capabilities consume these real Host services. They are
       // not role rows, and none of their adapters may perform external work here.
       for (const [service, plugin, peer] of [
@@ -251,9 +317,9 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
         await ctx.plugin(module.default, {}).await();
       }
     }
-    const dsmmEntryId = loader === undefined ? undefined : await loader.create({ name: "cordis:parity-dsmm", config });
+    const dsmmEntryId = options.nativePermissionSettings || loader === undefined ? undefined : await loader.create({ name: "cordis:parity-dsmm", config });
     await loader?.await();
-    const dsmmFiber = dsmmEntryId === undefined ? ctx.plugin({
+    const dsmmFiber = permissionHost ? await permissionHost.mountPermissionHostCore(ctx, DsmmPlugin) : dsmmEntryId === undefined ? ctx.plugin({
       name: "dsmm-native-routing-fixture",
       inject: [...DsmmPlugin.inject],
       apply(ready: Context) { return apply(ready as unknown as DshContext, config); }
@@ -268,7 +334,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       }
     }
     return {
-      ctx, host, adapter, agents, subagents, dsmmFiber, spawnFiber, tools, profileDir, home, dsmmEntryId,
+      ctx, host, adapter, agents, subagents, dsmmFiber, spawnFiber, tools, profileDir, home, dsmmEntryId, mountPresets,
       async reloadDeployment(next: DsmmPluginConfig): Promise<void> {
         assert.ok(loader && dsmmEntryId);
         await loader.update(dsmmEntryId, { config: withPresetRoot(next) }); await loader.await();
@@ -286,36 +352,45 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
       },
       /** A real native provider owns publication, capture and the initial queued turn. */
       async createAuxiliary(role: DsmmRoleId = "dsmm-reviewer", selection?: ModelSelectionRef, mode: "one-shot" | "continuable" = "one-shot", existingParent?: Agent,
-        request: Partial<Omit<SubagentStartRequest, "parent" | "signal" | "label">> = {}): Promise<Agent> {
+        request: Partial<Pick<SubagentStartRequest, "agentOptions" | "prompt">> = {}): Promise<Agent> {
         if (mode === "continuable" && ctx.get("sessionPersistence") === undefined) {
-          await ctx.plugin(DsmmSessionPersistence, { root: join(fixtureDir, "auxiliary-sessions"), compression: "none" }).await();
+          await ctx.plugin(NativeSessionPersistence, { root: join(fixtureDir, "auxiliary-sessions"), compression: "none" }).await();
         }
         const parent = existingParent ?? await create({ agentPreset: "dsmm-orchestrator" }, selection,
           selection?.current === undefined ? {} : { agentOptions: { ...selection.current } });
-        const childId = SessionId(randomUUID());
+        let publish!: (agent: Agent) => void;
+        const published = new Promise<Agent>(resolve => { publish = resolve; });
         const remove = ctx.on("agent/created", ({ agent }) => {
-          if (agent.id !== childId || !agents.isOwnedBy(agent.id, parent)) return;
+          if (!agents.isOwnedBy(agent.id, parent)) return;
           holdAuxiliaryTurn(agent, selection);
+          publish(agent);
         }, { global: true });
         try {
-          const signal = new AbortController().signal;
-          const runtime = ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
-          const invocation = await resolveRoleInvocation(parent, role, runtime.getSettings(parent as unknown as DshAgent), signal, {}, request.agentOptions);
-          const started = await duringRoleInvocation(parent as unknown as DshAgent, invocation, () => subagents.startActivation({ provider: `dsmm-role-${role.slice("dsmm-".length)}`,
-            childId, label: `Native routing ${role}`, delivery: mode === "continuable" ? "parent" : "caller",
-            request: { parent, prompt: [{ type: "text", text: "Complete this local fixture" }], ...request, agentOptions: invocationAgentOptions(invocation, request.agentOptions) }, signal }));
-          const child = agents.get(started.childId)!;
+          const category = DSMM_ROLES.find(row => row.id === role)!.kind === "category";
+          const merged = parent.ctx.tools.get("dsmm_role", parent) !== undefined;
+          const name = category ? "dsmm_category" : merged ? "dsmm_role" : role.replaceAll("-", "_");
+          const prompt = request.prompt?.map(block => { assert.ok(block.type === "text"); return block.text; }).join("\n") ?? "Complete this local fixture";
+          const started = parent.ctx.tools.execute({ agent: parent, name, callId: ToolCallId(randomUUID()), signal: new AbortController().signal,
+            arguments: { description: `Native routing ${role}`, prompt, ...(category ? { category: role } : merged ? { role } : {}),
+              ...(request.agentOptions === undefined ? {} : { route: request.agentOptions }) } });
+          const child = await Promise.race([published, started.then(result => { throw new Error(`Child was not created: ${JSON.stringify(result)}`); })]);
           assert.ok(child && initialAuxiliaryTurns.has(child));
-          auxiliaryRuns.set(child, { dispose: () => started.dispose(), parent });
+          auxiliaryRuns.set(child, { async dispose() {
+            const draining = agents.get(child.id) === child ? subagents.drainChildren(parent, [child.id]) : undefined;
+            initialAuxiliaryTurns.get(child)?.release();
+            initialAuxiliaryTurns.delete(child);
+            await draining; await started;
+          }, parent });
           assert.equal(agents.isOwnedBy(child.id, parent), true);
+          await Promise.race([initialAuxiliaryTurns.get(child)!.entered, started.then(result => { throw new Error(`Initial child turn did not start: ${JSON.stringify(result)}`); })]);
           return child;
         } finally { remove(); }
       },
       async resumeAuxiliary(agent: Agent, selection?: ModelSelectionRef): Promise<Agent> {
-        await ctx.get("dsmmRuntimeIntegration")?.ready();
         const owned = auxiliaryRuns.get(agent);
         assert.ok(owned, "cold resume requires the exact fixture-owned native run");
         await owned.dispose();
+        auxiliaryRuns.delete(agent);
         await owned.parent.whenIdle();
         await ctx.sessionPersistence.flush();
         const remove = ctx.on("agent/created", ({ agent: resumed }) => { if (resumed.id === agent.id) holdAuxiliaryTurn(resumed, selection); }, { global: true });
@@ -331,6 +406,7 @@ export async function nativeRoutingFixture(config: DsmmPluginConfig = {}, option
         const owned = auxiliaryRuns.get(agent);
         assert.ok(owned, "release requires the exact fixture-owned native run");
         await owned.dispose();
+        auxiliaryRuns.delete(agent);
       },
       async dispose() {
         const errors: unknown[] = [];

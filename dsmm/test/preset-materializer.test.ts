@@ -3,7 +3,6 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { apply } from "../lib/index.js";
 import { DSMM_ROLES, renderAgentCordis, renderPresetMetadata } from "../lib/roles.js";
 import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import { enabledSkillNames } from "../lib/skills.js";
@@ -438,41 +437,12 @@ test("reconcileRolePresets materialize false no-ops when root is absent", () => 
   });
 });
 
-test("apply reconciles configured preset roots without defaulting to home", () => {
-  usingFixture((root) => {
-    apply({}, { presets: { materialize: true, root }, roles: { "dsmm-reviewer": false } });
-
-    assert.equal(existsSync(join(root, "dsmm-orchestrator", DSMM_MANAGED_PRESET_MARKER)), true);
-    assert.equal(existsSync(join(root, "dsmm-reviewer")), false);
-  });
-});
-
-test("apply skips preset reconciliation when root is absent", () => {
-  assert.doesNotThrow(() => apply({}, { presets: { materialize: true } }));
-});
-
 test("resolveManagedPresetRoot falls back to DSH_HOME agent preset root", () => {
   assert.equal(
     resolveManagedPresetRoot(resolveConfig({ presets: { materialize: true } }), { DSH_HOME: "C:/tmp/dsh-home" }),
     join("C:/tmp/dsh-home", ".agent-presets")
   );
   assert.equal(resolveManagedPresetRoot(resolveConfig({ presets: { materialize: true } }), {}), undefined);
-});
-
-test("apply uses DSH_HOME fallback root when preset root is absent", () => {
-  usingFixture((home) => {
-    const previous = process.env.DSH_HOME;
-    process.env.DSH_HOME = home;
-    try {
-      apply({}, { presets: { materialize: true }, roles: { "dsmm-reviewer": false } });
-
-      assert.equal(existsSync(join(home, ".agent-presets", "dsmm-orchestrator", DSMM_MANAGED_PRESET_MARKER)), true);
-      assert.equal(existsSync(join(home, ".agent-presets", "dsmm-reviewer")), false);
-    } finally {
-      if (previous === undefined) delete process.env.DSH_HOME;
-      else process.env.DSH_HOME = previous;
-    }
-  });
 });
 
 function usingFixture(callback: (root: string) => void): void {

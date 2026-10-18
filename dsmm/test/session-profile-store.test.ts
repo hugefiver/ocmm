@@ -59,7 +59,7 @@ test("async external sidecar/draft edits and final liveness fences never publish
         return "not-published";
       }, { assertCurrent() { if (!alive) throw Object.assign(new Error("native epoch fence"), { code: "conflict" }); }, committed() { publications++; } }));
       assert.equal(publications, 0);
-      assert.equal(existsSync(join(f.root, ".revisions", `${saved.revision}.jsonc`)), false);
+      assert.equal((await f.store.loadSessionSelection("a")).selectedId, null);
       assert.equal(existsSync(f.path("a")), mutation === "sidecar");
       assert.equal(existsSync(join(f.root, ".lock")), false);
     } finally { f.cleanup(); }
@@ -89,19 +89,19 @@ test("session commit failure retains old sidecar and callback; replaced lock is 
   } finally { f.cleanup(); }
 });
 
-test("corrupt session identity, duplicate fields, missing or modified immutable pins refuse cold loading", async () => {
+test("corrupt session identity, duplicate fields, missing or invalid immutable pins refuse cold loading", async () => {
   const f = fixture();
   try {
     const saved = await f.store.save({ id: "focus", content: body(), expectedRevision: null });
-    await f.store.selectSession(request("a", saved.revision), epoch, () => null, commit());
+    const selected = await f.store.selectSession(request("a", saved.revision), epoch, () => null, commit());
     const original = readFileSync(f.path("a"), "utf8");
-    for (const corrupt of [original.replace('"sessionId":"a"', '"sessionId":"b"'), original.replace('"version":1', '"version":1,"version":1'), "{}", "x"]) {
+    for (const corrupt of [original.replace('"sessionId":"a"', '"sessionId":"b"'), original.replace('"version":2', '"version":2,"version":2'), "{}", "x"]) {
       writeFileSync(f.path("a"), corrupt);
       await assert.rejects(new ProfileStore(f.root).loadSessionSelection("a"), { code: "corrupt-selection" });
     }
     writeFileSync(f.path("a"), original);
-    const pin = join(f.root, ".revisions", `${saved.revision}.jsonc`);
-    writeFileSync(pin, body(false));
+    const pin = join(f.root, ".revisions", `${selected.selection.appliedRevision}.jsonc`);
+    writeFileSync(pin, "{}");
     await assert.rejects(new ProfileStore(f.root).loadSessionSelection("a"), { code: "corrupt-selection" });
     unlinkSync(pin);
     await assert.rejects(new ProfileStore(f.root).loadSessionSelection("a"), { code: "corrupt-selection" });

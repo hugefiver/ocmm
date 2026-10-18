@@ -1,20 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { createContext, runInContext } from "node:vm";
+import { fileURLToPath } from "node:url";
+import { runInThisContext } from "node:vm";
+import { build } from "esbuild";
 import { setImmediate } from "node:timers/promises";
-import { isValidElement } from "react";
+import { cloneElement, createElement, isValidElement } from "react";
 import type { ReactElement } from "react";
 import type { Context } from "@deepseek-ai/cordis";
 import type { ConnectionGenerationState } from "@deepseek-ai/dsh-client-connection/client";
-import type { DsmmConfigRemote } from "../lib/profile-remote.js";
-import type { DeploymentAdmissionView, DeploymentEditorSnapshot, SessionProfileSnapshot } from "../lib/profile-types.js";
-import type { DeploymentPageProps } from "../lib/client/DeploymentPage.js";
-import { deploymentEn } from "../lib/client/deployment-locales.js";
-import { deploymentEditorSchema, resolveConfig } from "../lib/settings.js";
-import { DeploymentController } from "../lib/client/deployment-controller.js";
-import { editLayer, layerDiff, parseAdvanced, validateEditorValue } from "../lib/client/deployment-data.js";
+import type { DsmmConfigRemote } from "../src/profile-remote.js";
+import type { DeploymentAdmissionView, DeploymentEditorSnapshot, SessionProfileSnapshot } from "../src/profile-types.js";
+import type { DeploymentPageProps } from "../src/client/DeploymentPage.js";
+import { deploymentEn } from "../src/client/deployment-locales.js";
+import { deploymentEditorSchema, resolveConfig } from "../src/settings.js";
+import { DeploymentController } from "../src/client/deployment-controller.js";
+import type { NativePageForm } from "../src/client/deployment-controller.js";
+import { editLayer, layerDiff, mergeLayer, parseAdvanced, record, validateEditorValue } from "../src/client/deployment-data.js";
 
 function fixture() {
   const defaults = resolveConfig() as unknown as Record<string, unknown>;
@@ -39,20 +41,30 @@ function fixture() {
       return { ok: true, value: { config: global, revision: "g1" } };
     },
   };
-  return { remote, writes, get: () => snapshot, change: (patch: Partial<DeploymentEditorSnapshot>) => { snapshot = { ...snapshot, ...patch }; }, intercept: (callback: () => Promise<void>) => { intercept = callback; } };
+  const mutateNative = (edits: Parameters<NativePageForm["mutate"]>[0], revision?: number) => {
+    assert.equal(revision, snapshot.nativeFormRevision);
+    const base = snapshot.nativeForm!.base as Record<string, unknown>;
+    let user = snapshot.nativeForm!.user as Record<string, unknown>;
+    for (const edit of edits) user = editLayer(user, edit.path, edit.op === "set" ? edit.value : undefined);
+    const nextRevision = revision! + 1, value = mergeLayer(base, user);
+    assert.ok(record(value));
+    snapshot = { ...snapshot, nativeForm: { base, user }, profile: value, nativeFormRevision: nextRevision, nativeRevision: `n${nextRevision}` };
+    return { status: "ready" as const, writable: true, revision: nextRevision, value, base, user };
+  };
+  return { remote, writes, mutateNative, get: () => snapshot, change: (patch: Partial<DeploymentEditorSnapshot>) => { snapshot = { ...snapshot, ...patch }; }, intercept: (callback: () => Promise<void>) => { intercept = callback; } };
 }
 
+const currentClient = await build({ entryPoints: [fileURLToPath(new URL("../src/client/index.ts", import.meta.url))], bundle: true, write: false, platform: "browser", format: "cjs", target: "es2022", external: ["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-ui-primitives"] });
 async function compiledNativePage(remote: DsmmConfigRemote) {
   const require = createRequire(import.meta.url);
-  let factory!: (require: (id: string) => unknown) => { apply(ctx: Context): Promise<void> };
-  const realm = createContext({ window: { __ModuleLoader__: { load(row: { factory: typeof factory }) { factory = row.factory; } } }, TextEncoder, TextDecoder, structuredClone, AbortController, AbortSignal });
-  runInContext(await readFile(new URL("../lib/client.js", import.meta.url), "utf8"), realm);
-  const module = factory(id => {
-    if (id === "react") return { ...require(id), useEffect() {}, useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get() };
-    if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button() {}, Input() {} };
+  const module = { exports: {} as { apply(ctx: Context): Promise<void> } };
+  runInThisContext(`(function(require,module,exports){${currentClient.outputFiles[0].text}\n})`)((id: string) => {
+    if (id === "react") return { ...require(id), useEffect() {}, useId: () => "deployment-fixture", useRef: (current: unknown) => ({ current }), useMemo: (factory: () => unknown) => factory(), useState: (value: unknown) => [value, () => {}], useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get() };
+    if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button: (props: Record<string, unknown>) => createElement("button", props), Input: (props: Record<string, unknown>) => createElement("input", props) };
     assert.equal(id, "react/jsx-runtime"); return require(id);
-  });
+  }, module, module.exports);
   let component!: (props: DeploymentPageProps) => unknown, core!: DeploymentController;
+  let injected!: Pick<DeploymentPageProps, "core" | "remote" | "workspace">;
   const copy: Readonly<Record<string, string>> = deploymentEn;
   const t: DeploymentPageProps["t"] = key => copy[key] ?? key;
   // A JSX tree seam, not a browser/authentication substitute. Capture the real
@@ -60,17 +72,23 @@ async function compiledNativePage(remote: DsmmConfigRemote) {
   const context = {
     remote: { $mount() {}, dsmmConfig: remote }, effect() {}, locale: { bind: () => t },
     inject(names: string[], callback: (ctx: unknown) => unknown) { if (names.includes("remote.dsmmConfig")) return callback(this); },
-    slots: { inject(_name: string, callback: () => unknown) { callback(); }, register(options: { inject(): { core: DeploymentController } }, view: typeof component) { component = view; core = options.inject().core; } },
+    slots: { inject(_name: string, callback: () => unknown) { callback(); }, register(options: { name: string; inject(): typeof injected }, view: typeof component) { if (options.name === "plugins.bundle.config") { component = view; injected = options.inject(); core = injected.core; } } },
   };
-  await module.apply(context as unknown as Context);
+  await module.exports.apply(context as unknown as Context);
   for (let round = 0; round < 100 && core.getSnapshot().busy; round++) await setImmediate();
-  assert.ok(core.getSnapshot().snapshot, "the real editor read must settle before testing its JSX state");
+  const tree = () => component({ ...injected, view: "page", t });
+  const open = (label: string) => { const button = elements(tree()).find(node => typeof node.props.onClick === "function" && text(node) === label); assert.ok(button, label); (button.props.onClick as () => void)(); };
   const inspector = () => {
-    const tree = component({ core, remote, view: "page", t });
-    const node = elements(tree).find(node => typeof node.type === "function" && node.type.name === "StateInspector")!;
+    const node = elements(tree()).find(node => typeof node.type === "function" && node.type.name === "StateInspector")!;
     assert.ok(node); return (node.type as (props: unknown) => unknown)(node.props);
   };
-  return { core, inspector };
+  return { core, inspector, open, tree: () => render(tree()), workspace: injected.workspace!, dispose() { injected.workspace!.dispose(); core.dispose(); } };
+}
+function render(tree: unknown): unknown {
+  if (Array.isArray(tree)) return tree.map(render);
+  if (!isValidElement<Record<string, unknown>>(tree)) return tree;
+  if (typeof tree.type === "function") return render((tree.type as (props: unknown) => unknown)(tree.props));
+  return cloneElement(tree, { children: render(tree.props.children) });
 }
 function elements(tree: unknown): ReactElement<Record<string, unknown>>[] {
   if (Array.isArray(tree)) return tree.flatMap(elements);
@@ -78,15 +96,19 @@ function elements(tree: unknown): ReactElement<Record<string, unknown>>[] {
   return [tree, ...elements(tree.props.children)];
 }
 function text(tree: unknown): string {
-  if (Array.isArray(tree)) return tree.map(text).join(" ");
+  if (Array.isArray(tree)) return tree.map(text).join("");
   return isValidElement<Record<string, unknown>>(tree) ? text(tree.props.children) : typeof tree === "string" || typeof tree === "number" ? String(tree) : "";
 }
 
-test("compiled native inspector distinguishes known admission-unavailable and includes sorted named-only next/session fields", async () => {
+test("source-bundled native drawer distinguishes known admission-unavailable and includes sorted named-only next/session fields", async () => {
   const f = fixture(), page = await compiledNativePage(f.remote);
   const session: SessionProfileSnapshot = { sessionId: "known-native-root", admissionEpoch: "epoch-new", scope: "session-override", switchAllowed: true,
+    canSelectModel: false, selectModelUnavailableReason: "model-unconfigured",
+    canToggleMode: false, toggleModeUnavailableReason: "runtime-unavailable",
+    canApplyOverlay: false, applyOverlayUnavailableReason: "new-session-required",
     globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, selection: { selectedId: "overlay", appliedRevision: "named-revision", selectionRevision: "named-selection" } };
   try {
+    page.open(deploymentEn["module:state"]);
     page.core.setSession(session);
     const unavailable = text(page.inspector());
     const configuration: DeploymentAdmissionView = { settings: { defaultActive: false, roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "overlay-only" } } } },
@@ -97,13 +119,51 @@ test("compiled native inspector distinguishes known admission-unavailable and in
     const model = rows.find(row => text(row).includes("roleRouting.dsmm-reviewer.primary.model"));
     assert.ok(model, "named-only field is absent in desired routing but present in admitted/next-root state");
     assert.match(text(model), /overlay-only/u); assert.match(text(model), /Named\/session/u); assert.match(text(model), /Absent/u);
-    assert.match(text(model).replace(/\s+/gu, " "), /Startup mounted \/ captured : Absent · Absent \/ Absent/u);
-    assert.match(text(tree), /Deployment capture/u);
+    const values = elements(model).filter(node => node.type === "dd").map(text);
+    assert.equal(values[1], `${deploymentEn.startup}: ${deploymentEn.absent} · ${deploymentEn.unknown}`);
+    assert.equal(values[2], `${deploymentEn.next}: ${JSON.stringify("overlay-only")} · ${deploymentEn.namedSource}`);
+    assert.equal(values[3], `${deploymentEn.session}: ${JSON.stringify("overlay-only")} · ${deploymentEn.namedSource}`);
     assert.deepEqual(keys, [...keys].sort());
-    assert.doesNotMatch(unavailable, /No active session/u, "a known root cannot be relabeled sessionless when an older Host omits the projection");
-    assert.match(unavailable, /known-native-root|epoch-new/u);
-    page.core.setSession(null); assert.match(text(page.inspector()), /No active session/u);
-  } finally { page.core.dispose(); }
+    assert.equal(text(elements(page.inspector()).find(node => node.props.role === "status")), deploymentEn.sessionObserved);
+    assert.ok(unavailable.includes(deploymentEn.sessionUnavailable));
+    page.core.setSession(null); assert.ok(text(page.inspector()).includes(deploymentEn.noSession));
+  } finally { page.dispose(); }
+});
+
+test("first configuration read failure exposes a disabled Save and explicit Refresh in the same drawer after connection recovery", async () => {
+  const f = fixture(); let unavailable = true;
+  f.intercept(async () => { if (unavailable) throw new Error("fixture disconnected"); });
+  const page = await compiledNativePage(f.remote);
+  const listeners = new Set<() => void>(); let current: ReturnType<ConnectionGenerationState["getSnapshot"]>;
+  page.core.bindConnection({ getSnapshot: () => current, subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; } });
+  const button = (label: string) => elements(page.tree()).find(node => node.type === "button" && text(node) === label);
+  try {
+    page.open(deploymentEn["module:run"]);
+    assert.equal(page.core.getSnapshot().snapshot, null); assert.equal(page.core.getSnapshot().issue, "transport");
+    assert.ok(elements(page.tree()).some(node => node.props.role === "alert" && text(node) === deploymentEn.transport));
+    assert.equal(button(deploymentEn.saveGlobal)?.props.disabled, true); assert.equal(button(deploymentEn.refresh)?.props.disabled, false);
+    await (button(deploymentEn.saveGlobal)!.props.onClick as () => void)(); assert.equal(f.writes.length, 0);
+    unavailable = false; current = { id: 1 } as unknown as NonNullable<typeof current>; for (const listener of listeners) listener();
+    assert.equal(page.core.getSnapshot().snapshot, null); assert.equal(page.core.canEdit(), false);
+    (button(deploymentEn.refresh)!.props.onClick as () => void)();
+    while (page.core.getSnapshot().busy) await setImmediate();
+    assert.equal(page.workspace.getSnapshot().module, "run"); assert.equal(page.core.getSnapshot().issue, null); assert.equal(page.core.canEdit(), true);
+    assert.equal(page.core.getSnapshot().snapshot?.entryId, f.get().entryId); assert.equal(f.writes.length, 0);
+  } finally { page.dispose(); assert.equal(listeners.size, 0); }
+});
+
+test("unresolved native scope exposes read-only Refresh without borrowing a dirty Global save", async () => {
+  const f = fixture(); f.change({ namespace: null }); const page = await compiledNativePage(f.remote);
+  try {
+    page.open(deploymentEn["module:run"]); page.core.edit(["defaultActive"], true);
+    const scope = elements(page.tree()).find(node => node.type === "select")!;
+    (scope.props.onChange as (event: unknown) => void)({ currentTarget: { value: "profile" } }); page.workspace.keepAndNavigate();
+    const controls = elements(page.tree()).filter(node => node.type === "button"), refresh = controls.find(node => text(node) === deploymentEn.refresh);
+    assert.equal(page.workspace.controller(), null); assert.ok(refresh); assert.equal(refresh.props.disabled, false);
+    assert.ok(controls.every(node => ![deploymentEn.saveGlobal, deploymentEn.saveProfile].includes(text(node))));
+    (refresh.props.onClick as () => void)(); while (page.core.getSnapshot().busy) await setImmediate();
+    assert.equal(page.core.getSnapshot().dirty, true); assert.equal(f.writes.length, 0);
+  } finally { page.dispose(); }
 });
 
 test("Global native editor preserves sparse untouched fields, bytes CAS and saved feedback after field validation settles", async () => {
@@ -144,12 +204,24 @@ test("profile native form requires exact namespace, revision, explicit metadata 
   const f = fixture(); f.change({ nativeForm: { base: { defaultActive: true }, user: { defaultActive: false } }, profile: { defaultActive: false } });
   const c = new DeploymentController(f.remote, "profile", "dsmm"); let mutations = 0;
   const state = { status: "ready" as const, writable: true, revision: 0, value: { defaultActive: false }, base: { defaultActive: true }, user: { defaultActive: false } };
-  const mutate = async (ops: unknown, revision?: number) => { assert.equal(revision, 0); assert.deepEqual(ops, [{ op: "unset", path: ["defaultActive"] }]); mutations++; return true; };
+  const mutate: NativePageForm["mutate"] = async (ops, revision) => { assert.equal(revision, 0); assert.deepEqual(ops, [{ op: "unset", path: ["defaultActive"] }]); mutations++; c.attachForm({ state: f.mutateNative(ops, revision), mutate }); return true; };
   c.attachForm({ state, mutate }); await c.refresh(); assert.deepEqual(c.getSnapshot().draft, { defaultActive: false }, "never schema-filled form.value"); assert.equal(c.canWriteProfile(), true);
   c.attachForm({ state: { ...state, writable: false }, mutate }); c.edit(["defaultActive"], undefined); await c.save(); assert.equal(mutations, 0);
   c.attachForm({ state, mutate }); c.edit(["defaultActive"], undefined); await c.save(); assert.equal(mutations, 1); assert.equal(f.writes.length, 0);
-  const foreign = new DeploymentController(f.remote, "profile", "other-row"); foreign.attachForm({ state, mutate }); await foreign.refresh(); assert.equal(foreign.canWriteProfile(), false); foreign.dispose(); c.dispose();
+  assert.deepEqual(c.getSnapshot().draft, {}); assert.equal(f.get().profile.defaultActive, true); assert.equal(c.getSnapshot().saved, true);
+  assert.equal(c.canWriteProfile(), true);
+  const foreign = new DeploymentController(f.remote, "profile", "other-row"); foreign.attachForm({ state: { ...state, revision: f.get().nativeFormRevision!, value: f.get().profile, user: f.get().nativeForm!.user as Record<string, unknown> }, mutate }); await foreign.refresh(); assert.equal(foreign.canWriteProfile(), false); foreign.dispose(); c.dispose();
   assert.deepEqual(layerDiff({ workflow: { reviewCap: 3, strictGates: false } }, { workflow: { strictGates: false } }), [{ op: "unset", path: ["workflow", "reviewCap"] }]);
+});
+
+test("native mutation refuses non-JSON object values without coercing them into inherited configuration", async () => {
+  const f = fixture(), c = new DeploymentController(f.remote, "profile", "dsmm"); let mutations = 0;
+  c.attachForm({ state: { status: "ready", writable: true, revision: 0, value: {}, base: {}, user: {} }, mutate: async () => { mutations++; return true; } });
+  try {
+    await c.refresh(); c.edit(["workflow"], new Date("2026-01-01T00:00:00Z")); await c.save();
+    assert.equal(c.getSnapshot().issue, "validation"); assert.equal(c.getSnapshot().dirty, true);
+    assert.ok(c.getSnapshot().draft.workflow instanceof Date); assert.equal(mutations, 0); assert.equal(f.writes.length, 0);
+  } finally { c.dispose(); }
 });
 
 test("entry replacement and disposal between validation and send cannot write a previous identity", async () => {
@@ -161,17 +233,17 @@ test("entry replacement and disposal between validation and send cannot write a 
   }
 });
 
-test("profile editor preserves startup-only input and sparse native primary inheritance instead of pinning merged routes", async () => {
+test("profile editor preserves sparse native primary inheritance instead of pinning merged routes", async () => {
   const f = fixture();
-  const user = { roleRouting: { "dsmm-reviewer": { primary: { model: "override" } } }, sessionPersistence: { root: "/owned/existing-native-log", compression: "none" } };
+  const user = { roleRouting: { "dsmm-reviewer": { primary: { model: "override" } } } };
   f.change({ global: { roleRouting: { "dsmm-reviewer": { primary: { provider: "fixture", model: "native-default" } } } }, nativeForm: { base: {}, user } });
   const c = new DeploymentController(f.remote, "profile", "dsmm");let mutations = 0;
   c.attachForm({ state: { status: "ready", writable: true, revision: 0, value: {}, base: {}, user }, mutate: async (ops, revision) => {
-    assert.equal(revision, 0);assert.deepEqual(ops, [{ op: "set", path: ["roleRouting", "dsmm-reviewer", "primary", "model"], value: "changed" }]);mutations++;return true;
+    assert.equal(revision, 0);assert.deepEqual(ops, [{ op: "set", path: ["roleRouting", "dsmm-reviewer", "primary", "model"], value: "changed" }]);mutations++;
+    const state = f.mutateNative(ops, revision); c.attachForm({ state, mutate: async () => { throw new Error("unexpected replay"); } }); return true;
   } });
   await c.refresh();c.edit(["roleRouting", "dsmm-reviewer", "primary", "model"], "changed");await c.save();
   assert.equal(mutations, 1);assert.equal(f.writes.length, 0);
-  assert.deepEqual(c.getSnapshot().draft.sessionPersistence, user.sessionPersistence);
   assert.deepEqual(c.getSnapshot().draft.roleRouting, { "dsmm-reviewer": { primary: { model: "changed" } } });c.dispose();
 });
 

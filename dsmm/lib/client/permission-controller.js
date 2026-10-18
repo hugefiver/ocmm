@@ -76,7 +76,8 @@ export class PermissionController {
         const value = this.state.rules;
         return value !== null && value.runtime.state === "synced" && value.runtime.savedRevision === value.snapshot.revision && value.runtime.runtimeRevision === value.snapshot.revision;
     }
-    canSave(generation) { return this.live(generation) && this.state.rulesIssue === null && this.synchronized() && !this.state.reading && this.state.busy === null && this.state.dirty && this.state.draft?.editor === null; }
+    canEdit(generation) { return this.live(generation) && this.state.rulesIssue === null && this.synchronized() && this.state.busy === null; }
+    canSave(generation) { return this.canEdit(generation) && !this.state.reading && this.state.dirty && this.state.draft?.editor === null; }
     async refresh(generation, discard = false) {
         if (!this.live(generation) || this.state.reading || this.state.busy !== null)
             return;
@@ -98,7 +99,7 @@ export class PermissionController {
         this.schedule();
     }
     edit(generation, patch) {
-        if (this.disposed || generation !== this.state.generation || this.state.draft === null || this.state.busy !== null)
+        if (!this.canEdit(generation) || this.state.draft === null)
             return;
         const draft = { ...this.state.draft, ...patch };
         this.publish({ draft, notice: null });

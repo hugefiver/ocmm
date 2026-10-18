@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { Context } from "@deepseek-ai/cordis";
+import { Context, symbols } from "@deepseek-ai/cordis";
+import { isDeepStrictEqual } from "node:util";
 import { resolveDshHome } from "./dsh-home.js";
 import { FixedConfigFileStore } from "./config-file-store.js";
-import { copyJson, freezeSettings, resolveDeployment, validateDeploymentPath, validateSparseConfig } from "./settings.js";
+import { copyJson, freezeSettings, resolveDeployment, validateDeploymentPath, validateSparseConfig, validateNativeConfig } from "./settings.js";
 import { DsmmProfileError } from "./profiles.js";
 import { resolve } from "node:path";
 import { diagnosticSourcePath, DsmmConfigValidationError, fieldLocation, inspectJsonDocument } from "./profile-diagnostics.js";
@@ -96,6 +97,7 @@ export class DsmmDeploymentConfig {
     ctx;
     config;
     writeCoordinator;
+    permissionObservation;
     home;
     store;
     entryId;
@@ -111,8 +113,23 @@ export class DsmmDeploymentConfig {
     /** Synchronous source identity for permission dispatch fences; no form revision or process identity. */
     permissionSource() {
         const profile = this.profile(), file = this.store.read(), global = parseGlobalConfig(file.content);
+        if (profile.revision === "unavailable")
+            throw new DsmmProfileError("unavailable", "Native settings version is unavailable; permission authority requires a current Host descriptor.");
         const settings = resolveDeployment(global, profile.config);
-        return freezeSettings({ revision: hash([this.hostProfileKey, file.revision, profile.revision, profile.config]),
+        const original = (value) => value === undefined ? undefined : Reflect.get(value, symbols.original) ?? value;
+        const profileContext = this.ctx.get?.("profileContext");
+        const scope = [original(this.ctx.get?.("settings")), original(profileContext), profileContext?.home, profileContext?.dir,
+            this.nativeEntry, this.nativeEntry?.fiber?.ctx];
+        const previous = this.permissionObservation;
+        if (previous !== undefined && scope.some((owner, index) => owner !== previous.scope[index])) {
+            throw new DsmmProfileError("unavailable", "Permission source authority changed; the previous deployment owner cannot adopt it.");
+        }
+        const unchangedPolicy = previous !== undefined && previous.globalRevision === file.revision && isDeepStrictEqual(previous.config, profile.config);
+        const revision = unchangedPolicy && previous.nativeRevision === profile.revision ? previous.revision
+            : `deployment-v1:${this.hostProfileKey}:${file.revision}:${profile.revision}`;
+        this.permissionObservation = { scope, globalRevision: file.revision, nativeRevision: profile.revision, revision,
+            config: profile.config };
+        return freezeSettings({ revision,
             globalRevision: file.revision, nativeRevision: profile.revision, global, profile: profile.config,
             policy: { ...settings.permissionControl, nativeCommands: parseHostNativeCommands(settings.permissionControl.nativeCommands) } });
     }
@@ -134,17 +151,18 @@ export class DsmmDeploymentConfig {
             return value === undefined ? [] : [[key, value]];
         })) : entry.options.config ?? {};
         try {
-            const presence = validateSparseConfig(raw);
+            const presence = validateNativeConfig(raw);
             const snapshot = {};
             for (const key of Object.keys(presence)) {
                 const parsed = Reflect.get(this.config, key);
                 const value = parsed !== null && typeof parsed === "object" && "get" in parsed && typeof parsed.get === "function" ? parsed.get() : parsed;
                 snapshot[key] = presentValue(value, Reflect.get(presence, key));
             }
-            const config = validateSparseConfig(snapshot);
+            const config = validateNativeConfig(snapshot);
             if (config.permissionControl?.nativeCommands !== undefined)
                 parseHostNativeCommands(config.permissionControl.nativeCommands);
-            return { config, revision: hash(presence) };
+            const descriptor = entry === undefined ? undefined : this.ctx.get?.("settings")?.describe({ redactSecrets: true }).find(row => row.ns === entry.options.id);
+            return { config, revision: descriptor === undefined ? "unavailable" : `native-v1-${descriptor.revision}` };
         }
         catch (error) {
             if (error instanceof DsmmConfigValidationError)
@@ -192,14 +210,23 @@ export class DsmmDeploymentConfig {
                 throw error;
             configurationError();
         }
+        let committed;
         const write = async (candidate) => {
             const validated = validateSparseConfig(candidate, true);
             resolveDeployment(validated, this.profile().config);
             assertAuthority();
             const saved = await this.store.save(`${JSON.stringify(validated, null, 2)}\n`, request.expectedRevision, assertAuthority);
-            return { config: validated, revision: saved.revision };
+            committed = { config: validated, revision: saved.revision, ...(saved.refreshRequired ? { refreshRequired: true } : {}) };
+            return committed;
         };
-        return this.writeCoordinator === undefined ? write(config) : this.writeCoordinator.global(request, config, assertAuthority, write);
+        try {
+            return await (this.writeCoordinator === undefined ? write(config) : this.writeCoordinator.global(request, config, assertAuthority, write));
+        }
+        catch (error) {
+            if (committed !== undefined)
+                return { ...committed, refreshRequired: true };
+            throw error;
+        }
     }
 }
 //# sourceMappingURL=deployment-config.js.map

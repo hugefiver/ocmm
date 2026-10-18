@@ -5,10 +5,11 @@ export type DeepworkSelectionOutcome = "committed" | "unchanged";
 export declare function isDeepworkActive(events?: readonly DshSessionEvent[], defaultActive?: boolean, selectedPreset?: string): boolean;
 export declare function hasOpenTurn(events?: readonly DshSessionEvent[]): boolean;
 export declare class DeepworkModeController {
-    private readonly ctx;
     private readonly moduleEnabled;
+    private readonly runtimeReady;
     private readonly listeners;
-    constructor(ctx: DshContext, moduleEnabled?: (agent: DshAgent) => boolean);
+    private readonly versions;
+    constructor(_ctx: DshContext, moduleEnabled?: (agent: DshAgent) => boolean, runtimeReady?: () => boolean);
     watch(listener: (agent: DshAgent) => void): () => void;
     /** Profile commits have no native session event; notify their Agent mount. */
     changed(agent: DshAgent): void;

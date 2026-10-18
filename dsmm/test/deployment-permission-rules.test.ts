@@ -86,20 +86,22 @@ test("native mutate/update/replace share the ordinary editor transaction and imp
   } finally { await run.dispose(); }
 });
 
-test("delayed and failed notifications keep committed policy fenced until an authoritative recovery ACK", async () => {
+test("a committed save reports unsynchronized permission state until authoritative recovery acknowledges it", async () => {
   const run = nativeConfigRun({ managedPermissionSettings: true }), entered = gate(), release = gate();
   try {
     const profile = await run.createProfile("permission-notify"), owner = await bind(profile);
     const before = owner.backend.initial, oldSignal = owner.backend.runtime.signal;
     owner.notify(async () => { entered.release(); await release.promise; throw new Error("owned notification failure"); });
     const saving = owner.backend.save({ expectedRevision: before.revision, changes: { outsideReads: "deny" } }, owner.authority);
-    const refused = assert.rejects(saving);
     await Promise.race([entered.promise, saving.then(() => { throw new Error("The notification did not reach its gate."); })]);
     assert.equal(oldSignal.aborted, true);
     assert.equal(owner.backend.runtime.status().state, "updating");
     assert.throws(() => owner.backend.runtime.getPolicy());
     assert.equal((await owner.deployment.readDesired()).settings.permissionControl.outsideReads, "deny");
-    release.release(); await refused;
+    release.release();
+    const saved = await saving;
+    assert.equal(saved.snapshot.policy.outsideReads, "deny");
+    assert.equal(saved.runtime.state, "unsynced");
     assert.equal(owner.backend.runtime.status().state, "unsynced");
     assert.throws(() => owner.backend.runtime.getPolicy());
     owner.notify(async () => {});
@@ -141,7 +143,7 @@ test("cancellation before file CAS prevents persistence; active Root work does n
       assert.equal(saved.snapshot.policy.rules.length, 0);
       const previous = owner.backend.runtime.signal;
       const same = await owner.backend.save({ expectedRevision: saved.snapshot.revision, changes: { outsideReads: "ask" } }, owner.authority);
-      assert.equal(same.snapshot.revision, saved.snapshot.revision);
+      assert.equal(same.snapshot.revision, owner.deployment.permissionSource().revision);
       assert.equal(previous.aborted, true);
       assert.notEqual(owner.backend.runtime.signal, previous);
     } finally { hold.release(); await busy; }
@@ -297,8 +299,9 @@ test("deployment policy changes and same-source no-op saves refresh their projec
       const pending = execute();
       assert.equal(await Promise.race([entered.promise.then(() => true), pending.then(() => false)]), true, "native call must reach its approval request");
       assert.equal(bodies, beforeBodies); assert.equal(answers, beforeAnswers + 1);
+      assert.equal(previous.policy.outsideReads === "deny", noOp);
       const saved = await owner.backend.save({ expectedRevision: previous.revision, changes: { outsideReads: "deny" } }, owner.authority);
-      assert.equal(saved.snapshot.revision === previous.revision, noOp); assert.equal(signal.aborted, true);
+      assert.equal(saved.snapshot.revision, owner.deployment.permissionSource().revision); assert.equal(signal.aborted, true);
       const current = owner.backend.runtime.getPolicy();
       assert.notEqual(current, previous); assert.equal(owner.backend.runtime.getPolicy(), current);
       assert.equal(current.policy.outsideReads, "deny"); assert.equal(pendingSignal?.aborted, false);

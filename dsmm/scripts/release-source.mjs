@@ -3,16 +3,26 @@ import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
 import { validateRecoveryBinding } from "./release-recovery-policy.mjs";
+import { isSource031 } from "./release-contract.mjs";
 
 export const CONTROL_FILES = Object.freeze([
   ".github/workflows/dsmm-release.yml", "dsmm/scripts/dsmm-release.mjs", "dsmm/scripts/check-dsmm-release-completion.mjs",
   "dsmm/scripts/dsmm-registry-install-probe.mjs", "dsmm/scripts/release-contract.mjs", "dsmm/scripts/release-source.mjs",
   "dsmm/scripts/native-core-smoke.mjs", "dsmm/scripts/native-picker-proof.mjs", "dsmm/scripts/extract-runtime-sdk.mjs",
-  "dsmm/scripts/prepare-dsh-runtime-input.mjs",
+  "dsmm/scripts/prepare-dsh-runtime-input.mjs", "dsmm/docker/Dockerfile.artifact",
+  "dsmm/scripts/docker-smoke.mjs", "dsmm/scripts/session-history-smoke.mjs", "dsmm/scripts/release-native-gate.mjs",
+  "dsmm/scripts/profile-ui-acceptance.mjs", "dsmm/scripts/profile-ui-harness-server.mjs",
+  "dsmm/scripts/profile-ui-harness-stable021.mjs", "dsmm/scripts/profile-ui-harness-stable021-native.mjs", "dsmm/scripts/stable-native-acceptance.mjs",
 ]);
 export const RECOVERY_CONTROL_FILES = Object.freeze([...CONTROL_FILES,
   "dsmm/scripts/release-recovery-022.mjs", "dsmm/scripts/release-recovery-policy.mjs", "dsmm/scripts/release-native-gate.mjs",
 ]);
+export const CONTROL_FILES_031 = Object.freeze([
+  ".github/workflows/dsmm-release.yml", "dsmm/scripts/dsmm-release.mjs", "dsmm/scripts/check-dsmm-release-completion.mjs",
+  "dsmm/scripts/check-release-readiness.mjs", "dsmm/scripts/dsmm-registry-install-probe.mjs", "dsmm/scripts/release-contract.mjs",
+  "dsmm/scripts/release-source.mjs", "dsmm/scripts/release-recovery-policy.mjs",
+]);
+export const controlFilesForVersion = (version) => isSource031(version) ? CONTROL_FILES_031 : CONTROL_FILES;
 export const PACK_INPUTS = Object.freeze(["dsmm", ".github/workflows/dsmm-release.yml", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json"]);
 function executeGit(root, args) {
   const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", shell: false, windowsHide: true });
@@ -44,6 +54,6 @@ export function assertPackSource(root, context, execute = executeGit, { sourceRo
   assert.equal(execute(root, ["rev-parse", "--verify", `refs/tags/${context.tag}^{commit}`]), context.releaseSha, "pack tag differs from released source");
   assert.equal(execute(root, ["status", "--porcelain", "--untracked-files=all", "--", ...PACK_INPUTS]), "",
     "packing requires clean tracked tagged DSMM source and no untracked package inputs; preserve local edits outside the release checkout");
-  if (!recovery) for (const path of CONTROL_FILES) execute(root, ["cat-file", "-e", `${context.controlSha}:${path}`]);
+  if (!recovery) for (const path of controlFilesForVersion(context.version)) execute(root, ["cat-file", "-e", `${context.controlSha}:${path}`]);
   return { releaseSha: context.releaseSha, controlSha: context.controlSha, tag: context.tag };
 }

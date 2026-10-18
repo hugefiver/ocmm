@@ -15,6 +15,9 @@ let resolvingPeer = false;
 registerHooks({
   resolve(specifier, context, next) {
     if (resolvingPeer) return next(specifier, context);
+    if (specifier === "@dsmm/dsmm" || specifier === "@dsmm/dsmm/subagent-runtime" || specifier === "@dsmm/dsmm/agent-registry") {
+      return { url: new URL(specifier === "@dsmm/dsmm" ? "index.ts" : specifier.endsWith("/agent-registry") ? "agent-registry.ts" : "runtime-integration.ts", source).href, shortCircuit: true };
+    }
     if (specifier.startsWith("@deepseek-ai/") || specifier === "jsonc-parser") {
       resolvingPeer = true;
       try { return { url: pathToFileURL((specifier === "jsonc-parser" ? project : sdk).resolve(specifier)).href, shortCircuit: true }; }

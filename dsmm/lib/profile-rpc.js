@@ -33,12 +33,12 @@ var __esDecorate = (this && this.__esDecorate) || function (ctor, descriptorIn, 
     done = true;
 };
 import { symbols } from "@deepseek-ai/cordis";
-import { Remote, RemoteError, TypertRemoteService, remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
-import { SessionId } from "@deepseek-ai/dsh-session";
+import { Remote, RemoteError, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import { parseProfileErrorInfo, TYPERT_HOST } from "./profile-remote.js";
 import { DsmmProfileError, profileErrorInfo } from "./profiles.js";
 import { projectDsmmModules } from "./modules.js";
 import { DEFAULT_DSMM_SETTINGS, deploymentEditorSchema } from "./settings.js";
+import { runtimeAdmissionView } from "./runtime-integration.js";
 import { readOnlySettings, readOnlySettingSources } from "./status.js";
 /** Business service addressed only by native Typert Gateway invocations. */
 let DsmmProfilesHost = (() => {
@@ -91,11 +91,33 @@ let DsmmProfilesHost = (() => {
                 throw new RemoteError("dsmm-profiles/refused", "The Host refused the profile operation.", parseProfileErrorInfo(profileErrorInfo(error)));
             }
         }
+        captureAuthority() {
+            assertLocalSettingsOperator(this.ctx);
+            const invocation = this.ctx.invocation;
+            const connection = this.ctx.get("connection");
+            const owner = Reflect.get(connection, symbols.original) ?? connection;
+            const signal = AbortSignal.any([invocation.signal, invocation.peer.signal, this.lifetime.signal]);
+            const assertAuthority = () => {
+                if (signal.aborted)
+                    throw new DsmmProfileError("cancelled", "The profile operation was cancelled before commit.");
+                assertLocalSettingsOperator(this.ctx);
+                const current = this.ctx.get("connection");
+                if ((Reflect.get(current, symbols.original) ?? current) !== owner || current.browserPeer !== invocation.peer) {
+                    throw new DsmmProfileError("not-owned", "The operator connection changed before committing the profile operation.");
+                }
+            };
+            assertAuthority();
+            return assertAuthority;
+        }
         describe() { return this.invoke(() => this.backend.describe()); }
         read(id) { return this.invoke(() => this.backend.read(id)); }
-        save(request) { return this.invoke(() => this.backend.save(request)); }
-        select(request) { return this.invoke(() => this.backend.select(request)); }
-        /** Native Connection's exact operator is authority, not a claimed Peer ID. */
+        save(request) {
+            return this.invoke(() => this.backend.save(request, this.captureAuthority()));
+        }
+        select(request) {
+            return this.invoke(() => this.backend.select(request, this.captureAuthority()));
+        }
+        /** Native Connection's exact browser Peer is authority, not a claimed Peer ID. */
         async invokeSession(sessionId, operation, readOnly = false) {
             return this.invoke(async () => {
                 const invocation = this.ctx.invocation;
@@ -122,36 +144,9 @@ let DsmmProfilesHost = (() => {
                     return agents;
                 };
                 let agents = checkAuthority();
-                let captured = agents.get(sessionId);
-                if (captured === undefined) {
-                    // Gateway lookups run before invocation authentication. Resolve here,
-                    // after full strict JSON decoding and operator admission, so invalid or
-                    // unauthorized calls cannot cold-resume a native session as a side effect.
-                    const controller = this.ctx.get("sessionController");
-                    if (controller === undefined || typeof controller.resolveAgent !== "function") {
-                        throw new DsmmProfileError("unavailable", "The native ordinary-session resume service is unavailable.");
-                    }
-                    let found;
-                    try {
-                        found = await controller.resolveAgent(SessionId(sessionId));
-                    }
-                    catch {
-                        checkAuthority();
-                        throw new DsmmProfileError("unavailable", "The native session could not be safely resumed.", "sessionId");
-                    }
-                    agents = checkAuthority();
-                    if ("error" in found) {
-                        const code = remoteErrorOf(found.error)?.code;
-                        if (code === "session/not-found")
-                            throw new DsmmProfileError("not-found", "The native session was not found.", "sessionId");
-                        if (code === "session/agent-busy")
-                            throw new DsmmProfileError("not-owned", "Subagent-owned sessions cannot select a root profile.", "sessionId");
-                        if (code === "session/writer-held")
-                            throw new DsmmProfileError("busy", "The native session is owned by another active writer.", "sessionId");
-                        throw new DsmmProfileError("unavailable", "The native session could not be safely resumed.", "sessionId");
-                    }
-                    captured = found.agent;
-                }
+                const captured = agents.get(sessionId);
+                if (captured === undefined)
+                    throw new DsmmProfileError("unavailable", "Session admission is unknown; read-only configuration queries never resume history.", "sessionId");
                 const agent = captured;
                 const checkCaptured = () => {
                     const current = checkAuthority();
@@ -267,12 +262,13 @@ let DsmmConfigHost = (() => {
                 const runtime = this.runtime?.() ?? this.ctx.get("dsmmProfileRuntime");
                 return { entryId: desired.entryId, namespace: desired.nativeNamespace ?? null, hostProfileKey: desired.hostProfileKey,
                     global: desired.global, globalRevision: desired.globalRevision,
-                    profile: desired.profile, nativeRevision: desired.nativeRevision,
+                    profile: { ...desired.profile }, nativeRevision: desired.nativeRevision,
                     nativeFormRevision: desired.nativeFormRevision ?? null, nativeForm: desired.nativeForm === undefined ? null : { base: desired.nativeForm.base ?? null, user: desired.nativeForm.user ?? null },
                     desired: { ...readOnlySettings(desired.settings) }, sources: readOnlySettingSources(desired.sources),
                     startup: { ...readOnlySettings(this.startup) }, defaults: DEFAULT_DSMM_SETTINGS,
                     ...(this.startupSources === undefined ? {} : { startupSources: readOnlySettingSources(this.startupSources) }),
-                    schema: deploymentEditorSchema(), nextRoot: runtime?.previewDeployment(desired) ?? null,
+                    schema: deploymentEditorSchema(), nativeSchema: deploymentEditorSchema(true),
+                    subagentRuntime: runtimeAdmissionView(this.ctx), nextRoot: runtime?.previewDeployment(desired) ?? null,
                     modules: projectDsmmModules(this.startup, desired, undefined, true, this.getMountedPermission) };
             }
             catch (error) {

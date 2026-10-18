@@ -1,6 +1,6 @@
 # Deepwork Agent presets and child control
 
-This guide describes built source behavior on the native DSH integration, not automatic availability in the published `@dsmm/dsmm@0.2.0` artifact. Native package composition and callable admission must both exist.
+DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`. Native package composition and callable admission are separate requirements.
 
 ## Roles and composition
 
@@ -8,9 +8,13 @@ The canonical inventory is 11 base roles and 11 categories. Base roles are orche
 
 Only Orchestrator and Builder (`primary`) and Planner (`all`) are root-eligible. Planner root exposure additionally requires `presets.plannerRootEnabled: true`; it defaults false. This does not disable `roles.dsmm-planner` (default true), its native workflow provider, or its read-only delegation. Other roles are auxiliary-only (`subagent`), regardless of enablement. Native preset selection displays `DW …` labels under unchanged IDs. A role name is a responsibility, not a model choice or authority claim.
 
-Native `agentPresets.register({id, plugins})` registers root compositions; DSH doesn't discover them by scanning exported directories. Generated `agent-presets/` mirrors are inspection/export resources. `presets.materialize` defaults off and never selects the Host default preset. Personas, read-only restrictions and host approvals remain when explicit Deepwork off hides common workflow and DSMM skills. Complete adapted source content and resources are described in [source synchronization](skill-sync.md).
+Native `agentPresets.register({id, plugins})` registers compositions for roots and role spawning; DSH doesn't discover them by scanning exported directories. rc.2 has no child-only preset field: auxiliary catalog visibility doesn't grant root eligibility, and creation/execution checks reject invalid roots. Generated `agent-presets/` mirrors are inspection/export resources. `presets.materialize` defaults off and never selects the Host default preset. Personas, read-only restrictions and host approvals remain when explicit Deepwork off hides common workflow and DSMM skills. Complete adapted source content and resources are described in [source synchronization](skill-sync.md).
 
-The Planner root flag follows the existing deployment `presets` scope: Global config and the current DSH entry may set it; named/session overlays cannot. The complete `presets` group is startup-pinned. Saving desired changes neither migrates running Agents nor changes the standing registry; next-root settings report `restartRequired: ["presets"]` until an independent Host restart. After restart, disabled Planner roots are not registered for native picker, definition export or mounting, and forced native/API creation or root resume is refused before prompt/provider execution. Opting in still requires the enabled module, enabled role, usable native composition and current admission; it never grants writes. Original child captures do not contain `presets`: old captured workflow Planner children retain their original route, epoch and read-only ceiling without migration or current-parent permission reconstruction. Harness's native `/plan` and its plan-mode composition remain unchanged.
+Optional preset materialization writes only DSMM-owned role directories under its configured root. Ownership requires the exact role-bound marker and expected regular files; foreign directories, extra entries, links and containment escapes refuse update/removal. New directories publish by same-parent rename. A legacy marker is accepted only with the complete expected regular-file shape, never as permission to claim unrelated content. Disabling a role or materialization removes only verified owned directories. Materialized files remain export resources, not an alternative native registration mechanism.
+
+Managed Agent scopes supply their own `harness:identity` system section. The ordinary native identity remains unchanged outside those scopes; the override doesn't grant a role, tool or permission based on its displayed name.
+
+The Planner root flag follows deployment `presets`: Global and the current DSH entry may set it; named overlays cannot. This startup-pinned group requires an independent restart when changed. Planner can remain available for child spawning while root use is disabled. Forced creation and empty-root preset changes still require valid root admission before execution. Opting in requires the enabled module, role and usable composition; it never grants writes. Harness's native `/plan` remains collaboration state, not a permission upgrade.
 
 Standing Orchestrator/Builder compositions include native planning, compaction/pruning, question and todo rows. Planner includes planning, compaction/pruning and questions, but no todo writer. Coding/frontend/deep/complex/cross-cutting include compaction/pruning, questions and todo; other auxiliary roles add none of those rows. Native spawn can retain parent services, so this isn't a promise to strip every inherited row from short children. Effective filters and execution fences still decide access. Native `/plan` doesn't upgrade Planner permissions, and `/compact` remains a human native command.
 
@@ -25,7 +29,7 @@ Standing Orchestrator/Builder compositions include native planning, compaction/p
 | deep, complex, cross-cutting | Utility leaves and coding/frontend/hard-reasoning/creative/documenting specialists |
 | Native child Builder | Bounded utility leaves, not stage ownership |
 
-No child gains coordination authority from a preset label, persona or durable role string. The shared role policy checks exact live native ownership, original child capture, admitted epoch and provider/definition identity. Generic spawn can't bypass role admission in a DSMM-owned workflow. Unrelated ordinary off-mode native children retain Host behavior without acquiring DSMM delegation.
+No child gains coordination authority from a preset label, persona or serialized role string. The shared policy checks exact live native ownership/admission and provider/definition identity. Each call has its own pending child correlation; awaited creation installs immutable policy before queued input executes. Generic spawn/fork can't bypass role admission in a DSMM-controlled workflow. Unrelated ordinary off-mode native children retain Host behavior without acquiring DSMM delegation.
 
 Read-only roles remain read-only independently of mode and optional guards. Planner returns complete Markdown for native review/handoff; an authorized coordinator persists it. There is no Planner writer. Native catalog visibility and role permission are separate: a schema or read-only catalog listing doesn't authorize invocation, and own-layer native schemas may remain visible even when mandatory execution fences deny them.
 
@@ -35,27 +39,35 @@ Descendants intersect parent allow-lists with requested restrictions and union d
 
 Actual per-role or parameterized tool names, target IDs and `level`/opt-in `route` parameters are documented in [model routing](model-routing.md#tool-topology-and-target-filters). Default level is normal; low/high/max require explicit target configuration. Root model selection stays native-owned. Children capture route, visible-output locale and authority at admission, not from a parent's later profile.
 
-Foreground one-shot is the deployment default. A one-shot waits for useful native result/output and settles; its terminal child can't be revived as a continuable conversation. Structured result capture, cancellation, storage, capacity and teardown remain native-owned.
+Waiting for the official activation result is the default (`delivery:'caller'`). Only `stopReason:'completed'` is normal completion. Native output, structured result, diagnostics and partial output retain their separate meanings; interrupted or failed activation isn't reported as success. Cancellation after publication uses the activation receipt's `dispose()` and waits for cleanup, including cancellation racing with receipt creation.
 
-Explicit `enableRunInBackground` permits native jobs. With `backgroundMode:"one-shot"`, calls wait unless `run_in_background:true`. With opted-in `backgroundMode:"continuable"`, background continuation is the call default; `run_in_background:false` still waits for one-shot work. Continuable start requires a real native `prepareContinuable` method, not a capability flag alone. Omitted `maxDepth` delegates to the native limit; deployment depth/background settings aren't named-profile fields.
+Explicit `enableRunInBackground` exposes `run_in_background`. Only `true` selects background delivery, before start, using native `delivery:'parent'`. It returns accepted child/message information, and the native activation notifies the parent on completion. A legacy `backgroundMode` value isn't a selector for another execution owner or a promise of cold continuation. Omitted `maxDepth` delegates to the native limit; deployment depth/background settings aren't named-profile fields.
 
-A running foreground one-shot can be handed to background jobs using the exact published run, tool call, parent session and admission epoch. This transfers the same native run, not a restarted prompt or second child. The receipt reports `background`, `already-background`, `already-settled` or `cancelled`, with the same run ID and job ID where applicable. Starting, settled, cancelled, stale or unauthorized requests don't imply a new execution.
+A running waiting call can't be handed to background. There is no restart-as-handoff, second child or DSMM RoleRun/job owner. Native activation owns execution, results and disposal.
 
-## Native child panel and report
+## Child reports and control interfaces
 
-The session-scoped Conversation child panel shows actual runs, direct children and a read-only descendant tree. IDs, activity, mode, admitted role/level, route comparison, original evidence and disabled reasons remain separate facts. Corrupt, unsupported or unavailable branches show diagnostics, not fabricated successful results. Descendant inspection doesn't grant control over non-direct children.
+Child report interfaces expose actual runs, direct children and a read-only descendant tree. IDs, activity, mode, admitted role/level, route comparison, original evidence and disabled reasons remain separate facts. Corrupt, unsupported or unavailable branches report diagnostics, not fabricated success. Descendant inspection doesn't grant control over non-direct children. The current client doesn't register a separate Conversation child tab; retained interfaces or components aren't proof of a reachable panel.
 
-Route comparison uses the current version-3 `invocation-capture` and the child's latest `own-native-request-header`. Missing, invalid, old-version, or unobserved evidence remains unknown and refuses current resume; it is never inferred from the root route, current profile, role label, or compatibility projection.
+Route comparison uses the live admitted `invocation-capture` and the child's latest `own-native-request-header`. Missing, invalid or unobserved evidence remains unknown; it is never inferred from a root route, current profile or role label. Display metadata isn't a cold-recovery credential.
 
-Human messages target only an admitted direct continuable child with current parent authority and ready delivery fencing. Entries whose observed control projection is read-only remain inspection-only; this isn't the role's tool-level read-only policy. **Queue** accepts a distinct later turn; **Steer** targets the nearest step. Idle/cold continuation keeps the same durable child ID. Native attachment and model admission validate images separately.
+Human messages target only a supported live direct child with current exact-parent authority and native capabilities. Entries whose observed control projection is read-only remain inspection-only; this isn't the role's tool-level read-only policy. **Queue** accepts a distinct later turn; **Steer** targets the nearest step. An idle live child can receive another turn, but DSMM cold resume without trusted live binding is unsupported. Native attachment/model capabilities separately determine image availability.
 
 An inbox receipt means **accepted**, not executed or completed. An interrupt acknowledgment isn't completion and doesn't claim queued work was removed. If transport leaves a send outcome unknown, the draft stays visible and automatic resend is disabled. Inspect the native child conversation before explicitly allowing a new message, which could duplicate an accepted one. Refresh and reconnection never imply automatic retry.
 
-## Explicit runtime and capture boundaries
+## Invocation presentation
 
-Managed delivery uses the bundled explicit cold-start Agent registry/runtime/Main composition, not automatic replacement by the default bundle. Keep one provider in the same Host scope, preserve native spawn/fork/model/Gateway services, and retain explicit capacity/depth settings. Runtime binding, delivery readiness and restart requirement are observable separately. See [settings](settings-status.md#child-runtime-composition).
+Native per-role and parameterized delegation call views distinguish **requested** role/category/level from **actual** validated invocation metadata. Pending raw arguments don't prove execution; error results or missing metadata don't establish actual identity. Route source and model IDs are shown only from the validated result projection, not inferred from a role name or requested route.
 
-An old child without a valid version-3 capture is unsupported in 0.3.0 and remains untouched. The legacy-read adapter is not exported or composed; current parent settings cannot be treated as recovered history. See [compatibility](compatibility.md#retired-compatibility-surfaces).
+Collapsed rows show **调用 Coding** / **Call Coding** once a complete target is available, even while remaining arguments stream. Child labels use **Coding: task description**. Failures, interruptions and current-format replay, including nested PTC, keep the requested name without inventing actual execution. Native safety refusal views take precedence.
+
+Arguments, result content, errors and metadata remain inspectable as JSON. Nontext results don't receive a rich preview. Calls without a usable native window use native fallback behavior. The view is presentation-only: it doesn't select a route, change approval or grant delegation authority.
+
+## Runtime and admission boundaries
+
+Official AgentRegistry, SubagentRuntime and JSONL namespace plugins own execution and storage. There is no custom Registry/Runtime selector, manual-runtime activation path or companion requirement. Native runtime availability and actual DSMM admission are still separate observations; seeing a catalog isn't proof of callable policy. See [settings](settings-status.md#child-runtime-composition).
+
+Cold DSMM recovery without a trusted live binding refuses execution and preserves history. Logs, IDs, PluginRecord display data or current parent settings can't restore authority. Read-only history queries don't resume Agents. `preset-skills` is an internal handle installed and released by the admitted Agent scope, not a public plugin. See [compatibility](compatibility.md#retired-compatibility-surfaces).
 
 Native Host commands, sessions, inbox, permissions, process/cwd/model selection and transports retain ownership. DSMM supplies role admission and bounded controls, not a replacement lifecycle scheduler, generic permission bypass or automatic retry system.
 

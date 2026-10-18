@@ -1,5 +1,5 @@
 import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, opendirSync, readSync, realpathSync, renameSync, unlinkSync, writeSync } from "node:fs";
-import type { Stats } from "node:fs";
+import type { Stats, BigIntStats } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { parseTree } from "jsonc-parser";
@@ -12,6 +12,8 @@ import type { ProfileDiagnostic } from "./profile-diagnostics.js";
 import { inspectJsonDocument } from "./profile-diagnostics.js";
 import { parseChildAdmissionCapture } from "./child-capture.js";
 import type { ChildAdmissionCapture } from "./child-capture.js";
+import { isProfileReference } from "./config-revision.js";
+import { validateAdmissionEpoch } from "./profiles.js";
 
 export type SaveProfileRequest = ProfileSaveRequest;
 export type SelectProfileRequest = ProfileSelectRequest;
@@ -37,15 +39,22 @@ export interface SessionProfileCommit<T> {
   /** Synchronous publication after durable commit. Must not throw or await. */
   committed(selection: LoadedSessionProfileSelection, prepared: T): void;
 }
+export interface ProfileCommit<T> {
+  prepare(selection: LoadedProfileSelection, prepared: T): void;
+  committed(selection: LoadedProfileSelection, prepared: T): void;
+}
 
 export interface ProfileStoreOptions {
   lockTimeoutMs?: number;
   lockPollMs?: number;
   /** Narrow test seam for a failed atomic replacement; never delete the old target. */
   rename?: (source: string, destination: string) => void;
+  /** Optional observation seam, after rename and synchronous admission publication. */
+  observe?: (path: string) => void;
 }
 
 interface ProfileFile {
+  identity: BigIntStats;
   bytes: Buffer;
   content: string;
   revision: string;
@@ -57,9 +66,10 @@ interface ProfileDraft extends ProfileFile {
 }
 
 interface SelectionPointer {
-  version: 1;
+  version: 1 | 2;
   id: string | null;
   revision: string | null;
+  sourceRevision?: string;
 }
 
 interface SessionSelectionPointer extends SelectionPointer {
@@ -87,6 +97,7 @@ export class ProfileStore {
   private readonly timeoutMs: number;
   private readonly pollMs: number;
   private readonly rename: (source: string, destination: string) => void;
+  private readonly observe?: (path: string) => void;
   private rootIdentity?: Stats;
   readonly origin: ProfileStoreMetadata["origin"];
   private readonly hostProfile?: string;
@@ -104,6 +115,7 @@ export class ProfileStore {
     this.timeoutMs = boundedOption(options.lockTimeoutMs, 2000, 0, 30000);
     this.pollMs = boundedOption(options.lockPollMs, 25, 1, 1000);
     this.rename = options.rename ?? renameSync;
+    this.observe = options.observe;
   }
 
   static fromCentral(home: string, canonicalHostProfile: string, actualEntryId: string, options: ProfileStoreOptions = {}): ProfileStore {
@@ -151,7 +163,7 @@ export class ProfileStore {
       });
       try {
         const selected = this.selection();
-        return { ...this.metadata(), profiles, selectedId: selected.selectedId, appliedRevision: selected.appliedRevision, selectionRevision: selected.selectionRevision, ...(selected.warnings === undefined ? {} : { selectedWarnings: selected.warnings }) };
+        return { ...this.metadata(), profiles, selectedId: selected.selectedId, appliedRevision: selected.appliedRevision, selectionRevision: selected.selectionRevision, ...(selected.sourceRevision === undefined ? {} : { sourceRevision: selected.sourceRevision }), ...(selected.warnings === undefined ? {} : { selectedWarnings: selected.warnings }) };
       } catch (error) {
         // An error is not a successful fallback to the baseline.
         return { ...this.metadata(), profiles, selectedId: null, appliedRevision: null, selectionRevision: "unavailable", selectionError: profileErrorInfo(error, "corrupt-selection") };
@@ -164,13 +176,16 @@ export class ProfileStore {
     return this.readOperation(() => this.readResult(this.draft(id, this.inventory())));
   }
 
-  async save(request: ProfileSaveRequest): Promise<ProfileReadResult> {
+  /** The optional fence belongs to the trusted server caller, never the saved document. */
+  async save(request: ProfileSaveRequest, assertCurrent?: () => void): Promise<ProfileReadResult> {
     this.assertWritable();
+    assertCurrent?.();
     validateProfileId(request.id);
     const document = parseProfileDocument(request.content, request.id);
     const warnings = validateProfileDocument(request.content, request.id).diagnostics;
     if (request.expectedRevision !== null) validateProfileRevision(request.expectedRevision);
     return this.locked((assertLock) => {
+      assertCurrent?.();
       const entries = this.inventory();
       const name = this.draftName(request.id, entries);
       const current = name === undefined ? undefined : this.draft(request.id, entries);
@@ -178,12 +193,13 @@ export class ProfileStore {
       if (current === undefined && entries.length >= MAX_PROFILE_COUNT) throw new DsmmProfileError("limit", "At most 128 Deepwork profiles are supported.");
       const bytes = Buffer.from(request.content, "utf8");
       const target = join(this.profileDir, `${request.id}.jsonc`);
-      this.atomicReplace(target, bytes, () => {
+      const owned = this.atomicReplace(target, bytes, () => {
         const latestNames = this.inventory();
         const latest = this.draftName(request.id, latestNames) === undefined ? null : this.draft(request.id, latestNames).revision;
         if (latest !== request.expectedRevision) conflict("The profile was edited externally during save. Reload it before saving.");
-      }, assertLock);
-      return this.readResult({ bytes, content: request.content, revision: digest(bytes), document, ...(warnings.length ? { warnings } : {}) });
+      }, assertLock, assertCurrent);
+      const observed = observeCommitted(target, owned, this.observe);
+      return { ...this.readResult({ content: request.content, revision: observed.revision, document, ...(warnings.length ? { warnings } : {}) }), ...observed };
     });
   }
 
@@ -202,7 +218,7 @@ export class ProfileStore {
     this.assertWritable();
     validateSessionProfileId(request.sessionId);
     validateSelectionRequest(request);
-    validateProfileRevision(epoch, "admissionEpoch");
+    validateAdmissionEpoch(epoch);
     return this.locked(async (assertLock) => {
       commit.assertCurrent();
       if (this.sessionSelection(request.sessionId).selectionRevision !== request.expectedSelectionRevision) conflict("The session profile changed. Refresh before selecting again.");
@@ -230,22 +246,28 @@ export class ProfileStore {
       commit.assertCurrent();
       validateDirectories(directory, true, false, this.identities);
       fence();
-      if (draft !== undefined) this.publishRevision(draft, assertLock);
-      const pointer: SessionSelectionPointer = { version: 1, sessionId: request.sessionId, id: request.id, revision: draft?.revision ?? null, epoch };
+      const revision = draft === undefined ? null : this.publishRevision(draft, assertLock);
+      const source = draft === undefined ? {} : { sourceRevision: draft.revision };
+      const pointer: SessionSelectionPointer = { version: 2, sessionId: request.sessionId, id: request.id, revision, epoch, ...source };
       const bytes = Buffer.from(`${JSON.stringify(pointer)}\n`, "utf8");
       const selection: LoadedSessionProfileSelection = { sessionId: request.sessionId, admissionEpoch: epoch,
-        selectedId: request.id, appliedRevision: draft?.revision ?? null, selectionRevision: digest(bytes), document: draft?.document ?? null, content: draft?.content ?? null, ...warningFields(draft) };
+        selectedId: request.id, appliedRevision: revision, selectionRevision: "unavailable", document: draft?.document ?? null, content: draft?.content ?? null, ...source, ...warningFields(draft) };
       commit.prepare?.(selection, prepared);
-      this.atomicReplace(target, bytes, fence, assertLock);
+      const owned = this.atomicReplace(target, bytes, fence, assertLock);
       commit.committed(selection, prepared);
+      const observed = observeCommitted(target, owned, this.observe);
+      selection.selectionRevision = observed.revision;
+      if (observed.refreshRequired) selection.refreshRequired = true;
       return { selection, prepared };
     });
   }
 
-  async select<T = undefined>(request: ProfileSelectRequest, validateCandidate?: (document: DsmmProfileDocument | null) => T | Promise<T>): Promise<{ selection: LoadedProfileSelection; prepared: T }> {
+  async select<T = undefined>(request: ProfileSelectRequest, validateCandidate?: (document: DsmmProfileDocument | null) => T | Promise<T>, commit?: ProfileCommit<T>, assertCurrent?: () => void): Promise<{ selection: LoadedProfileSelection; prepared: T }> {
     this.assertWritable();
+    assertCurrent?.();
     validateSelectionRequest(request);
     return this.locked(async (assertLock) => {
+      assertCurrent?.();
       const current = this.selection();
       if (current.selectionRevision !== request.expectedSelectionRevision) conflict("The selected profile changed. Refresh before selecting again.");
       const draft = request.id === null ? undefined : this.draft(request.id, this.inventory());
@@ -258,25 +280,31 @@ export class ProfileStore {
         throw new DsmmProfileError("activation", "The candidate profile could not be activated; the previous selection was retained.");
       }
       // The audit may await native work. Recheck security and CAS afterwards.
+      assertCurrent?.();
       assertLock();
       this.assertSelectionRevision(request.expectedSelectionRevision);
       if (draft !== undefined && this.draft(request.id!, this.inventory()).revision !== draft.revision) conflict("The draft changed during activation. Reload and select again.");
-      if (draft !== undefined) this.publishRevision(draft, assertLock);
-      const pointer: SelectionPointer = { version: 1, id: request.id, revision: draft?.revision ?? null };
+      const revision = draft === undefined ? null : this.publishRevision(draft, assertLock);
+      const source = draft === undefined ? {} : { sourceRevision: draft.revision };
+      const pointer: SelectionPointer = { version: 2, id: request.id, revision, ...source };
       const bytes = Buffer.from(`${JSON.stringify(pointer)}\n`, "utf8");
       this.validateState(true);
-      this.atomicReplace(join(this.stateDir, ".selection.json"), bytes, () => {
+      const selection: LoadedProfileSelection = { selectedId: request.id, appliedRevision: revision, selectionRevision: "unavailable", document: draft?.document ?? null, content: draft?.content ?? null, ...source, ...warningFields(draft) };
+      commit?.prepare(selection, prepared);
+      const target = join(this.stateDir, ".selection.json");
+      const owned = this.atomicReplace(target, bytes, () => {
         this.assertSelectionRevision(request.expectedSelectionRevision);
         if (draft !== undefined && this.draft(request.id!, this.inventory()).revision !== draft.revision) conflict("The draft changed during selection. Reload and select again.");
-      }, assertLock);
-      return {
-        selection: { selectedId: request.id, appliedRevision: draft?.revision ?? null, selectionRevision: digest(bytes), document: draft?.document ?? null, content: draft?.content ?? null, ...warningFields(draft) },
-        prepared
-      };
+      }, assertLock, assertCurrent);
+      commit?.committed(selection, prepared);
+      const observed = observeCommitted(target, owned, this.observe);
+      selection.selectionRevision = observed.revision;
+      if (observed.refreshRequired) selection.refreshRequired = true;
+      return { selection, prepared };
     });
   }
 
-  private readResult(draft: ProfileDraft): ProfileReadResult {
+  private readResult(draft: Pick<ProfileDraft, "document" | "revision" | "content" | "warnings">): ProfileReadResult {
     return { id: draft.document.id, ...(draft.document.label === undefined ? {} : { label: draft.document.label }), revision: draft.revision, content: draft.content, ...warningFields(draft) };
   }
 
@@ -322,10 +350,10 @@ export class ProfileStore {
       if (pointer.id === null) return { selectedId: null, appliedRevision: null, selectionRevision: file.revision, document: null, content: null };
       validateDirectories(join(this.profileDir, ".revisions"), false);
       const immutable = regularFile(join(this.profileDir, ".revisions", `${pointer.revision}.jsonc`), MAX_PROFILE_BYTES);
-      if (immutable.revision !== pointer.revision) throw new DsmmProfileError("corrupt-selection", "The selected immutable profile revision failed its SHA256 verification.");
-      return { selectedId: pointer.id, appliedRevision: pointer.revision, selectionRevision: file.revision, ...validatedProfile(immutable.content, pointer.id), content: immutable.content };
+      assertPointerVersion(path, file);
+      return { selectedId: pointer.id, appliedRevision: pointer.revision, selectionRevision: file.revision, ...(pointer.sourceRevision === undefined ? {} : { sourceRevision: pointer.sourceRevision }), ...validatedProfile(immutable.content, pointer.id), content: immutable.content };
     } catch (error) {
-      if (error instanceof DsmmProfileError && error.code === "unsafe-path") throw error;
+      if (error instanceof DsmmProfileError && (error.code === "unsafe-path" || error.code === "conflict")) throw error;
       if (error instanceof DsmmProfileError && error.reason !== undefined) throw new DsmmProfileError("corrupt-selection", error.message, error.field, error.reason, error.location);
       throw new DsmmProfileError("corrupt-selection", "The selected profile pointer or immutable revision is missing or invalid. Repair it explicitly; the baseline was not silently selected.");
     }
@@ -350,11 +378,11 @@ export class ProfileStore {
       if (pointer.id === null) return { ...absent, admissionEpoch: pointer.epoch, selectionRevision: file.revision };
       validateDirectories(join(this.profileDir, ".revisions"), false);
       const immutable = regularFile(join(this.profileDir, ".revisions", `${pointer.revision}.jsonc`), MAX_PROFILE_BYTES);
-      if (immutable.revision !== pointer.revision) throw new DsmmProfileError("corrupt-selection", "The session's immutable profile revision failed SHA256 verification.");
+      assertPointerVersion(path, file);
       return { sessionId, admissionEpoch: pointer.epoch, selectedId: pointer.id, appliedRevision: pointer.revision,
-        selectionRevision: file.revision, ...validatedProfile(immutable.content, pointer.id), content: immutable.content };
+        selectionRevision: file.revision, ...(pointer.sourceRevision === undefined ? {} : { sourceRevision: pointer.sourceRevision }), ...validatedProfile(immutable.content, pointer.id), content: immutable.content };
     } catch (error) {
-      if (error instanceof DsmmProfileError && error.code === "unsafe-path") throw error;
+      if (error instanceof DsmmProfileError && (error.code === "unsafe-path" || error.code === "conflict")) throw error;
       if (error instanceof DsmmProfileError && error.reason !== undefined) throw new DsmmProfileError("corrupt-selection", error.message, error.field, error.reason, error.location);
       throw new DsmmProfileError("corrupt-selection", "The session profile choice or immutable revision is missing or invalid. Repair it explicitly; no global or baseline fallback was admitted.");
     }
@@ -364,16 +392,12 @@ export class ProfileStore {
     if (this.selection().selectionRevision !== expected) conflict("The selection was edited externally. Refresh before selecting again.");
   }
 
-  private publishRevision(draft: ProfileDraft, assertLock: () => void): void {
+  private publishRevision(draft: ProfileDraft, assertLock: () => void): string {
     assertLock();
     const directory = join(this.profileDir, ".revisions");
     validateDirectories(directory, true);
-    const path = join(directory, `${draft.revision}.jsonc`);
-    if (status(path) !== undefined) {
-      const existing = regularFile(path, MAX_PROFILE_BYTES);
-      if (existing.revision !== draft.revision || !existing.bytes.equals(draft.bytes)) throw new DsmmProfileError("corrupt-selection", "An immutable profile revision has been altered; no selection was committed.");
-      return;
-    }
+    const revision = `snapshot-v1-${randomUUID()}`;
+    const path = join(directory, `${revision}.jsonc`);
     if (boundedEntries(directory, MAX_PROFILE_REVISIONS).length >= MAX_PROFILE_REVISIONS) throw new DsmmProfileError("limit", "The immutable revision inventory is full; no selection was committed.");
     let fd: number | undefined;
     let created = false;
@@ -390,13 +414,14 @@ export class ProfileStore {
       if (created) unlinkSync(path);
       throw error;
     }
+    return revision;
   }
 
-  private atomicReplace(target: string, bytes: Buffer, beforeRename: (temporary: string) => void, assertLock: () => void): void {
-    atomicReplace(target, bytes, beforeRename, () => {
+  private atomicReplace(target: string, bytes: Buffer, beforeRename: (temporary: string) => void, assertLock: () => void, assertCurrent?: () => void): BigIntStats {
+    return atomicReplace(target, bytes, beforeRename, () => {
       assertLock();
       validateDirectories(dirname(target), false, false, this.identities);
-    }, this.rename);
+    }, this.rename, assertCurrent);
   }
 
   private validateRoot(create: boolean): boolean {
@@ -502,7 +527,7 @@ export class ProfileStore {
       if (inspected.diagnostics.length) throw new Error("Invalid child JSON");
       const envelope = JSON.parse(file.content) as Record<string, unknown>;
       if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope) || Object.keys(envelope).length !== 3 || envelope.version !== 1 || !Object.hasOwn(envelope, "revision") || !Object.hasOwn(envelope, "capture")) throw new Error("Invalid capture envelope");
-      validateProfileRevision(envelope.revision, "revision");
+      validateAdmissionEpoch(envelope.revision, "revision");
       if (digest(Buffer.from(JSON.stringify(envelope.capture), "utf8")) !== envelope.revision) throw new Error("Capture integrity mismatch");
       const capture = parseChildAdmissionCapture(envelope.capture);
       if (capture.childSessionId !== childId || capture.parentSessionId !== parentId) throw new Error("Child capture identity mismatch");
@@ -513,14 +538,10 @@ export class ProfileStore {
   private async readOperation<T>(operation: () => T): Promise<T> {
     if (this.origin === "explicit") return this.locked(operation);
     try {
-      const first = operation();
-      const second = operation();
+      const result = operation();
       this.validateRoot(false);
       this.validateState(false);
-      if (JSON.stringify(first) !== JSON.stringify(second)) {
-        throw new DsmmProfileError(this.origin === "legacy" ? "corrupt-selection" : "conflict", "Profile storage changed during the read. No selection was admitted; retry after it is stable.");
-      }
-      return second;
+      return result;
     } catch (error) {
       if (error instanceof DsmmProfileError) throw error;
       throw new DsmmProfileError("io", "Deepwork profile storage could not be read safely.");
@@ -587,7 +608,7 @@ async function locked<T>(directory: string, lockName: string, validateRoot: (cre
 }
 
 function atomicReplace(target: string, bytes: Buffer, beforeRename: (temporary: string) => void, assertAuthority: () => void,
-  rename: (source: string, destination: string) => void, assertCurrent?: () => void): void {
+  rename: (source: string, destination: string) => void, assertCurrent?: () => void): BigIntStats {
   assertAuthority();
   if (status(target) !== undefined) assertRegular(status(target)!);
   const temporary = join(dirname(target), `.dsmm-tmp-${randomUUID()}`);
@@ -598,6 +619,7 @@ function atomicReplace(target: string, bytes: Buffer, beforeRename: (temporary: 
     fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
     created = true;
     owned = fstatSync(fd);
+    const ownedIdentity = fstatSync(fd, { bigint: true });
     assertRegular(owned);
     writeAll(fd, bytes);
     fsyncSync(fd);
@@ -612,7 +634,7 @@ function atomicReplace(target: string, bytes: Buffer, beforeRename: (temporary: 
     assertCurrent?.();
     rename(temporary, target);
     created = false;
-    // rename is the transaction commit. No fallible work follows it.
+    return ownedIdentity;
   } finally {
     if (fd !== undefined) closeSync(fd);
     if (created) {
@@ -640,7 +662,22 @@ function trustedHome(home: string): string {
 }
 
 /** @internal Shared only by the fixed config file adapter; not a wire-path storage API. */
-export const profileStoreFilePrimitives = { trustedHome, validateDirectories, status, regularFile, digest, boundedOption, locked, atomicReplace };
+export const profileStoreFilePrimitives = { trustedHome, validateDirectories, status, regularFile, observeCommitted, boundedOption, locked, atomicReplace };
+
+function statRevision(stat: BigIntStats): string { return `stat-v1-${stat.mtimeNs}-${stat.ctimeNs}`; }
+function assertPointerVersion(path: string, file: ProfileFile): void {
+  if (observeCommitted(path, file.identity).revision !== file.revision) conflict("The selection version changed while reading its snapshot.");
+}
+function observeCommitted(path: string, owned: BigIntStats, observe?: (path: string) => void): { revision: string; refreshRequired?: true } {
+  try {
+    observe?.(path);
+    validateDirectories(dirname(path), false);
+    const named = lstatSync(path, { bigint: true });
+    assertRegular(named);
+    if (named.dev !== owned.dev || named.ino !== owned.ino) throw new Error("Committed target was replaced");
+    return { revision: statRevision(named) };
+  } catch { return { revision: "unavailable", refreshRequired: true }; }
+}
 
 function boundedOption(value: number | undefined, fallback: number, minimum: number, maximum: number): number {
   if (value === undefined) return fallback;
@@ -691,8 +728,8 @@ function validateDirectories(directory: string, create: boolean, allowMissing = 
   return true;
 }
 
-function assertRegular(found: Stats): void {
-  if (found.isSymbolicLink() || !found.isFile() || found.nlink !== 1) throw new DsmmProfileError("unsafe-path", "Profile files and lock files must be regular, unlinked files, not symlinks, junctions, directories or hard links.");
+function assertRegular(found: Stats | BigIntStats): void {
+  if (found.isSymbolicLink() || !found.isFile() || (found.nlink !== 1 && found.nlink !== 1n)) throw new DsmmProfileError("unsafe-path", "Profile files and lock files must be regular, unlinked files, not symlinks, junctions, directories or hard links.");
 }
 
 function sameFile(first: Stats, second: Stats): boolean {
@@ -709,6 +746,7 @@ function regularFile(path: string, maximum: number): ProfileFile {
   try {
     validateDirectories(dirname(path), false);
     const opened = fstatSync(fd);
+    const openedVersion = fstatSync(fd, { bigint: true });
     assertRegular(opened);
     if (!sameFile(before, opened)) conflict("The profile file changed while it was opened. Retry the operation.");
     const buffer = Buffer.alloc(maximum + 1);
@@ -720,15 +758,18 @@ function regularFile(path: string, maximum: number): ProfileFile {
     }
     if (size > maximum) throw new DsmmProfileError("limit", "Profile storage contains an oversized file.");
     const after = fstatSync(fd);
+    const afterVersion = fstatSync(fd, { bigint: true });
     const named = status(path);
+    const namedVersion = lstatSync(path, { bigint: true });
     validateDirectories(dirname(path), false);
     assertRegular(after);
     if (named !== undefined) assertRegular(named);
     if (named === undefined || !sameFile(opened, named) || opened.size !== after.size || opened.mtimeMs !== after.mtimeMs || opened.ctimeMs !== after.ctimeMs) conflict("The profile file was edited while being read. Retry the operation.");
+    if (statRevision(openedVersion) !== statRevision(afterVersion) || statRevision(afterVersion) !== statRevision(namedVersion) || afterVersion.ino !== namedVersion.ino || afterVersion.dev !== namedVersion.dev) conflict("The file version changed while being read.");
     const bytes = buffer.subarray(0, size);
     let content: string;
     try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch { throw new DsmmProfileError("validation", "Profile files must contain valid UTF-8 text.", "content"); }
-    return { bytes, content, revision: digest(bytes) };
+    return { bytes, content, revision: statRevision(afterVersion), identity: afterVersion };
   } finally { closeSync(fd); }
 }
 
@@ -758,16 +799,19 @@ function writeAll(fd: number, bytes: Buffer): void {
 function parseSelectionPointer(content: string): SelectionPointer {
   const errors: ParseError[] = [];
   const tree = parseTree(content, errors, { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false });
-  if (tree?.type !== "object" || errors.length > 0 || tree.children?.length !== 3) throw new DsmmProfileError("corrupt-selection", "The selected profile pointer must contain exactly three unique fields in valid JSON.");
+  if (tree?.type !== "object" || errors.length > 0) throw new DsmmProfileError("corrupt-selection", "The selected profile pointer must contain unique fields in valid JSON.");
   let input: unknown;
   try { input = JSON.parse(content) as unknown; } catch { throw new DsmmProfileError("corrupt-selection", "The selected profile pointer is not valid JSON."); }
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw new DsmmProfileError("corrupt-selection", "The selected profile pointer must be a versioned object.");
   const record = input as Record<string, unknown>;
-  if (Object.keys(record).length !== 3 || !["version", "id", "revision"].every((key) => Object.hasOwn(record, key)) || record.version !== 1) throw new DsmmProfileError("corrupt-selection", "The selected profile pointer has an unsupported shape or version.");
-  if (record.id === null && record.revision === null) return { version: 1, id: null, revision: null };
+  const allowed = ["version", "id", "revision", ...record.version === 2 ? ["sourceRevision"] : []];
+  if (tree.children?.length !== Object.keys(record).length || !["version", "id", "revision"].every((key) => Object.hasOwn(record, key)) || Object.keys(record).some(key => !allowed.includes(key)) || (record.version !== 1 && record.version !== 2)) throw new DsmmProfileError("corrupt-selection", "The selected profile pointer has an unsupported shape or version.");
+  if (record.id === null && record.revision === null && !Object.hasOwn(record, "sourceRevision")) return { version: record.version, id: null, revision: null };
   validateProfileId(record.id);
-  validateProfileRevision(record.revision, "revision");
-  return { version: 1, id: record.id, revision: record.revision };
+  if (!isProfileReference(record.revision)) throw new DsmmProfileError("corrupt-selection", "Invalid snapshot reference.");
+  if (record.version === 1) validateAdmissionEpoch(record.revision, "revision");
+  if (Object.hasOwn(record, "sourceRevision")) validateProfileRevision(record.sourceRevision, "sourceRevision");
+  return { version: record.version, id: record.id, revision: record.revision, ...(typeof record.sourceRevision === "string" ? { sourceRevision: record.sourceRevision } : {}) };
 }
 
 export function validateSessionProfileId(id: unknown): asserts id is string {
@@ -791,13 +835,14 @@ function validateSelectionRequest(request: ProfileSelectRequest): void {
 function parseSessionSelectionPointer(content: string, sessionId: string): SessionSelectionPointer {
   const errors: ParseError[] = [];
   const tree = parseTree(content, errors, { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false });
-  if (tree?.type !== "object" || errors.length > 0 || tree.children?.length !== 5) throw new DsmmProfileError("corrupt-selection", "The session choice must contain exactly five unique fields in valid JSON.");
+  if (tree?.type !== "object" || errors.length > 0) throw new DsmmProfileError("corrupt-selection", "The session choice must contain unique fields in valid JSON.");
   const record = JSON.parse(content) as Record<string, unknown>;
-  if (Object.keys(record).length !== 5 || !["version", "sessionId", "id", "revision", "epoch"].every((key) => Object.hasOwn(record, key)) || record.version !== 1 || record.sessionId !== sessionId) {
+  const allowed = ["version", "sessionId", "id", "revision", "epoch", ...record.version === 2 ? ["sourceRevision"] : []];
+  if (tree.children?.length !== Object.keys(record).length || Object.keys(record).some(key => !allowed.includes(key)) || !["version", "sessionId", "id", "revision", "epoch"].every((key) => Object.hasOwn(record, key)) || record.sessionId !== sessionId) {
     throw new DsmmProfileError("corrupt-selection", "The session choice identity, shape or version is invalid.");
   }
-  validateProfileRevision(record.epoch, "admissionEpoch");
-  const selection = parseSelectionPointer(JSON.stringify({ version: record.version, id: record.id, revision: record.revision }));
+  validateAdmissionEpoch(record.epoch);
+  const selection = parseSelectionPointer(JSON.stringify({ version: record.version, id: record.id, revision: record.revision, ...Object.hasOwn(record, "sourceRevision") ? { sourceRevision: record.sourceRevision } : {} }));
   return { ...selection, sessionId, epoch: record.epoch };
 }
 

@@ -1,10 +1,7 @@
 import { LlmError } from "@deepseek-ai/dsh-llm";
-import { requiresDsmmCallAdmission, snapshotDsmmCall } from "./host-llm.js";
+import { captureDsmmEffortSource, requiresDsmmCallAdmission, snapshotDsmmCall } from "./host-llm.js";
 import { resolvedModelParameterPolicy } from "./model-parameter-policy.js";
 import { modelRouteFromCall, projectModelRouteParameters } from "./role-llm.js";
-import { capturedRoleInvocation } from "./role-invocation.js";
-import { latestNativeModelSelection } from "./role-routing.js";
-import { resolveSelectedAgentPreset } from "./session-scope.js";
 /** Connect the cold Host LLM owner to the existing exact Agent/role admission authority. */
 export function createDsmmRoleLlmOwner(ctx, providers) {
     const nativeFallback = async (frame, proposal) => {
@@ -32,20 +29,17 @@ export function createDsmmRoleLlmOwner(ctx, providers) {
             if (original !== admission.admission)
                 throw new Error("LLM policy does not own the exact admission");
             const policy = resolvedModelParameterPolicy(original);
-            const invocation = capturedRoleInvocation(agent);
-            const effortSource = latestNativeModelSelection(agent) !== undefined
-                || frame.agent.session.header.origin !== "subagent" && !resolveSelectedAgentPreset(agent.session)?.startsWith("dsmm-")
-                ? "native" : invocation?.effortSource ?? (invocation?.routeSource === "inherited" ? "native" : "dsmm-config");
+            const effortSource = captureDsmmEffortSource(frame.agent);
             const config = snapshotDsmmCall(projectModelRouteParameters(modelRouteFromCall(proposal), effortSource, policy.mode !== "native-defaults"));
             admission.assertCurrent();
             if (policy.mode !== "passthrough") {
-                return { kind: "stock", admission, config };
+                return { kind: "stock", admission, config, effortSource };
             }
             if (!requiresDsmmCallAdmission(config, providers)) {
                 try {
                     await ctx.get("llm").resolveCallConfig(config, frame.signal);
                     admission.assertCurrent();
-                    return { kind: "stock", admission, config };
+                    return { kind: "stock", admission, config, effortSource };
                 }
                 catch (error) {
                     if (!(error instanceof LlmError) || error.code !== "UNSUPPORTED_OPTION"
@@ -55,7 +49,7 @@ export function createDsmmRoleLlmOwner(ctx, providers) {
             }
             const generation = providers.generation(config.provider);
             admission.assertCurrent();
-            return { kind: "dsmm", admission, config, generation };
+            return { kind: "dsmm", admission, config, generation, effortSource };
         },
     };
 }

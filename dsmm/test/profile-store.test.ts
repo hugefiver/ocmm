@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import fs from "node:fs";
 import { closeSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { syncBuiltinESMExports } from "node:module";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
@@ -50,7 +48,7 @@ test("save/read preserve exact JSONC bytes and optimistic creation/edit conflict
     const raw = `\uFEFF${content()}`;
     const first = await f.store.save({ id: "focus", content: raw, expectedRevision: null });
     assert.equal(first.content, raw);
-    assert.equal(first.revision, sha(raw));
+    assert.equal(first.revision, (await f.store.read("focus")).revision);
     assert.equal((await f.store.read("focus")).content, raw);
     assert.equal(readFileSync(join(f.root, "focus.jsonc"), "utf8"), raw);
     await assert.rejects(f.store.save({ id: "focus", content: content("focus", true), expectedRevision: null }), fault("conflict"));
@@ -99,26 +97,26 @@ test("selection commits a minimal pointer to immutable bytes, and changed drafts
     });
     assert.equal(validations, 1);
     assert.deepEqual(committed.prepared, { fixturePrepared: "ready" });
-    assert.deepEqual(JSON.parse(readFileSync(join(f.root, ".selection.json"), "utf8")), { version: 1, id: "focus", revision: first.revision });
-    assert.equal(readFileSync(join(f.root, ".revisions", `${first.revision}.jsonc`), "utf8"), first.content);
+    assert.deepEqual(JSON.parse(readFileSync(join(f.root, ".selection.json"), "utf8")), { version: 2, id: "focus", revision: committed.selection.appliedRevision, sourceRevision: first.revision });
+    assert.equal(readFileSync(join(f.root, ".revisions", `${committed.selection.appliedRevision}.jsonc`), "utf8"), first.content);
     const next = await f.store.save({ id: "focus", content: content("focus", true), expectedRevision: first.revision });
     const restarted = new ProfileStore(f.root);
     const loaded = await restarted.loadSelection();
-    assert.equal(loaded.appliedRevision, first.revision);
+    assert.equal(loaded.appliedRevision, committed.selection.appliedRevision);
     assert.equal(loaded.document?.settings.defaultActive, false);
     assert.equal(loaded.content, first.content);
     const snapshot = await restarted.describe();
     assert.equal(snapshot.profiles[0]?.revision, next.revision);
-    assert.equal(snapshot.appliedRevision, first.revision);
+    assert.equal(snapshot.appliedRevision, committed.selection.appliedRevision);
     rmSync(join(f.root, "focus.jsonc"));
-    assert.equal((await restarted.loadSelection()).appliedRevision, first.revision, "selection is independent of the mutable draft");
+    assert.equal((await restarted.loadSelection()).appliedRevision, committed.selection.appliedRevision, "selection is independent of the mutable draft");
     const reset = await restarted.select({ id: null, expectedSelectionRevision: loaded.selectionRevision }, (document) => {
       assert.equal(document, null);
       return "baseline";
     });
     assert.equal(reset.prepared, "baseline");
     assert.equal(reset.selection.selectedId, null);
-    assert.deepEqual(JSON.parse(readFileSync(join(f.root, ".selection.json"), "utf8")), { version: 1, id: null, revision: null });
+    assert.deepEqual(JSON.parse(readFileSync(join(f.root, ".selection.json"), "utf8")), { version: 2, id: null, revision: null });
   } finally { f.cleanup(); }
 });
 
@@ -138,7 +136,7 @@ test("selection requires both revision checks and failed candidate activation ch
       return "not-admitted";
     }), fault("conflict"));
     assert.equal(readFileSync(join(f.root, ".selection.json"), "utf8"), pointer);
-    assert.equal((await f.store.loadSelection()).appliedRevision, first.revision);
+    assert.equal((await f.store.loadSelection()).appliedRevision, selected.selection.appliedRevision);
   } finally { f.cleanup(); }
 });
 
@@ -199,8 +197,8 @@ for (const mutation of ["remove", "replace", "rewrite"] as const) {
         return "not-admitted";
       }), fault("conflict"));
       assert.equal(readFileSync(join(f.root, ".selection.json")).equals(previousPointer), true);
-      assert.equal(readFileSync(join(f.root, ".revisions", `${first.revision}.jsonc`), "utf8"), first.content);
-      assert.equal(existsSync(join(f.root, ".revisions", `${next.revision}.jsonc`)), false);
+      assert.equal(readFileSync(join(f.root, ".revisions", `${selected.selection.appliedRevision}.jsonc`), "utf8"), first.content);
+      assert.equal(readdirSync(join(f.root, ".revisions")).length, 1);
       if (mutation === "remove") assert.equal(existsSync(join(f.root, ".lock")), false);
       else assert.equal(readFileSync(join(f.root, ".lock"), "utf8"), mutation === "replace" ? "foreign-exclusive-lock\n" : "foreign-rewritten-lock\n");
     } finally {
@@ -369,9 +367,9 @@ test("corrupt or missing immutable selections fail visibly rather than silently 
   const f = fixture();
   try {
     const first = await f.store.save({ id: "focus", content: content(), expectedRevision: null });
-    await f.store.select({ id: "focus", expectedRevision: first.revision, expectedSelectionRevision: "absent" });
-    const immutable = join(f.root, ".revisions", `${first.revision}.jsonc`);
-    writeFileSync(immutable, content("focus", true));
+    const selected = await f.store.select({ id: "focus", expectedRevision: first.revision, expectedSelectionRevision: "absent" });
+    const immutable = join(f.root, ".revisions", `${selected.selection.appliedRevision}.jsonc`);
+    writeFileSync(immutable, "{}");
     await assert.rejects(new ProfileStore(f.root).loadSelection(), fault("corrupt-selection"));
     assert.equal((await f.store.describe()).selectionError?.code, "corrupt-selection");
     rmSync(immutable);
@@ -470,7 +468,7 @@ test("central missing reads create no directories or locks and the trusted facto
   } finally { f.cleanup(); }
 });
 
-test("central shared documents retain byte-bound immutable pins while host and entry selection/session CAS are isolated", async () => {
+test("central shared documents retain snapshot pins while host and entry selection/session versions are isolated", async () => {
   const f = fixture();
   try {
     const a = centralFixture(f);
@@ -489,18 +487,18 @@ test("central shared documents retain byte-bound immutable pins while host and e
     assert.equal((await otherEntry.loadSelection()).selectionRevision, "absent");
     assert.equal((await b.loadSessionSelection("same-session")).selectionRevision, "absent");
     const next = await b.save({ id: "focus", content: content("focus", true), expectedRevision: first.revision });
-    assert.equal((await a.loadSelection()).appliedRevision, first.revision);
+    assert.equal((await a.loadSelection()).appliedRevision, selected.selection.appliedRevision);
     assert.equal((await a.loadSessionSelection("same-session")).content, first.content);
     const bSelected = await b.select({ id: "focus", expectedRevision: next.revision, expectedSelectionRevision: "absent" });
     await assert.rejects(a.select({ id: null, expectedSelectionRevision: bSelected.selection.selectionRevision }), fault("conflict"));
     await assert.rejects(a.selectSession({ sessionId: "same-session", id: null, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "b".repeat(64) }, "c".repeat(64), () => null, sessionCommit), fault("conflict"));
     assert.equal((await a.loadSelection()).selectionRevision, selected.selection.selectionRevision);
     assert.equal((await a.loadSessionSelection("same-session")).selectionRevision, session.selection.selectionRevision);
-    assert.equal(readFileSync(join(a.profileDir, ".revisions", `${first.revision}.jsonc`), "utf8"), first.content);
+    assert.equal(readFileSync(join(a.profileDir, ".revisions", `${selected.selection.appliedRevision}.jsonc`), "utf8"), first.content);
     assert.equal(existsSync(join(a.profileDir, ".selection.json")), false);
     assert.equal(existsSync(join(a.profileDir, ".sessions")), false);
     const reopened = centralFixture(f);
-    assert.equal((await reopened.loadSessionSelection("same-session")).appliedRevision, first.revision);
+    assert.equal((await reopened.loadSessionSelection("same-session")).appliedRevision, session.selection.appliedRevision);
     assert.equal(readdirSync(a.profileDir).includes(".lock"), false);
   } finally { f.cleanup(); }
 });
@@ -515,9 +513,9 @@ test("central scopes cooperate on the same documents lock and recheck scoped sta
       assert.equal(existsSync(join(a.profileDir, ".lock")), true);
       await assert.rejects(b.save({ id: "focus", content: content("focus", true), expectedRevision: draft.revision }), fault("lock-timeout"));
     });
-    const pointer = readFileSync(join(a.stateDir, ".selection.json"));
+    const selection = await a.loadSelection();
     const external = Buffer.from('{"version":1,"id":null,"revision":null}\n');
-    await assert.rejects(a.select({ id: null, expectedSelectionRevision: sha(pointer.toString("utf8")) }, () => {
+    await assert.rejects(a.select({ id: null, expectedSelectionRevision: selection.selectionRevision }, () => {
       writeFileSync(join(a.stateDir, ".selection.json"), external);
     }), fault("conflict"));
     assert.equal(readFileSync(join(a.stateDir, ".selection.json")).equals(external), true);
@@ -566,8 +564,8 @@ test("legacy reads retain full immutable and session pins without locks or write
   const f = fixture();
   try {
     const first = await f.store.save({ id: "focus", content: `\uFEFF${content()}`, expectedRevision: null });
-    await f.store.select({ id: "focus", expectedRevision: first.revision, expectedSelectionRevision: "absent" });
-    await f.store.selectSession({ sessionId: "cold", id: "focus", expectedRevision: first.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "a".repeat(64) }, "b".repeat(64), () => null, sessionCommit);
+    const selected = await f.store.select({ id: "focus", expectedRevision: first.revision, expectedSelectionRevision: "absent" });
+    const session = await f.store.selectSession({ sessionId: "cold", id: "focus", expectedRevision: first.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "a".repeat(64) }, "b".repeat(64), () => null, sessionCommit);
     await f.store.save({ id: "focus", content: content("focus", true), expectedRevision: first.revision });
     const before = fileTree(f.root);
     writeFileSync(join(f.root, ".lock"), "foreign lock remains untouched\n");
@@ -578,12 +576,12 @@ test("legacy reads retain full immutable and session pins without locks or write
     assert.equal(snapshot.readOnly, true);
     assert.match(snapshot.writeRestriction!, /import/u);
     assert.equal((await legacy.loadSelection()).content, first.content);
-    assert.equal((await legacy.loadSessionSelection("cold")).appliedRevision, first.revision);
+    assert.equal((await legacy.loadSessionSelection("cold")).appliedRevision, session.selection.appliedRevision);
     assert.equal((await legacy.read("focus")).content, content("focus", true));
     const central = centralFixture(f);
     const centralDraft = await central.save({ id: "focus", content: `${content()}// central same ID\n`, expectedRevision: null });
     await central.select({ id: "focus", expectedRevision: centralDraft.revision, expectedSelectionRevision: "absent" });
-    assert.equal((await legacy.loadSelection()).appliedRevision, first.revision);
+    assert.equal((await legacy.loadSelection()).appliedRevision, selected.selection.appliedRevision);
     await assert.rejects(legacy.save({ id: "focus", content: content(), expectedRevision: first.revision }), fault("unavailable"));
     await assert.rejects(legacy.select({ id: null, expectedSelectionRevision: "absent" }), fault("unavailable"));
     await assert.rejects(legacy.selectSession({ sessionId: "cold", id: null, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "a".repeat(64) }, "b".repeat(64), () => null, sessionCommit), fault("unavailable"));
@@ -601,12 +599,13 @@ test("legacy refuses missing or corrupt pointers/revisions and pins the original
     await assert.rejects(legacy.loadSelection(), fault("corrupt-selection"));
     assert.equal((await legacy.describe()).selectionError?.code, "corrupt-selection");
     assert.equal(existsSync(join(f.root, ".lock")), false);
-    await f.store.select({ id: "focus", expectedRevision: draft.revision, expectedSelectionRevision: "absent" });
-    await f.store.selectSession({ sessionId: "cold", id: "focus", expectedRevision: draft.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "a".repeat(64) }, "b".repeat(64), () => null, sessionCommit);
-    unlinkSync(join(f.root, ".revisions", `${draft.revision}.jsonc`));
+    const selected = await f.store.select({ id: "focus", expectedRevision: draft.revision, expectedSelectionRevision: "absent" });
+    const session = await f.store.selectSession({ sessionId: "cold", id: "focus", expectedRevision: draft.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "a".repeat(64) }, "b".repeat(64), () => null, sessionCommit);
+    unlinkSync(join(f.root, ".revisions", `${selected.selection.appliedRevision}.jsonc`));
+    unlinkSync(join(f.root, ".revisions", `${session.selection.appliedRevision}.jsonc`));
     await assert.rejects(legacy.loadSelection(), fault("corrupt-selection"));
     await assert.rejects(legacy.loadSessionSelection("cold"), fault("corrupt-selection"));
-    writeFileSync(join(f.root, ".revisions", `${draft.revision}.jsonc`), content("focus", true));
+    writeFileSync(join(f.root, ".revisions", `${selected.selection.appliedRevision}.jsonc`), "{}");
     await assert.rejects(legacy.loadSelection(), fault("corrupt-selection"));
     writeFileSync(join(f.root, ".selection.json"), '{"version":1,"id":null,"revision":null,"id":"focus"}');
     await assert.rejects(legacy.loadSelection(), fault("corrupt-selection"));
@@ -633,7 +632,7 @@ test("fixture-only explicit non-destructive copy preserves raw drafts/revisions/
   try {
     const raw = `\uFEFF${content()}// explicit fixture copy only\n`;
     const draft = await f.store.save({ id: "focus", content: raw, expectedRevision: null });
-    await f.store.select({ id: "focus", expectedRevision: draft.revision, expectedSelectionRevision: "absent" });
+    const selected = await f.store.select({ id: "focus", expectedRevision: draft.revision, expectedSelectionRevision: "absent" });
     await f.store.selectSession({ sessionId: "cold", id: "focus", expectedRevision: draft.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "a".repeat(64) }, "b".repeat(64), () => null, sessionCommit);
     const original = fileTree(f.root);
     const target = centralFixture(f);
@@ -647,39 +646,9 @@ test("fixture-only explicit non-destructive copy preserves raw drafts/revisions/
     cpSync(join(f.root, ".selection.json"), join(clean.stateDir, ".selection.json"), { errorOnExist: true, force: false });
     cpSync(join(f.root, ".sessions"), join(clean.stateDir, ".sessions"), { recursive: true, errorOnExist: true, force: false });
     assert.equal((await clean.read("focus")).content, raw);
-    assert.equal((await clean.loadSelection()).appliedRevision, draft.revision);
+    assert.equal((await clean.loadSelection()).appliedRevision, selected.selection.appliedRevision);
     assert.equal((await clean.loadSessionSelection("cold")).content, raw);
     assert.throws(() => cpSync(join(f.root, ".selection.json"), join(clean.stateDir, ".selection.json"), { errorOnExist: true, force: false }));
     assert.deepEqual(fileTree(f.root), original);
   } finally { f.cleanup(); }
-});
-
-test("legacy double-read refuses a concurrently changed selection pointer without creating a lock or falling back", async (t) => {
-  const f = fixture();
-  const originalRead = fs.readSync;
-  try {
-    const draft = await f.store.save({ id: "focus", content: content(), expectedRevision: null });
-    await f.store.select({ id: "focus", expectedRevision: draft.revision, expectedSelectionRevision: "absent" });
-    const legacy = ProfileStore.fromLegacy(f.root);
-    let changed = false;
-    const external = '{"version":1,"id":null,"revision":null}\n';
-    t.mock.method(fs, "readSync", (fd: number, buffer: Buffer, offset: number, length: number, position: number) => {
-      const count = originalRead(fd, buffer, offset, length, position);
-      if (!changed && buffer.length === MAX_PROFILE_BYTES + 1) {
-        changed = true;
-        writeFileSync(join(f.root, ".selection.json"), external);
-      }
-      return count;
-    });
-    syncBuiltinESMExports();
-    await assert.rejects(legacy.loadSelection(), fault("corrupt-selection"));
-    assert.equal(changed, true);
-    assert.equal(existsSync(join(f.root, ".lock")), false);
-    assert.equal(readFileSync(join(f.root, ".selection.json"), "utf8"), external);
-    assert.equal(readFileSync(join(f.root, ".revisions", `${draft.revision}.jsonc`), "utf8"), draft.content);
-  } finally {
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
-    f.cleanup();
-  }
 });

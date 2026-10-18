@@ -32,16 +32,12 @@ test("Core-only admission preserves a foreign native role-named tool and execute
   } finally { await f.dispose(); }
 });
 
-test("an admitted DSMM delegation remains fenced when its actual delivery provider retires", async () => {
+test("an admitted DSMM delegation remains fenced when its native spawn provider retires", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true });
   try {
     const root = await f.create();
     assert.ok(root.ctx.tools.get("dsmm_category", root));
-    const authority = f.ctx.get("dsmmRuntimeIntegration")!.runtime.authority;
-    authority.acquireParentTicket(root);
     await f.spawnFiber!.dispose();
-    assert.equal(authority.view().deliveryFenceReady, false);
-    assert.throws(() => authority.acquireParentTicket(root));
     const result = await root.ctx.tools.execute({ agent: root, name: "dsmm_category",
       arguments: { category: "dsmm-coding", description: "Retired delivery", prompt: "Must not dispatch" },
       callId: ToolCallId("retired-owned-delegation"), signal: new AbortController().signal });
@@ -49,7 +45,7 @@ test("an admitted DSMM delegation remains fenced when its actual delivery provid
   } finally { await f.dispose(); }
 });
 
-test("foreign native creation provenance survives provider retirement without declassifying seeded DSMM descriptors", async () => {
+test("foreign native provider names and serialized descriptors cannot grant DSMM role authority", async () => {
   let unregister = () => {};
   const f = await nativeRoutingFixture({}, {
     persistence: true,
@@ -69,16 +65,18 @@ test("foreign native creation provenance survives provider retirement without de
       const child = f.agents.get(started.childId)!;
       await child.whenIdle();
       assert.equal(classifyDsmmAgent(child), "native");
-      assert.equal(f.ctx.get("dsmmProfileRuntime")!.hasAdmission(child as unknown as DshAgent), false);
+      assert.equal(f.ctx.get("dsmmProfileRuntime")!.hasAdmission(child as unknown as DshAgent), true);
       const persisted = Session.create(SessionId("descriptor-only-dsmm"));
       persisted.append("subagent/descriptor", snapshotSubagentDescriptor({ mode: "continuable", provider: "dsmm-role-coding", label: "Persisted DSMM child" }));
       let observed = 0;
-      await assert.rejects(f.create({ origin: "subagent" }, undefined, { parentAgent: root,
+      const seeded = await f.create({ origin: "subagent", parentSession: root.id, delegationDepth: 1 }, undefined, { parentAgent: root,
         seed: JSON.parse(JSON.stringify(persisted.snapshotEvents())), setup(_scope, agent) {
-          observed++; assert.equal(classifyDsmmAgent(agent), "dsmm");
+          observed++; assert.equal(classifyDsmmAgent(agent), "native");
           assert.ok(agent.session.snapshotEvents().some(event => event.type === "subagent/descriptor"));
-        } }), { code: "unavailable" });
+        } });
       assert.equal(observed, 1);
+      const seededView: Omit<DshAgent, "ctx"> = seeded;
+      assert.equal(f.ctx.dsmmNativeAdmission.policy.identity(seededView).role, undefined);
       unregister();
       assert.equal(f.subagents.getProvider("dsmm-role-coding"), undefined);
       assert.equal(classifyDsmmAgent(child), "native");

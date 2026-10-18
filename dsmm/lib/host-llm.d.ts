@@ -2,7 +2,7 @@ import { Context } from "@deepseek-ai/cordis";
 import type { Events } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { LlmRuntime } from "@deepseek-ai/dsh-llm";
-import type { GenerateOptions, LlmCallConfig, PreparedLlmCall, PreparedAdapterCall, ResolvedRetryPolicy, StreamChunk } from "@deepseek-ai/dsh-llm";
+import type { ConfigureCall, GenerateOptions, LlmCallConfig, PreparedLlmCall, PreparedAdapterCall, ResolvedRetryPolicy, StreamChunk } from "@deepseek-ai/dsh-llm";
 export type DsmmJson = null | boolean | number | string | readonly DsmmJson[] | {
     readonly [key: string]: DsmmJson;
 };
@@ -12,7 +12,10 @@ export interface DsmmLlmCallConfig extends LlmCallConfig {
 }
 export interface DsmmLlmCallClassifier {
     requiresRaw?(config: DsmmLlmCallConfig): boolean;
+    supportsNativeStop?(provider: string): boolean;
 }
+export type DsmmEffortSource = "native" | "dsmm-config";
+export declare function captureDsmmEffortSource(agent: Agent): DsmmEffortSource;
 /** Use the live provider owner and this call's complete frozen parameters, not envelope presence alone. */
 export declare function requiresDsmmCallAdmission(config: DsmmLlmCallConfig, classifier?: DsmmLlmCallClassifier, uncapturedAgent?: Agent): boolean;
 /** A Host-held admission, not a credential or a value accepted from serialized configuration. */
@@ -30,7 +33,7 @@ export interface DsmmLlmGeneration {
     readonly retryPolicy: ResolvedRetryPolicy;
     readonly defaultReasoningEffort?: LlmCallConfig["reasoningEffort"];
     assertCurrent(): void;
-    prepareCall(provider: string, model: string, signal: AbortSignal, assertAdmission?: () => void): Promise<PreparedAdapterCall>;
+    prepareCall(provider: string, model: string, signal: AbortSignal, assertAdmission?: () => void, effortSource?: () => DsmmEffortSource): Promise<PreparedAdapterCall>;
 }
 export interface DsmmLlmHostOwner {
     /** Classification must reject lost DSMM evidence instead of returning native. */
@@ -40,11 +43,13 @@ export interface DsmmLlmHostOwner {
         readonly kind: "stock";
         readonly admission: DsmmLlmAdmission;
         readonly config: LlmCallConfig;
+        readonly effortSource?: DsmmEffortSource;
     } | {
         readonly kind: "dsmm";
         readonly admission: DsmmLlmAdmission;
         readonly generation: DsmmLlmGeneration;
         readonly config: DsmmLlmCallConfig;
+        readonly effortSource?: DsmmEffortSource;
     }>;
 }
 export declare function freezeDsmmJson<T>(value: T): T;
@@ -71,7 +76,8 @@ export declare class DsmmAwareLlmRuntime extends LlmRuntime {
     private assertCaptured;
     private finishCaptured;
     private uncapturedNativeConfig;
-    prepareCall(proposal: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;
+    prepareCall(proposal: LlmCallConfig, signal?: AbortSignal, configure?: ConfigureCall): Promise<PreparedLlmCall>;
+    private prepareNativeCall;
     private prepareAdmittedCall;
     private bindPrepared;
     private adapterStreamFor;

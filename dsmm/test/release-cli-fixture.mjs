@@ -30,8 +30,8 @@ export function runCliControls({ tarball, receipt, identity, context, files }) {
       GITHUB_WORKFLOW_REF: identity.workflow.ref, GITHUB_WORKFLOW_SHA: identity.controlSha, GITHUB_RUN_ID: identity.runId, GITHUB_RUN_ATTEMPT: identity.runAttempt,
       GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.githubusercontent.com/fixture", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "test-only", GH_TOKEN: "test-only" };
     for (const key of Object.keys(env)) if (/NPM_TOKEN|NODE_AUTH_TOKEN|NPM_CONFIG_.*AUTH|SIGSTORE_ID_TOKEN/iu.test(key)) delete env[key];
-    const run = (script, args, expectedExit = 0) => {
-      const result = spawnSync(process.execPath, ["--import", new URL("./release-cli-carrier.mjs", import.meta.url).href, fileURLToPath(new URL(`../scripts/${script}`, import.meta.url)), ...args], { encoding: "utf8", env, timeout: 15_000, windowsHide: true });
+    const run = (script, args, expectedExit = 0, extraEnv = {}) => {
+      const result = spawnSync(process.execPath, ["--import", new URL("./release-cli-carrier.mjs", import.meta.url).href, fileURLToPath(new URL(`../scripts/${script}`, import.meta.url)), ...args], { encoding: "utf8", env: { ...env, ...extraEnv }, timeout: 15_000, windowsHide: true });
       assert.equal(result.error, undefined); assert.equal(result.status, expectedExit, result.stderr || result.stdout);
       return result.stdout.trim() ? JSON.parse(result.stdout.trim()) : null;
     };
@@ -70,17 +70,37 @@ export function runCliControls({ tarball, receipt, identity, context, files }) {
       const current = JSON.parse(readFileSync(statePath, "utf8")); assert.equal(current.publishes, 0);
       current.published = true; writeFileSync(statePath, JSON.stringify(current));
     } else assert.equal(run("dsmm-release.mjs", ["publish", ...base, "--artifact-dir", transport, "--work-dir", join(root, "publish")]).outcome, "SUBMITTED_NOT_VERIFIED");
+    const failureState = JSON.parse(readFileSync(statePath, "utf8")); failureState.publishExit = 1; failureState.published = false; writeFileSync(statePath, JSON.stringify(failureState));
+    run("dsmm-release.mjs", ["publish", ...base, "--artifact-dir", transport, "--work-dir", join(root, "publish-nonzero")], 1, { DSMM_RELEASE_CLI_PUBLISH_RUNTIME: "fixture-only" });
+    const failedPublish = JSON.parse(readFileSync(statePath, "utf8"));
+    assert.equal(failedPublish.publishes, originalMajor === "24" ? 2 : 1); assert.equal(failedPublish.published, true);
+    delete failedPublish.publishExit; writeFileSync(statePath, JSON.stringify(failedPublish));
     const verificationPath = join(root, "verification.json");
     const verification = run("check-dsmm-release-completion.mjs", ["verify", "--artifact-dir", transport, "--receipt", verificationPath]);
     assert.equal(verification.outcome, "COMPLETED");
-    const current = JSON.parse(readFileSync(statePath, "utf8")); current.verification = verification; writeFileSync(statePath, JSON.stringify(current));
-    assert.equal(run("dsmm-release.mjs", ["transport", ...base, "--artifact-dir", transport]).releaseId, "44");
-    assert.equal(run("dsmm-release.mjs", ["finalize", ...base, "--artifact-dir", transport, "--verification", verificationPath]).outcome, "PUBLIC_NOT_TERMINALLY_VERIFIED");
-    const terminal = run("check-dsmm-release-completion.mjs", ["terminal", "--run-id", identity.runId, "--run-attempt", identity.runAttempt, "--control-sha", identity.controlSha, "--receipt", join(root, "terminal.json")]);
+    const current = JSON.parse(readFileSync(statePath, "utf8")); current.forbidRegistry = true; writeFileSync(statePath, JSON.stringify(current));
+    const transportPath = join(root, "created-transport.json");
+    assert.equal(run("dsmm-release.mjs", ["transport", ...base, "--artifact-dir", transport, "--output", transportPath]).releaseId, "44");
+    run("dsmm-release.mjs", ["finalize", ...base, "--artifact-dir", transport], 1);
+    assert.equal(run("dsmm-release.mjs", ["finalize", ...base, "--artifact-dir", transport, "--transport", transportPath]).outcome, "PUBLIC_NOT_TERMINALLY_VERIFIED");
+    const terminalArgs = ["terminal-publication", "--run-id", identity.runId, "--run-attempt", identity.runAttempt, "--control-sha", identity.controlSha];
+    const terminal = run("check-dsmm-release-completion.mjs", [...terminalArgs, "--receipt", join(root, "terminal.json")]);
     assert.equal(terminal.outcome, "COMPLETED");
     const finished = JSON.parse(readFileSync(statePath, "utf8")); assert.equal(finished.packs, 1);
-    assert.equal(finished.publishes, originalMajor === "24" ? 1 : 0);
+    assert.equal(finished.publishes, originalMajor === "24" ? 2 : 1);
     assert.equal(terminal.artifact.sha256, identity.sha256); assert.equal(terminal.artifact.receiptSha256, identity.receiptSha256);
+    assert.equal(terminal.mode, "npm-publication");
+    for (const [name, changes, exit, outcome] of [
+      ["release-failure", { run: { conclusion: "failure" }, jobs: { "github-release": { conclusion: "failure" } } }, 0, "COMPLETED"],
+      ["publish-failure", { run: { conclusion: "failure" }, jobs: { publish: { conclusion: "failure" } } }, 1, "FAILED"],
+      ["running", { run: { status: "in_progress", conclusion: null } }, 2, "UNRESOLVED"],
+      ["wrong-checkout", { checkoutSha: "f".repeat(40) }, 1, "FAILED"],
+    ]) {
+      writeFileSync(statePath, JSON.stringify({ ...finished, ...changes }));
+      const receiptPath = join(root, `${name}.json`), result = run("check-dsmm-release-completion.mjs", [...terminalArgs, "--receipt", receiptPath], exit);
+      assert.equal(result.mode, "npm-publication"); assert.equal(result.outcome, outcome);
+      assert.deepEqual(JSON.parse(readFileSync(receiptPath, "utf8")), result);
+    }
     return { outcome: "COMPLETED", scope: "fixture-only-cli", publisherRuntime: originalMajor === "24" ? "SUBMISSION_EXERCISED" : "PINNED_RUNTIME_REFUSAL_EXERCISED", stages: 8 };
   } finally { cleanupOwnedRoot(owner); }
 }

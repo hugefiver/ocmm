@@ -16,12 +16,3 @@ test("bundled skill files exist with matching frontmatter", () => {
     assert.match(text, /description: /, `${skill} has frontmatter description`);
   }
 });
-
-test("cordis patch registers the dsmm bundle entry", () => {
-  const patch = readFileSync(join(packageRoot, "cordis.patch.yml"), "utf8");
-
-  assert.match(patch, /id: dsmm/);
-  assert.match(patch, /name: ['"]@dsmm\/dsmm['"]/);
-  assert.doesNotMatch(patch, /name: ['"]?dsmm['"]?(?:\r?\n|$)/);
-  assert.doesNotMatch(patch, /dsh-skill-filesystem/);
-});

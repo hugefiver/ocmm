@@ -100,7 +100,7 @@ export function packageFiles(version = "0.1.3") {
     "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts", "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
     ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
     ...["agent-presets", "compatibility", "design", "lsp", "migration-from-ocmm", "model-routing", "profiles", "releasing", "roadmap", "runtime-recovery", "safety-guards", "settings-status", "skill-sync"].map((name) => `docs/${name}.md`),
-    "agent-presets/default.yml", "docs/research/reference.md", "patches/baseline.yml", "prompts/root.md", "skills/example/SKILL.md"];
+    "agent-presets/default.yml", ...(version === "0.3.0" ? [] : ["docs/research/reference.md"]), "patches/baseline.yml", "prompts/root.md", "skills/example/SKILL.md"];
   const compiledFiles = version === "0.3.0" ? compiledFilesForDsmmVersion(version) : compiledFilesForVersion(version);
   return new Map([["package.json", Buffer.from(JSON.stringify(manifest))], ...[...new Set([...names, ...compiledFiles])].map((name) => [name, Buffer.from("fixture\n")]),
     ...(requiresDeepworkMetadata(version) ? LOCALE_FILES.map((path) => [path, Buffer.from(JSON.stringify(FROZEN_HISTORICAL_LOCALE_RESOURCES[path]))]) : [])]);

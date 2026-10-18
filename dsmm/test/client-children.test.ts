@@ -9,7 +9,7 @@ import type { ReactElement } from "react";
 import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import type { RemoteResult } from "@deepseek-ai/dsh-typert-protocol";
 import type { DsmmChildrenRemote } from "../src/role-control-remote.js";
-import type { BackgroundTransitionResult, ChildSessionSnapshot, RoleControlChildView, SubagentPromptReceipt, SubagentPromptRequest } from "../src/role-control-types.js";
+import type { ChildSessionSnapshot, RoleControlChildView, SubagentPromptReceipt, SubagentPromptRequest } from "../src/role-control-types.js";
 import type { ChildrenSnapshot } from "../src/client/children-controller.js";
 import type { DsmmInvocationView, DsmmRoleRouteComparison } from "../src/profile-types.js";
 
@@ -20,26 +20,23 @@ async function clientModule<T>(entry: string, overrides: Record<string, unknown>
   new Function("require", "module", "exports", result.outputFiles[0].text)((name: string) => Object.hasOwn(overrides, name) ? overrides[name] : require(name), module, module.exports);
   return module.exports as T;
 }
-const { ChildrenController, childActionKey, runActionKey } = await clientModule<typeof import("../src/client/children-controller.js")>("children-controller.ts");
+const { ChildrenController, childActionKey } = await clientModule<typeof import("../src/client/children-controller.js")>("children-controller.ts");
 const epoch = "a".repeat(64), otherEpoch = "b".repeat(64);
 const yes = { enabled: true } as const;
 const invocation = { role: "dsmm-planner", label: "Planner", level: "high", routeSource: "level", route: { provider: "configured", model: "exact", reasoningEffort: "custom" }, mode: "one-shot", runId: "run", childId: "one-shot" } as const;
 function child(id = "child", parentSessionId = "parent"): RoleControlChildView {
-  return { id, parentSessionId, mode: "continuable", activity: "running", label: "Continuable", readonly: false, controls: { prompt: yes, interrupt: yes },
-    evidence: { mode: "captured", originalAdmissionEpoch: otherEpoch, parentAdmissionEpoch: epoch, provenFields: ["lineage", "role"], limitations: [{ field: "output-schema", code: "unverified", effect: "capability-denied" }] } };
+  return { id, parentSessionId, mode: "continuable", activity: "running", label: "Continuable", readonly: false, controls: { prompt: yes, interrupt: yes } };
 }
 function snapshot(id = "parent"): ChildSessionSnapshot {
-  return { sessionId: id, admissionEpoch: epoch, runs: [{ sessionId: id, toolCallId: "tool-call", state: "running", invocation, background: yes },
-    { sessionId: id, toolCallId: "starting-call", state: "starting", background: { enabled: false, reason: "starting" } }], children: [child("child", id)],
-    capabilities: { background: yes, prompt: yes, interrupt: yes, images: yes, runtime: { binding: "dsmm", deliveryFenceReady: true, restartRequired: false } } };
+  return { sessionId: id, admissionEpoch: epoch, children: [child("child", id)],
+    capabilities: { prompt: yes, interrupt: yes, images: yes, runtime: { binding: "stock", deliveryFenceReady: true, restartRequired: false } } };
 }
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 function fixture(overrides: Partial<DsmmChildrenRemote> = {}, value = snapshot()) {
-  const calls: { backgrounds: unknown[]; prompts: SubagentPromptRequest[]; interrupts: unknown[]; reads: string[] } = { backgrounds: [], prompts: [], interrupts: [], reads: [] };
+  const calls: { prompts: SubagentPromptRequest[]; interrupts: unknown[]; reads: string[] } = { prompts: [], interrupts: [], reads: [] };
   const remote: DsmmChildrenRemote = {
-    describe: async id => { calls.reads.push(id); return { ok: true, value: { ...value, sessionId: id, runs: value.runs.map(run => ({ ...run, sessionId: id })), children: value.children.map(child => ({ ...child, parentSessionId: id })) } }; },
+    describe: async id => { calls.reads.push(id); return { ok: true, value: { ...value, sessionId: id, children: value.children.map(child => ({ ...child, parentSessionId: id })) } }; },
     descendants: async id => ({ ok: true, value: { sessionId: id, admissionEpoch: value.admissionEpoch, descendants: [] } }),
-    background: async (id, request) => { calls.backgrounds.push({ id, request }); return { ok: true, value: { status: "background", runId: request.runId, jobId: "job" } }; },
     prompt: async (_id, request) => { calls.prompts.push(request); return { ok: true, value: { messageId: "message" as SubagentPromptReceipt["messageId"] } }; },
     interrupt: async (id, request) => { calls.interrupts.push({ id, request }); return { ok: true, value: { accepted: true } }; }, ...overrides,
   };
@@ -47,47 +44,14 @@ function fixture(overrides: Partial<DsmmChildrenRemote> = {}, value = snapshot()
   return { controller, calls, owner, connection, value, async start() { controller.bindConnection(connection, "generation"); controller.bindScope(value.sessionId, owner); await setImmediate(); assert.equal(controller.store.getSnapshot().fresh, true); } };
 }
 
-test("native scope is required; starting runs never acquire fabricated invocation identity", async () => {
+test("native scope is required before observing child conversations", async () => {
   const f = fixture();
   try {
     f.controller.bindScope("parent", null); await f.controller.actions.refresh(f.controller.store.getSnapshot().generation);
     assert.deepEqual(f.calls.reads, []); assert.equal(f.controller.store.getSnapshot().snapshot, null);
     await f.start();
-    assert.equal(f.controller.store.getSnapshot().snapshot?.runs[1].invocation, undefined);
-    const generation = f.controller.store.getSnapshot().generation;
-    await f.controller.actions.background(generation, "starting-call", "invented");
-    assert.deepEqual(f.calls.backgrounds, []);
+    assert.equal(f.controller.store.getSnapshot().snapshot?.children[0].id, "child");
   } finally { f.controller.dispose(); }
-});
-
-test("handoff submits the same published run and captured epoch once; receipts never fabricate completion", async () => {
-  const response = deferred<RemoteResult<BackgroundTransitionResult>>(), requests: unknown[] = [];
-  const f = fixture({ background: async (id, request) => { requests.push({ id, request }); return response.promise; } });
-  try {
-    await f.start(); const generation = f.controller.store.getSnapshot().generation;
-    const first = f.controller.actions.background(generation, "tool-call", "run");
-    await f.controller.actions.background(generation, "tool-call", "run");
-    assert.deepEqual(requests, [{ id: "parent", request: { sessionId: "parent", toolCallId: "tool-call", runId: "run", expectedAdmissionEpoch: epoch } }]);
-    assert.equal(f.controller.store.getSnapshot().pending.get(runActionKey("tool-call", "run")), "background");
-    response.resolve({ ok: true, value: { status: "background", runId: "run", jobId: "same-job" } }); await first;
-    await f.controller.actions.background(generation, "tool-call", "run"); assert.equal(requests.length, 1);
-    const state = f.controller.store.getSnapshot();
-    assert.deepEqual(state.outcomes.get(runActionKey("tool-call", "run")), { kind: "background", receipt: { status: "background", runId: "run", jobId: "same-job" } });
-    assert.equal(state.snapshot?.runs[0].state, "running"); assert.equal(state.snapshot?.children[0].activity, "running");
-  } finally { f.controller.dispose(); }
-});
-
-test("background refusals preserve terminal/cancelled state and never revive the run", async () => {
-  for (const state of ["settled", "cancelled", "background"] as const) {
-    const value = snapshot(); value.runs[0] = { ...value.runs[0], state, background: { enabled: false, reason: state === "settled" ? "already-settled" : state === "background" ? "already-background" : "cancelled" } };
-    const f = fixture({}, value);
-    try { await f.start(); await f.controller.actions.background(f.controller.store.getSnapshot().generation, "tool-call", "run"); assert.deepEqual(f.calls.backgrounds, []); assert.equal(f.controller.store.getSnapshot().snapshot?.runs[0].state, state); }
-    finally { f.controller.dispose(); }
-  }
-  const value = snapshot(); value.capabilities.background = { enabled: false, reason: "jobs-unavailable" };
-  const f = fixture({}, value);
-  try { await f.start(); await f.controller.actions.background(f.controller.store.getSnapshot().generation, "tool-call", "run"); assert.deepEqual(f.calls.backgrounds, []); }
-  finally { f.controller.dispose(); }
 });
 
 test("Queue/Steer use real text/image bodies and native receipt semantics without Agent attribution", async () => {
@@ -125,7 +89,7 @@ test("one-shot, read-only, foreign and capability-denied targets cannot send or 
     for (const id of ["one-shot", "read-only", "foreign"]) { f.controller.actions.editText(generation, id, "do not send"); await f.controller.actions.prompt(generation, id); await f.controller.actions.interrupt(generation, id); }
     await f.controller.actions.addImages(generation, "child", [new File(["body"], "chosen.png", { type: "image/png" })]);
     assert.equal(f.controller.store.getSnapshot().drafts.get("child"), undefined); assert.deepEqual(f.calls.prompts, []); assert.deepEqual(f.calls.interrupts, []);
-    value.capabilities.prompt = { enabled: false, reason: "delivery-fence-unavailable" };
+    value.capabilities.prompt = { enabled: false, reason: "unavailable" };
     await f.controller.actions.refresh(generation); const next = f.controller.store.getSnapshot().generation;
     f.controller.actions.editText(next, "child", "retained"); await f.controller.actions.prompt(next, "child"); assert.deepEqual(f.calls.prompts, []); assert.equal(f.controller.store.getSnapshot().drafts.get("child")?.text, "retained");
   } finally { f.controller.dispose(); }
@@ -147,7 +111,7 @@ test("transport loss preserves the exact draft, strips unsafe exceptions, and ne
 });
 
 test("known Host refusal and invalid image input retain corrective drafts without claiming a send", async () => {
-  const f = fixture({ prompt: async () => ({ ok: false, error: new RemoteError("dsmm-children/refused", "PRIVATE", { code: "disabled", reason: "legacy-capability-denied", field: "childSessionId" }) }) });
+  const f = fixture({ prompt: async () => ({ ok: false, error: new RemoteError("dsmm-children/refused", "PRIVATE", { code: "disabled", reason: "evidence-unavailable", field: "childSessionId" }) }) });
   try {
     await f.start(); const generation = f.controller.store.getSnapshot().generation;
     f.controller.actions.editText(generation, "child", "draft");
@@ -155,7 +119,7 @@ test("known Host refusal and invalid image input retain corrective drafts withou
     assert.deepEqual(f.controller.store.getSnapshot().issues.get(childActionKey("child")), { kind: "local", code: "invalid-content" });
     assert.equal(f.controller.store.getSnapshot().drafts.get("child")?.text, "draft"); assert.equal(f.controller.store.getSnapshot().drafts.get("child")?.imageBusy, false);
     await f.controller.actions.prompt(generation, "child");
-    assert.deepEqual(f.controller.store.getSnapshot().issues.get(childActionKey("child")), { kind: "domain", code: "disabled", reason: "legacy-capability-denied", field: "childSessionId" });
+    assert.deepEqual(f.controller.store.getSnapshot().issues.get(childActionKey("child")), { kind: "domain", code: "disabled", reason: "evidence-unavailable", field: "childSessionId" });
     assert.equal(f.controller.store.getSnapshot().drafts.get("child")?.uncertain, false);
   } finally { f.controller.dispose(); }
 });
@@ -183,11 +147,11 @@ test("session, owner, connection, admission replacement and disposal fence late 
       if (replacement === "session") f.controller.bindScope("other", {});
       if (replacement === "owner") f.controller.bindScope("parent", {});
       if (replacement === "connection") { f.controller.bindConnection(null); f.controller.bindConnection({}, "new-generation"); }
-      if (replacement === "admission") { f.value.admissionEpoch = otherEpoch; f.value.children[0].evidence!.parentAdmissionEpoch = otherEpoch; f.controller.observeAdmission("parent", otherEpoch); }
+      if (replacement === "admission") { f.value.admissionEpoch = otherEpoch; f.controller.observeAdmission("parent", otherEpoch); }
       if (replacement === "dispose") f.controller.dispose();
       await setImmediate();
       response.resolve({ ok: true, value: { messageId: "late-message" as SubagentPromptReceipt["messageId"] } }); await request;
-      await f.controller.actions.prompt(generation, "child"); await f.controller.actions.background(generation, "tool-call", "run"); await f.controller.actions.interrupt(generation, "child");
+      await f.controller.actions.prompt(generation, "child"); await f.controller.actions.interrupt(generation, "child");
       const state = f.controller.store.getSnapshot(); assert.equal(calls.length, 1); assert.equal(state.outcomes.size, 0); assert.equal(state.pending.size, 0);
       if (replacement === "connection" || replacement === "admission") { assert.equal(state.drafts.get("child")?.text, "do not lose or leak this draft"); assert.equal(state.drafts.get("child")?.uncertain, true); }
       else assert.equal(state.drafts.size, 0);
@@ -210,10 +174,7 @@ test("late reads cannot replace a new native owner; descendant diagnostics and m
   finally { mismatch.controller.dispose(); }
 });
 
-test("unverified/malformed observations and mismatched run receipts fail closed", async () => {
-  const f = fixture({ background: async () => ({ ok: true, value: { status: "background", runId: "replacement", jobId: "other-job" } }) });
-  try { await f.start(); await f.controller.actions.background(f.controller.store.getSnapshot().generation, "tool-call", "run"); assert.equal(f.controller.store.getSnapshot().outcomes.size, 0); assert.equal(f.controller.store.getSnapshot().issues.get(runActionKey("tool-call", "run"))?.code, "conflict"); }
-  finally { f.controller.dispose(); }
+test("malformed observations fail closed", async () => {
   const bad = fixture({ describe: async () => ({ ok: true, value: { ...snapshot(), unsafeExtra: "PRIVATE" } as ChildSessionSnapshot }) });
   try {
     bad.controller.bindConnection(bad.connection, "generation"); bad.controller.bindScope("parent", bad.owner); await setImmediate();
@@ -224,7 +185,7 @@ test("unverified/malformed observations and mismatched run receipts fail closed"
 
 test("observed admission replacement fences an initial read and rejects conflicting epoch results before any action", async () => {
   const initial = deferred<RemoteResult<ChildSessionSnapshot>>(), conflicting = deferred<RemoteResult<ChildSessionSnapshot>>();
-  const admitted = snapshot(); admitted.admissionEpoch = otherEpoch; admitted.children[0].evidence!.parentAdmissionEpoch = otherEpoch;
+  const admitted = snapshot(); admitted.admissionEpoch = otherEpoch;
   let reads = 0;
   const f = fixture({ describe: async () => ++reads === 1 ? initial.promise : reads === 2 ? conflicting.promise : { ok: true, value: admitted },
     descendants: async id => ({ ok: true, value: { sessionId: id, admissionEpoch: reads === 1 ? epoch : otherEpoch, descendants: [] } }) });
@@ -240,18 +201,17 @@ test("observed admission replacement fences an initial read and rejects conflict
     const current = f.controller.store.getSnapshot();
     f.controller.actions.editText(current.generation, "child", "must not send under stale admission");
     for (const generation of [oldGeneration, current.generation]) {
-      await f.controller.actions.background(generation, "tool-call", "run");
       await f.controller.actions.prompt(generation, "child"); await f.controller.actions.interrupt(generation, "child");
     }
     assert.equal(current.fresh, false); assert.equal(current.issue?.code, "conflict"); assert.equal(current.snapshot, null);
-    assert.deepEqual(f.calls.backgrounds, []); assert.deepEqual(f.calls.prompts, []); assert.deepEqual(f.calls.interrupts, []);
+    assert.deepEqual(f.calls.prompts, []); assert.deepEqual(f.calls.interrupts, []);
     const readsBeforeRepeat = reads; f.controller.observeAdmission("parent", otherEpoch); await setImmediate();
     assert.equal(reads, readsBeforeRepeat); assert.equal(f.controller.store.getSnapshot().fresh, false);
     await f.controller.actions.refresh(f.controller.store.getSnapshot().generation);
     const restored = f.controller.store.getSnapshot();
     assert.equal(restored.fresh, true); assert.equal(restored.snapshot?.admissionEpoch, otherEpoch);
-    await f.controller.actions.background(restored.generation, "tool-call", "run");
-    assert.deepEqual(f.calls.backgrounds, [{ id: "parent", request: { sessionId: "parent", toolCallId: "tool-call", runId: "run", expectedAdmissionEpoch: otherEpoch } }]);
+    await f.controller.actions.interrupt(restored.generation, "child");
+    assert.equal(f.calls.interrupts.length, 1);
   } finally { f.controller.dispose(); }
 });
 
@@ -319,7 +279,7 @@ test("late image intake and interrupt receipts cannot revive busy state or image
       if (replacement === "session") f.controller.bindScope("other", {});
       if (replacement === "owner") f.controller.bindScope("parent", {});
       if (replacement === "connection") { f.controller.bindConnection(null); f.controller.bindConnection({}, "new-generation"); }
-      if (replacement === "admission") { f.value.admissionEpoch = otherEpoch; f.value.children[0].evidence!.parentAdmissionEpoch = otherEpoch; f.controller.observeAdmission("parent", otherEpoch); }
+      if (replacement === "admission") { f.value.admissionEpoch = otherEpoch; f.controller.observeAdmission("parent", otherEpoch); }
       if (replacement === "dispose") f.controller.dispose();
       await setImmediate();
       reading.resolve(new Uint8Array([1, 2, 3]).buffer); await intake;
@@ -365,15 +325,11 @@ test("production forms preserve accessible native semantics, real delivery callb
     assert.ok(deniedInspection.some(node => node.type === components.ControlAvailability && node.props.value === deniedTarget.controls.prompt));
     const oneShot = treeElements(components.ChildDetails({ child: { ...target, mode: "one-shot", readonly: true }, state, actions: f.controller.actions, t }));
     assert.equal(oneShot.some(node => node.type === components.ChildComposer), false);
-    const evidence = treeElements(components.EvidenceDetails({ value: target.evidence, t }));
-    assert.ok(evidence.some(node => node.props.children === "output-schema · unverified · unverified" || Array.isArray(node.props.children) && node.props.children.includes("output-schema")));
     const foreign = components.ChildrenPanel({ ...f.controller.actions, sessionId: "foreign", useChildren: selector => selector(state), t });
     assert.equal(treeElements(foreign).some(node => node.type === components.ChildDetails), false);
     const readonlyState: ChildrenSnapshot = { ...state, descendants: { sessionId: "parent", admissionEpoch: epoch, descendants: [{ kind: "diagnostic", id: "broken", parentSessionId: "parent", depth: 1, reason: "corrupt" }] } };
     const panel = treeElements(components.ChildrenPanel({ ...f.controller.actions, sessionId: "parent", useChildren: selector => selector(readonlyState), t }));
     assert.ok(panel.some(node => node.type === "p" && node.props.children === "diagnostic"));
-    const startingButtons = panel.filter(node => node.type === "fieldset" && node.key === "starting-call").flatMap(treeElements).filter(node => node.props.children === "background");
-    assert.deepEqual(startingButtons, []);
   } finally { f.controller.dispose(); }
 });
 
@@ -397,9 +353,8 @@ const comparedRoutes: DsmmRoleRouteComparison = {
   liveRoute: { status: "known", source: "own-native-request-header", route: { provider: "native-own", model: "observed-only", reasoningEffort: "off" } },
 };
 
-test("production run and child route fields keep captured high separate from own native request off", async () => {
+test("production child route fields keep captured high separate from own native request off", async () => {
   const value = snapshot();
-  value.runs[0].invocation = { ...invocation, routeComparison: { ...comparedRoutes, childId: "one-shot" } };
   value.children[0].routeComparison = comparedRoutes;
   value.children[0].invocation = { ...invocation, childId: "child", mode: "continuable", routeComparison: comparedRoutes };
   const f = fixture({}, value);
@@ -408,10 +363,7 @@ test("production run and child route fields keep captured high separate from own
     for (const locale of [childrenLocaleEn, childrenLocaleZh]) {
       const translations: Readonly<Record<string, string>> = locale;
       const t = (key: string) => translations[key] ?? key;
-      const panel = treeElements(routeComponents.ChildrenPanel({ ...f.controller.actions, sessionId: "parent", useChildren: select => select(state), t }));
-      const run = panel.find(node => node.type === "fieldset" && node.key === "tool-call")!;
-      const runDetails = treeElements(run).find(node => node.type === routeComponents.InvocationDetails)!;
-      const invocation = routeComponents.InvocationDetails({ value: runDetails.props.value as DsmmInvocationView, t });
+      const invocation = routeComponents.InvocationDetails({ value: state.snapshot!.children[0].invocation, t });
       const runComparison = treeElements(invocation).find(node => node.type === routeComponents.RouteComparisonDetails)!;
       const row = routeComponents.ChildDetails({ child: state.snapshot!.children[0], state, actions: f.controller.actions, t, inspection: true });
       const childComparison = treeElements(row).find(node => node.type === routeComponents.RouteComparisonDetails)!;
@@ -459,10 +411,9 @@ test("production route rows expose pre-request and unobserved reasons without pr
   }
 });
 
-test("legacy child comparison shows its own native route without inventing invocation level or initial capture", async () => {
+test("uncaptured child comparison shows its own native route without inventing invocation level or initial capture", async () => {
   const value = snapshot();
-  value.children[0] = { ...child(), routeComparison: { ...comparedRoutes, initialRoute: { status: "unknown", reason: "missing-invocation-capture" } },
-    evidence: { mode: "legacy-conservative", parentAdmissionEpoch: epoch, provenFields: ["lineage", "route"], limitations: [{ field: "invocation-level", code: "missing-evidence", effect: "display-only" }] } };
+  value.children[0] = { ...child(), routeComparison: { ...comparedRoutes, initialRoute: { status: "unknown", reason: "missing-invocation-capture" } } };
   const f = fixture({}, value);
   try {
     await f.start(); const state = f.controller.store.getSnapshot(), observed = state.snapshot!.children[0];

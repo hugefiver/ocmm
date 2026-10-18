@@ -15,7 +15,7 @@ const ruleDraft = (rule: PermissionRule): PermissionRuleDraft => ({ id: rule.id,
 const newMatch = (kind: PermissionRuleMatch["kind"]): PermissionRuleMatch => kind === "outside-read" ? { kind, path: "", scope: "exact" } : kind === "shell" ? { kind, executable: "", command: "", workingDirectory: "" } : { kind };
 function Issue({ value, t }: Locale & { value: PermissionIssue | null }) { return value === null ? null : <p className="dsmm-issue" role="alert">{t(`issue:${value}`)} <code>{value}</code></p>; }
 function RootState({ state, t }: Locale & { state: PermissionView }) {
-  return <><p>{t("root")}: <code>{state.sessionId ?? "—"}</code></p>
+  return <><p>{t("root")}: {t(state.scope === "root" && state.connected ? "active" : "unknown")}</p>
     {state.scope !== "root" && <p className="dsmm-hint">{t(state.scope === "child" ? "child" : "noRoot")}</p>}
     {!state.connected && <p className="dsmm-hint">{t("unknown")}</p>}</>;
 }
@@ -26,7 +26,7 @@ function ActionSelect({ id, value, inherit = true, onChange, disabled, t }: Loca
 function RuleEditor({ controller, state, t }: Locale & { controller: PermissionController; state: PermissionView }) {
   const id = useId(), editor = state.draft?.editor;
   if (editor == null) return null;
-  const disabled = state.busy !== null, change = (value: PermissionRuleDraft) => controller.edit(state.generation, { editor: value });
+  const disabled = !controller.canEdit(state.generation), change = (value: PermissionRuleDraft) => controller.edit(state.generation, { editor: value });
   const field = (key: "path" | "executable" | "command" | "workingDirectory", label: PermissionLocaleKey) => <div className="dsmm-field"><label htmlFor={`${id}-${key}`}>{t(label)}</label>
     <Input className="dsmm-input" id={`${id}-${key}`} required maxLength={32768} disabled={disabled} value={key in editor.match ? String(Reflect.get(editor.match, key)) : ""} onChange={event => change({ ...editor, match: { ...editor.match, [key]: event.currentTarget.value } })} /></div>;
   return <form className="dsmm-structured" aria-label={t("editor")} onSubmit={event => { event.preventDefault(); controller.stageRule(state.generation); }}>
@@ -45,19 +45,18 @@ function RuleRecords({ controller, state, t }: Locale & { controller: Permission
     <p>{t(rule.revoked ? "revoked" : "active")} · {t(`action:${rule.action}`)}</p><dl className="dsmm-child-meta"><dt>{t("match")}</dt><dd>{t(`kind:${rule.match.kind}`)}</dd>
       {rule.match.kind === "outside-read" && <><dt>{t("path")}</dt><dd>{rule.match.path} · {t(rule.match.scope)}</dd></>}
       {rule.match.kind === "shell" && <><dt>{t("executable")}</dt><dd>{rule.match.executable}</dd><dt>{t("command")}</dt><dd><code>{rule.match.command}</code></dd><dt>{t("cwd")}</dt><dd>{rule.match.workingDirectory}</dd></>}
-      <dt>{t("recordVersion")}</dt><dd>{rule.revision}</dd><dt>{t("source")}</dt><dd>{t(rule.source.kind === "operator" ? "operator" : "imported")} · {rule.source.kind === "operator" ? rule.source.sessionId : rule.source.label}</dd>
-      {rule.source.kind === "operator" && <><dt>{t("savedAt")}</dt><dd>{String(rule.source.savedAt)}</dd></>}</dl>
-    <div className="dsmm-actions"><Button type="button" variant="outline" disabled={state.busy !== null || state.draft === null} onClick={() => controller.edit(state.generation, { editor: ruleDraft(rule) })}>{t("editRule")}</Button>
-      <Button type="button" variant="outline" disabled={state.busy !== null || state.draft === null || rule.revoked || state.draft.revoke.includes(rule.id)} onClick={() => controller.stageRevoke(state.generation, rule.id)}>{t("stageRevoke")}</Button></div>
+      <dt>{t("source")}</dt><dd>{t(rule.source.kind === "operator" ? "operator" : "imported")}</dd></dl>
+    <div className="dsmm-actions"><Button type="button" variant="outline" disabled={!controller.canEdit(state.generation) || state.draft === null} onClick={() => controller.edit(state.generation, { editor: ruleDraft(rule) })}>{t("editRule")}</Button>
+      <Button type="button" variant="outline" disabled={!controller.canEdit(state.generation) || state.draft === null || rule.revoked || state.draft.revoke.includes(rule.id)} onClick={() => controller.stageRevoke(state.generation, rule.id)}>{t("stageRevoke")}</Button></div>
   </fieldset>)}</div>;
 }
 function PermissionCoverage({ state, t }: Locale & { state: PermissionView }) {
   const value = state.rules?.capabilities;
   return <section className="dsmm-structured" aria-label={t("coverageTitle")}><h3>{t("coverageTitle")}</h3>
     <p className="dsmm-hint">{t("coverage")}</p>
+    <p className="dsmm-hint">{t("registrationUnresolved")}</p>
     {value === undefined ? <p>{t("coverageUnavailable")}</p> : <>
-      <dl className="dsmm-child-meta"><dt>{t("coverageRuntime")}</dt><dd>{t(value.runtime.state)} · {t("mounted")}: {t(value.runtime.mounted ? "on" : "off")}</dd>
-        <dt>{t("coverageRevision")}</dt><dd><code>{value.runtime.runtimeRevision}</code></dd></dl>
+      <dl className="dsmm-child-meta"><dt>{t("coverageRuntime")}</dt><dd>{t(value.runtime.state)} · {t("mounted")}: {t(value.runtime.mounted ? "on" : "off")}</dd></dl>
       {value.runtime.restartRequired && <p>{t("restart")}</p>}
       {value.tools.length === 0 ? <p>{t("coverageEmpty")}</p> : <ul className="dsmm-profile-list">{value.tools.map(tool => <li key={tool.name}>
         <dl className="dsmm-child-meta"><dt>{t("toolName")}</dt><dd><code>{tool.name}</code></dd><dt>{t("toolKind")}</dt><dd><code>{tool.kind}</code></dd>
@@ -72,13 +71,16 @@ function PermissionCoverage({ state, t }: Locale & { state: PermissionView }) {
   </section>;
 }
 export function PermissionRulesEditor({ controller, state, t }: Locale & { controller: PermissionController; state: PermissionView }) {
-  const id = useId(), draft = state.draft, disabled = state.busy !== null, value = state.rules;
+  const id = useId(), draft = state.draft, disabled = !controller.canEdit(state.generation), value = state.rules;
   return <section className="dsmm-zone" aria-label={t("rules")}><h3>{t("rules")}</h3><p className="dsmm-hint">{t("rulesHint")}</p><p className="dsmm-hint">{t("networkLimit")}</p>
     <p className="dsmm-hint">{t("matchHint")}</p><Issue value={state.rulesIssue} t={t} />
-    <dl className="dsmm-child-meta"><dt>{t("base")}</dt><dd><code>{state.base?.revision ?? t("unknown")}</code></dd><dt>{t("savedRevision")}</dt><dd><code>{value?.runtime.savedRevision ?? t("unknown")}</code></dd>
-      <dt>{t("runtimeRevision")}</dt><dd><code>{value?.runtime.runtimeRevision ?? t("unknown")}</code></dd><dt>{t("runtime")}</dt><dd>{value === null ? t("unknown") : t(value.runtime.state)}</dd>
+    <p className="dsmm-hint">{t("observedPolicy")}</p><dl className="dsmm-child-meta"><dt>{t("profileOverrideState")}</dt><dd>{t("profileOverrideUnknown")}</dd></dl>
+    <dl className="dsmm-child-meta"><dt>{t("runtime")}</dt><dd>{value === null ? t("unknown") : t(value.runtime.state)}</dd>
       <dt>{t("mounted")}</dt><dd>{value === null ? t("unknown") : t(value.runtime.mounted ? "on" : "off")}</dd></dl>
     {value?.runtime.restartRequired && <p>{t("restart")}</p>}
+    {disabled && <p className="dsmm-hint">{t(state.reading ? "reading" : "rulesUnavailable")}</p>}
+    {state.base !== null && <dl className="dsmm-child-meta"><dt>permissionControl.enabled</dt><dd>{t(state.base.policy.enabled ? "on" : "off")} · {t("coldHint")}</dd>
+      <dt>permissionControl.nativeCommands.enabled</dt><dd>{t(state.base.policy.nativeCommands.enabled ? "on" : "off")}</dd></dl>}
     <PermissionCoverage state={state} t={t} />
     {draft !== null && <><div className="dsmm-field"><label htmlFor={`${id}-outside`}>{t("outsideReads")}</label><ActionSelect id={`${id}-outside`} value={draft.outsideReads} disabled={disabled} t={t} onChange={outsideReads => controller.edit(state.generation, { outsideReads })} /></div>
       {(["webSearch", "webFetch"] as const).map(key => <fieldset key={key}><legend>{t(key)}</legend><label className="dsmm-actions" htmlFor={`${id}-${key}-enabled`}><input type="checkbox" id={`${id}-${key}-enabled`} checked={draft[key].enabled} disabled={disabled} onChange={event => controller.edit(state.generation, { [key]: { ...draft[key], enabled: event.currentTarget.checked } })} />{t("enabled")}</label>
@@ -90,17 +92,17 @@ export function PermissionRulesEditor({ controller, state, t }: Locale & { contr
     </>}
     <RuleRecords state={state} controller={controller} t={t} />
     <div className="dsmm-actions"><Button type="button" variant="primary" disabled={!controller.canSave(state.generation)} onClick={() => void controller.save(state.generation)}>{t("save")}</Button>
-      <Button type="button" variant="outline" disabled={state.scope !== "root" || !state.connected || state.reading || disabled} onClick={() => void controller.refresh(state.generation, true)}>{t("discard")}</Button></div>
+      <Button type="button" variant="outline" disabled={state.scope !== "root" || !state.connected || state.reading || state.busy !== null} onClick={() => void controller.refresh(state.generation, true)}>{t("discard")}</Button></div>
     {state.dirty && <p>{t("dirty")}</p>}
   </section>;
 }
 export function PermissionsPanel({ controller, t, sessionId }: PermissionsPanelProps) {
   const state = useSyncExternalStore(controller.store.subscribe, controller.store.getSnapshot);
   useEffect(() => controller.watch(), [controller]);
-  if (sessionId !== undefined && sessionId !== state.sessionId) return null;
+  if (sessionId !== undefined && sessionId !== state.sessionId) return <p className="dsmm-hint" role="status">{t("rulesUnavailable")}</p>;
   return <section className="dsmm-profiles dsmm-children dsmm-permissions" data-dsmm-permissions aria-label={t("title")} aria-busy={state.reading || state.busy !== null}>
     <h2>{t("title")}</h2><RootState state={state} t={t} /><p className="dsmm-hint">{t("nativeApproval")}</p>
-    <p className="dsmm-status" role="status" aria-live="polite">{state.busy !== null ? t("busy") : state.notice === null ? "" : t(state.notice)}</p>
+    <p className="dsmm-status" role="status" aria-live="polite">{state.busy !== null ? t("busy") : state.reading ? t("reading") : state.notice === null ? "" : t(state.notice)}</p>
     <PermissionRulesEditor controller={controller} state={state} t={t} />
   </section>;
 }

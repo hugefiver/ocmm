@@ -8,6 +8,7 @@ import { DsmmProfileError, validateProfileRevision } from "./profiles.js";
 export const MAX_CONFIG_FILE_BYTES = 65536;
 
 export interface ConfigFileReadResult {
+  refreshRequired?: true;
   content: string | null;
   revision: string;
 }
@@ -20,6 +21,7 @@ export class FixedConfigFileStore {
   private readonly timeoutMs: number;
   private readonly pollMs: number;
   private readonly rename: (source: string, destination: string) => void;
+  private readonly observe?: (path: string) => void;
 
   constructor(home: string, options: ProfileStoreOptions = {}) {
     this.directory = join(files.trustedHome(home), "plugins", "dsmm");
@@ -27,6 +29,7 @@ export class FixedConfigFileStore {
     this.timeoutMs = files.boundedOption(options.lockTimeoutMs, 2000, 0, 30000);
     this.pollMs = files.boundedOption(options.lockPollMs, 25, 1, 1000);
     this.rename = options.rename ?? renameSync;
+    this.observe = options.observe;
     this.validateRoot(false);
   }
 
@@ -47,7 +50,7 @@ export class FixedConfigFileStore {
     }
   }
 
-  async save(content: string, expectedRevision: string, assertCurrent?: () => void): Promise<{ content: string; revision: string }> {
+  async save(content: string, expectedRevision: string, assertCurrent?: () => void): Promise<{ content: string; revision: string; refreshRequired?: true }> {
     if (typeof content !== "string") throw new DsmmProfileError("validation", "Global configuration must be UTF-8 text.", "content");
     if (content.length > MAX_CONFIG_FILE_BYTES) throw new DsmmProfileError("limit", "Global configuration must not exceed 64 KiB.", "content");
     const bytes = Buffer.from(content, "utf8");
@@ -59,8 +62,8 @@ export class FixedConfigFileStore {
         if (this.read().revision !== expectedRevision) throw new DsmmProfileError("conflict", "Global configuration changed. Refresh before saving; existing bytes were retained.");
       };
       recheck();
-      files.atomicReplace(this.path, bytes, recheck, assertLock, this.rename, assertCurrent);
-      return { content, revision: files.digest(bytes) };
+      const owned = files.atomicReplace(this.path, bytes, recheck, assertLock, this.rename, assertCurrent);
+      return { content, ...files.observeCommitted(this.path, owned, this.observe) };
     });
   }
 

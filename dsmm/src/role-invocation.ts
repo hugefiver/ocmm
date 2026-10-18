@@ -40,7 +40,7 @@ export function currentRoleInvocation(parent: DshAgent, target: DsmmRoleId): Res
   const current = scoped.getStore();
   return current?.parent === parent && current.invocation.target === target ? current.invocation : undefined;
 }
-export function bindRoleInvocation(agent: DshAgent, invocation: ResolvedRoleInvocation, original: ChildAdmissionCapture | undefined): void {
+export function bindRoleInvocation(agent: DshAgent, invocation: ResolvedRoleInvocation, original?: ChildAdmissionCapture): void {
   captured.set(agent, invocation);
   if (original === undefined) originalCaptures.delete(agent); else originalCaptures.set(agent, original);
 }

@@ -265,7 +265,7 @@ export interface DshContext {
   commands?: DshCommandsRegistry;
   tools?: DshToolRuntime;
   llm?: DshLlmRuntime;
-  dsmmRuntimeIntegration?: import("./runtime-integration.js").DsmmHostRuntimeIntegration;
+  dsmmNativeAdmission?: import("./native-admission.js").NativeAdmission;
   get?<T = unknown>(name: string): T | undefined;
   provide?(name: string, service: unknown): unknown;
   plugin?(plugin: unknown, config?: unknown): PromiseLike<unknown>;

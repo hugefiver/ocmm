@@ -1,53 +1,49 @@
 # DSMM native architecture
 
-DSMM is a DSH-native Cordis bundle. It supplies Core configuration and permission integration plus an optional Deepwork workflow, native role delegation and captured-child controls. It doesn't load the OpenCode plugin or emulate OpenCode hooks. The supported integration target is DSH `0.2.0-rc.2`; current source changes aren't proof of publication or installed Desktop acceptance.
+DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`. It supplies Core configuration and native permission integration plus optional Deepwork roles, routing and skills.
 
 ## Composition and authority
 
-The bundle's `cordis.patch.yml` composes with native base/Web/headless profiles. DSH owns authentication, model selection, session storage, approval, jobs and lifecycle. DSMM narrows role/tool/delegation authority within those services, without a second scheduler or approval queue.
+Official AgentRegistry, SubagentRuntime, AgentLoop and JSONL namespace plugins own creation, execution, activation results, queues, parent-child ownership, storage and disposal. DSMM doesn't replace those owners or require a manual-runtime selector, companion or cold-migration entry.
 
-Main entry `dsmm` accepts native-only `runtime.enabled`, a strict boolean defaulting to true. At cold startup it selects `dsmm-auto-subagent-runtime`, a subclass of the official `SubagentRuntime`, or leaves the official stock owner when false. The automatic entry inherits the final stock depth/capacity configuration. The explicit manual runtime overlay remains supported with its own Config semantics. Unsupported topology or ambiguous ownership refuses activation, not implicit owner replacement.
+The data flow is configuration source → complete immutable candidate → Agent admission → native request/tool execution → activation/catalog → client projection. Configuration and display metadata can't flow backward to grant execution permission.
 
-A native runtime save records desired state only. It doesn't dispose Main, cancel an active request or replace the resident owner; convergence requires an independent restart. Actual lifecycle loss and relevant permission changes still revoke stale authority. Desired enablement, actual binding, delivery-fence readiness and restart requirement are separate facts.
+Each role invocation captures its exact parent, ToolExecution, definition/provider identities, frozen settings and route before calling native `startActivation`. A short-lived pending record correlates the unique child with awaited `agent/created`. That listener installs scoped policy, skills and routing before queued input is released, then publishes the live admission. It runs after Registry publication; initialization failure is rolled back by the native factory, not treated as an unpublished creation. Pending state isn't a second execution queue.
 
-Default runtime selection doesn't establish stock-persistence readiness. Durable DSMM mode and role-policy events require compatible Main `sessionPersistence`. Native JSONL can retain ignorable extension records, but stock ownership doesn't satisfy DSMM's present compatibility guard. The [roadmap](roadmap.md) records the deferred official PluginRecord route; a Host upgrade alone isn't a fix.
+Preset discovery, root eligibility and model availability are independent. Auxiliary presets aren't valid roots even if a native picker displays them. Empty-root preset changes require a valid execution-before-input binding; mismatched composition refuses at step/request/tool boundaries. Generic spawn/fork can't bypass a controlled parent's role admission. Ordinary non-DSMM off-mode paths don't gain DSMM authority.
+
+Agent-scoped guards retain lifetime checks after plugin retirement. Native activation disposal handles owned work; hot unload/reinstall isn't a promise of uninterrupted live-session replacement. Existing unbound Agents aren't enrolled by listing them.
 
 ## Configuration and admission
 
-Effective settings resolve as defaults → sparse Global deployment → explicit native entry/profile → immutable named overlay. Objects merge; arrays replace. An explicit same-default value remains a pin, and Unset removes only the current layer's key.
+Settings resolve as defaults → sparse Global → explicit native entry/profile → admitted named overlay. Objects merge, arrays replace, and explicit false, empty and same-default values remain pins. Unset affects only its own layer.
 
-Core remains available without a session and with Deepwork cold-off. Global storage lives under `<resolvedDshHome>/plugins/dsmm`; native profile patches remain Host-owned. Global saves use metadata-version CAS, cooperative locking, final recheck and atomic replacement. Native form CAS, session selection CAS and admission epochs keep their separate authorities. Stat versions, snapshot references and historical digest-shaped references aren't configuration-content proofs. Child capture envelopes, source/resource integrity and release checksums retain their own integrity contracts.
+Core remains available without a session or active Deepwork. Desired source values, mounted startup ceilings and actual Agent admission are distinct. New roots capture valid desired configuration within mounted ceilings. Existing Agents and their children don't absorb later saves. Without a session, admission is unknown.
 
-Startup captures mounted capabilities. New ordinary roots admit current valid desired deployment within that startup ceiling. Existing roots, including blank ones, and their future children retain their captured baseline. Explicit idle current-session Apply replaces only the permitted named overlay on that baseline. Existing children retain original settings, locale, route and authority.
+Global, native form, named document and selection pointer have independent CAS boundaries. Global/store writes retain prepare, atomic commit and observation stages; native writes retain the public ConfigEditor/form transaction. Operator, connection, entry and lifetime are checked after awaits and before irreversible writes. A committed write with failed notification/observation stays committed with refresh-required or unsynchronized status. An unconfirmed native mutation requires reread before retry.
 
-Named profile Save, future-default selection and current-session Apply are distinct operations. Neither ordinary profile switching nor Save changes the native root model. **Use profile model** is a separate explicit native selection action, fenced against newer observed manual model/effort intent. Exact legacy libraries remain read-only; no automatic migration or same-name fallback is supplied. See [Profiles](profiles.md).
+Named-profile Save and future-default selection don't apply to existing Agents or select a model. **Live overlay Apply is unavailable**. **Use profile model**, **Deepwork mode** and **Apply overlay** project separate capabilities and reasons; Apply's restriction doesn't disable ordinary model/mode actions. Use profile model invokes native selection against the admitted immutable revision and observed manual-intent watermark. Same-value manual reselection is still new intent. See [Profiles](profiles.md).
 
 ## Native client surfaces
 
-**Plugins → DSMM bundle config** is the single deployment editor. DSMM registers `plugins.bundle.config` for `@dsmm/dsmm`, not duplicate item/row configuration pages or Conversation configuration tabs. A scope selector chooses Global or the current native profile, and module buttons open one in-area nonmodal drawer. [DESIGN.md](../DESIGN.md) defines the native tokens and interaction contract.
+**Plugins → DSMM bundle config** is the deployment editor. Global and current native profile have separate Save/Refresh/Discard, module drawers and bounded Advanced JSON. Exact form namespace, entry/profile identity, revision and raw base/user provenance are required; a redacted snapshot isn't a replacement document. Missing form authority doesn't authorize a Global fallback. Named **Deepwork Profiles** retains its Settings section and compact Conversation menu. [DESIGN.md](../DESIGN.md) defines native components and interaction behavior.
 
-The bundle owner passes `view`; authenticated server metadata resolves the optional native form. Entry ID, row ID, package ID and form namespace aren't interchangeable. Writes require matching identity, revision and raw base/user provenance. Missing or stale form authority makes that scope read-only, never a guessed namespace or Global fallback.
+Dirty and invalid drafts survive navigation and conflicts. Saving doesn't create sessions, select models, restart services or mount LSP. Children UI projects official catalog/control capabilities, not a duplicate state machine. Direct-child control and read-only descendant inspection have different authority.
 
-Each scope saves sparse explicit values. Dirty drafts survive drawer changes and native unmount/remount; invalid input or conflicts retain the draft and original CAS. Accepted-but-unrefreshed saves remain committed and can't be replayed. Browsing and saving don't create sessions, select profiles, call providers, restart services or mount LSP.
+Collapsed invocation rows show `调用 Coding` / `Call Coding`; native child labels use `Coding: task description`. Requested identity isn't actual identity. Validated result metadata, partial/failure/interruption handling and current-format replay/PTC preserve that distinction. Native safety refusal presentation takes precedence.
 
-The Permissions drawer includes exact native-command entries and a separate Root-rules transaction. Default-off command configuration doesn't certify an executor or grant full access. Root rules retain live operator, exact open Root, registration and synchronization gates. Named **Deepwork Profiles** keeps its independent Settings section and compact Conversation header menu.
+## Execution, routing and resources
 
-Native delegation call views distinguish requested identity from validated actual invocation metadata. Raw arguments, errors, metadata and nontext results remain inspectable as JSON without a rich preview. The view changes neither routing nor approval; calls without a native window use the native fallback. These are presentation interfaces, not proof that a target is callable.
+Waiting calls use native `delivery: 'caller'` and consume the activation result; only `completed` is normal completion. Publication-time cancellation uses the receipt's `dispose()` and waits for cleanup. Background must be chosen before start with `delivery: 'parent'`; accepted child/message IDs aren't completion. Running waiting calls can't be handed off to background.
 
-## Workflow, identity and routing
+Live direct-child Queue/Steer/interrupt require exact ownership, admission, operator and actual native capabilities. Unknown delivery outcomes aren't automatically resent. Cold DSMM resume without trusted live binding refuses execution while preserving history. DSMM read-only history queries don't call resume; native factory load/repair may precede the created guard, so refusal isn't a no-log-open guarantee.
 
-The source inventory contains 11 base roles, 11 categories and fourteen configurable lazy skills. Only enabled Orchestrator, Builder and opted-in Planner are standing-root eligible. File/catalog presence isn't execution admission. See [Agent presets](agent-presets.md) and [source synchronization](skill-sync.md).
+Ordinary roots retain native model selection. Role normal and explicit low/high/max routes use generic capabilities and immutable parameter policy. Standard supported calls use native prepared calls. Raw/custom parameters and Pi-AI stop-only calls use the minimal public completions payload seam for self-contained literal or explicit model-mapping configurations. Catalog-backed raw combinations that can't be reliably reproduced are rejected for both native and DSMM parameter sources. Standard Coding and native effort encoding remain unchanged. [Model routing](model-routing.md) and [runtime recovery](runtime-recovery.md) define the boundaries.
 
-Ordinary native identity remains Host-owned. DSMM-managed scopes supply their own `harness:identity` system section while preserving role, read-only and permission boundaries. Deepwork off withdraws common workflow and DSMM skills, not mandatory persona or access restrictions. The global module ceiling, session mode and runtime owner are separate controls.
+Fourteen skills use Agent-scoped metadata discovery and lazy bodies, preserving non-DSMM ancestor winners and cancellation/invalidation semantics. `preset-skills` is an internal admission-owned handle, not a public plugin or global lifecycle owner. Deepwork off removes workflow/DSMM skills, not mandatory persona/read-only/tool policy.
 
-Providers use generic native capabilities, `modelParameters`, role routes, configured invocation levels and explicit deployment-authorized per-call overrides. Omitted effort stays native-owned. Retired brand-calibration/default-effort and MaxReasoningPresets fields reject with `deprecated-field`; no automatic migration is provided. [Model routing](model-routing.md) defines exact route precedence and captured-version compatibility.
+## Limits
 
-Native jobs own permitted background execution. Handoff transfers the same running one-shot rather than starting another child. Continuable delivery retains the durable child ID and current direct-parent authority; inbox acceptance isn't execution completion. Retries require positive correlated no-output evidence, and partial text/reasoning/tool fragments forbid replay. See [runtime recovery](runtime-recovery.md).
+Native approval remains final for its exact call/scope, not a reusable permission. Relevant policy changes coordinate revocation; unrelated display/model saves aren't second approval gates. See [native permissions](native-permissions.md).
 
-## Verification and remaining limits
-
-Packed-artifact, native Web and actual Electron/Desktop acceptance are different surfaces. Source compatibility with official Desktop shared contracts doesn't prove executable activation. Verification must preserve user profiles, credentials, history and immutable release identities; software installation and real-carrier changes need separate authorization.
-
-The accepted P1 pending one-shot approval/parent-epoch defect remains [deferred](deferred-native-approval-risk.md). Repeated approval for read-only Git awaits an exact triggering command and reason; its cause isn't established. The [roadmap](roadmap.md) retains both limits and the official prerelease evidence.
-
-DSMM-managed external LSP remains off, even with `lsp.enabled:true`. Retained interfaces and release checks don't provide an automatic activation entry. DSH's own LSP and independently configured MCP remain unaffected; see [LSP boundary](lsp.md).
+Network behavior and limits are specified in [Fake-IP fetch](web-fetch-fakeip.md); shell rejection remains unlocated. LSP automatic mounting stays disabled; DSH's native LSP and independent MCP remain unchanged. See [LSP boundary](lsp.md).

@@ -51,6 +51,7 @@ export declare class PermissionController {
     private schedule;
     private issue;
     private synchronized;
+    canEdit(generation: number): boolean;
     canSave(generation: number): boolean;
     refresh(generation: number, discard?: boolean): Promise<void>;
     edit(generation: number, patch: Partial<PermissionDraft>): void;

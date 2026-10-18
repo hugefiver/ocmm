@@ -9,6 +9,7 @@ export declare class LivePiAiOwner implements DsmmLlmRouteResolver {
     private readonly native;
     private readonly registrations;
     constructor(ctx: Context, native: LlmRuntime);
+    supportsNativeStop(provider: string): boolean;
     requiresRaw(config: DsmmLlmCallConfig): boolean;
     register(scope: Context, providers: readonly string[], adapter: LlmAdapter, handle: RegistrationHandle): RegistrationHandle;
     generation(provider: string): DsmmLlmGeneration;

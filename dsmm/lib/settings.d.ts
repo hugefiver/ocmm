@@ -14,8 +14,6 @@ export type { DsmmRateLimitPolicy, DsmmRoutingStrategy, DsmmRuntimePolicyConfig,
 export { resolveRoleRuntimePolicy } from "./routing-policy.js";
 export { DSMM_SKILL_NAMES, MVP_SKILL_NAMES } from "./skills.js";
 export type { DsmmSkillName, MvpSkillName } from "./skills.js";
-export type DeepseekCalibration = "off" | "auto" | "strict";
-export type DeepseekDefaultReasoningEffort = "off" | "low" | "high";
 export type DsmmFinalReviewPolicy = "simple-oracle-complex-reviewer" | "reviewer-only" | "off";
 export type DsmmGuardScope = "deepwork-or-dsmm-agent" | "always" | "off";
 export type DsmmGitWritePolicy = "ask" | "deny" | "off";
@@ -108,17 +106,8 @@ export interface DsmmPluginConfig {
             enabled?: boolean;
         };
     };
-    /** Startup-only native storage binding; never a runtime-profile field. */
-    sessionPersistence?: {
-        root: string;
-        compression?: "zstd" | "none";
-    };
     modeName?: string;
     section?: string;
-    deepseekV4ProCalibration?: DeepseekCalibration;
-    deepseekV4ProDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
-    deepseekFlashCalibration?: DeepseekCalibration;
-    deepseekFlashDefaultReasoningEffort?: DeepseekDefaultReasoningEffort;
     defaultActive?: boolean;
     promptOrder?: number;
     skills?: Partial<Record<DsmmSkillName, boolean>>;
@@ -132,6 +121,7 @@ export interface DsmmPluginConfig {
     runtimeRecovery?: DsmmRuntimeRecoveryConfig;
     lsp?: Partial<DsmmLspSettings>;
 }
+export type DsmmNativeConfig = DsmmPluginConfig;
 export interface DsmmSettings {
     permissionControl: PermissionControlSettings;
     modelParameters: {
@@ -146,10 +136,6 @@ export interface DsmmSettings {
     modeName: string;
     defaultActive: boolean;
     promptOrder: number;
-    deepseekV4ProCalibration: DeepseekCalibration;
-    deepseekV4ProDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
-    deepseekFlashCalibration: DeepseekCalibration;
-    deepseekFlashDefaultReasoningEffort: DeepseekDefaultReasoningEffort;
     skills: Record<DsmmSkillName, boolean>;
     roles: Record<DsmmRoleId, boolean>;
     roleRouting: DsmmRoleRouting;
@@ -232,9 +218,10 @@ export interface RegisterSettingsOptions {
 }
 export declare const DEFAULT_DSMM_SETTINGS: DsmmSettings;
 /** Only data is transported. Defaults remain resolved by the existing authority. */
-export declare function deploymentEditorSchema(): DeploymentSchemaNode;
-export declare const DSMM_CONFIG_SCHEMA: Schema<DsmmPluginConfig>;
-export declare const DSMM_NATIVE_CONFIG_SCHEMA: Schema<DsmmPluginConfig>;
+export declare function deploymentEditorSchema(native?: boolean): DeploymentSchemaNode;
+export declare const DSMM_CONFIG_SCHEMA: Schema<DsmmNativeConfig>;
+export declare const DSMM_NATIVE_CONFIG_SCHEMA: Schema<DsmmNativeConfig>;
+export declare function validateNativeConfig(input: unknown): DsmmNativeConfig;
 export declare const DSMM_SETTINGS_SCHEMA: Schema<DsmmSettings>;
 export declare function resolveConfig(config?: DsmmPluginConfig): DsmmSettings;
 /** Reject references, accessors, prototypes and non-JSON data before any merge. */

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -9,6 +9,7 @@ import { parseArgs } from "node:util";
 import { throwAfterCleanup } from "./docker-cleanup-errors.mjs";
 import { createDiagnosticWorkspace } from "./lsp-smoke-fixture.mjs";
 import { dshPolicyForVersion, isReviewedSource, isSource022, isSource030, isStableNativeSource, validateCoreProof } from "./release-contract.mjs";
+import { inspectTarball } from "./dsmm-registry-install-probe.mjs";
 import { stableMainStartupRow, stableRuntimeStartupRows } from "./stable-native-acceptance.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -79,7 +80,7 @@ export function artifactDockerArguments(options, imageTag) {
   const args = ["run", "--rm", "--init", "--network", "bridge", "--shm-size", "256m", "--mount", `type=bind,source=${options.artifact},target=/dsmm-acceptance/package.tgz,readonly`];
   // Bind only explicit harness files and the chosen artifact, never a home,
   // profile, credentials directory, source checkout, or ancestor directory.
-  for (const file of ["docker-smoke.mjs", "docker-cleanup-errors.mjs", "native-preset-smoke.mjs", "native-core-smoke.mjs", "stable-native-acceptance.mjs", "release-contract.mjs", "session-history-smoke.mjs", "lsp-mcp-smoke.mjs", "lsp-smoke-fixture.mjs"]) {
+  for (const file of ["docker-smoke.mjs", "docker-cleanup-errors.mjs", "dsmm-registry-install-probe.mjs", "native-preset-smoke.mjs", "native-core-smoke.mjs", "stable-native-acceptance.mjs", "release-contract.mjs", "session-history-smoke.mjs", "lsp-mcp-smoke.mjs", "lsp-smoke-fixture.mjs"]) {
     args.push("--mount", `type=bind,source=${join(root, "scripts", file)},target=/dsmm-acceptance/scripts/${file},readonly`);
   }
   if (options.hook !== undefined) args.push("--mount", `type=bind,source=${options.hook},target=/dsmm-acceptance/hook.mjs,readonly`);
@@ -108,18 +109,18 @@ export function parseContainerArtifactReceipt(output, expectedSha256) {
 async function runArtifactSmoke() {
   const options = parseArtifactOptions(process.argv.slice(2));
   if (process.env.DSMM_DOCKER_INNER === "1") return await runInnerArtifactSmoke(options);
-  const manifest = JSON.parse(success(spawnSync("tar", ["-xOf", options.artifact, "package/package.json"], { encoding: "utf8" }), "read frozen package manifest"));
+  const manifest = frozenArtifactManifest(options.artifact);
   const dshPolicy = dshPolicyForVersion(manifest.version);
   const imageTag = options.image ?? `dsmm-final-artifact:${process.pid}-${randomUUID()}`;
   let imageOwned = false;
-  let runtimeInputRoot;
+  let runtimeInputOwner;
   let primaryError;
   const cleanupErrors = [];
   let receipt = { outcome: "FAILED", acceptanceScope: "native-final-artifact", artifact: { sha256: options.sha256 }, uiProfiles: { outcome: "NOT_RUN" } };
   try {
     if (options.image === undefined) {
-      runtimeInputRoot = mkdtempSync(join(tmpdir(), "dsmm-dsh-runtime-input-"));
-      const runtimeInput = join(runtimeInputRoot, "input");
+      runtimeInputOwner = mkdtempSync(join(tmpdir(), "dsmm-dsh-runtime-input-"));
+      const runtimeInput = join(runtimeInputOwner, "input");
       const { prepareDshRuntimeInput } = await import("./prepare-dsh-runtime-input.mjs");
       await prepareDshRuntimeInput({ packageVersion: manifest.version, destination: runtimeInput });
       success(spawnSync("docker", ["build", "--build-context", `dsh-input=${runtimeInput}`, "--build-arg", `DSH_VERSION=${dshPolicy.runtimeVersion}`, "-f", "docker/Dockerfile.artifact", "-t", imageTag, ".."], { cwd: root, stdio: "inherit" }), "independent Docker runtime build");
@@ -142,9 +143,12 @@ async function runArtifactSmoke() {
       try { success(spawnSync("docker", ["image", "rm", imageTag], { stdio: "inherit" }), "owned artifact image cleanup"); }
       catch (error) { cleanupErrors.push(error); }
     }
-    if (runtimeInputRoot !== undefined) {
-      try { rmSync(runtimeInputRoot, { recursive: true, force: false }); }
-      catch (error) { cleanupErrors.push(error); }
+    if (runtimeInputOwner !== undefined) {
+      try {
+        const owned = realpathSync(runtimeInputOwner);
+        if (dirname(owned) !== realpathSync(tmpdir()) || !basename(owned).startsWith("dsmm-dsh-runtime-input-")) throw new Error("unexpected DSH runtime input cleanup path");
+        rmSync(owned, { recursive: true, force: false });
+      } catch (error) { cleanupErrors.push(error); }
     }
     receipt.runtimeImage = { name: imageTag, ownership: imageOwned ? "owned" : "borrowed", cleanup: imageOwned ? (cleanupErrors.length ? "FAILED" : "COMPLETED") : "NOT_APPLICABLE" };
     if (cleanupErrors.length) { receipt.outcome = "FAILED"; receipt.cleanupFailures = cleanupErrors.map((error) => error.message); }
@@ -254,7 +258,7 @@ async function runInnerArtifactSmoke(options) {
       ];
       if (isStableNativeSource(manifest.version)) {
         rows[1] = stableMainStartupRow(rows[1].config, manifest.version);
-        rows.unshift(...stableRuntimeStartupRows(manifest.version));
+        if (!isSource030(manifest.version)) rows.unshift(...stableRuntimeStartupRows());
       }
       // Headless intentionally has no selector/Host. Keep its real composition,
       // but let the audit own the bounded native task rather than racing its driver.
@@ -279,7 +283,8 @@ async function runInnerArtifactSmoke(options) {
       mkdirSync(join(home, "plugins", "dsmm"), { recursive: true });
       writeFileSync(join(home, "plugins", "dsmm", "config.json"), JSON.stringify({ modules: { deepwork: { enabled: false } } }), { flag: "wx" });
       const output = join(owned, "core-receipt.json"), patch = join(owned, "core-audit.patch.yml");
-      const coreStartup = isStableNativeSource(manifest.version) ? [...stableRuntimeStartupRows(manifest.version), stableMainStartupRow({}, manifest.version)] : [];
+      const coreStartup = isStableNativeSource(manifest.version)
+        ? [...(isSource030(manifest.version) ? [] : stableRuntimeStartupRows()), stableMainStartupRow({}, manifest.version)] : [];
       if (isSource022(manifest.version)) {
         const nativePatch = join(home, "profiles", profile, "cordis.patch.yml");
         const existing = existsSync(nativePatch) ? yaml.load(readFileSync(nativePatch, "utf8")) ?? [] : [];
@@ -516,6 +521,14 @@ function pinnedDshRequire(expectedVersion) {
   const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
   if (manifest.name !== "@deepseek-ai/dsh" || manifest.version !== expectedVersion) throw new Error(`pinned DSH identity mismatch: ${manifest.name}@${manifest.version}`);
   return createRequire(packagePath);
+}
+
+function frozenArtifactManifest(artifact) {
+  const entry = inspectTarball(readFileSync(artifact)).get("package.json");
+  if (!entry) throw new Error("frozen artifact package manifest is missing");
+  const manifest = JSON.parse(entry.bytes.toString("utf8"));
+  if (manifest.name !== PACKAGE_NAME || !/^\d+\.\d+\.\d+$/u.test(manifest.version)) throw new Error("frozen artifact is not a versioned @dsmm/dsmm package");
+  return manifest;
 }
 
 async function importDsh(dshRequire, name) {

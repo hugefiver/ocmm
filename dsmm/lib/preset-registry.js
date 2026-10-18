@@ -1,7 +1,6 @@
 import { Context as NativeContext, getTraceable } from "@deepseek-ai/cordis";
 import { DSMM_ROLES, DSMM_ROLE_IDS, rolePluginRows } from "./roles.js";
 import { enabledSkillNames } from "./skills.js";
-import { isRootRoleEnabled } from "./settings.js";
 import { allowedRoleChildren, readonlyRoleTool, roleFromToolName, READONLY_ROLE_DENIED_TOOLS } from "./role-policy.js";
 import { nativeStandingFullAccess } from "./permission-native-access.js";
 import { scopeParentOf } from "./native-scope.js";
@@ -14,7 +13,7 @@ export function registerRolePresets(ctx, getSettings) {
             throw new Error("dsmm requires the native DSH agentPresets registry");
         const settings = getSettings();
         const enabled = DSMM_ROLE_IDS.filter((id) => settings.modules.deepwork.enabled && settings.roles[id]);
-        const active = DSMM_ROLES.filter((role) => isRootRoleEnabled(settings, role.id));
+        const active = DSMM_ROLES.filter((role) => enabled.includes(role.id));
         const disposers = [];
         try {
             for (const role of active) {
@@ -130,6 +129,8 @@ export function registerRolePresets(ctx, getSettings) {
         }
     };
     if (ctx.inject !== undefined) {
+        if (ctx.get?.("agentPresets") !== undefined)
+            return install(ctx);
         return Promise.resolve(ctx.inject(["agentPresets"], install)).then(() => undefined);
     }
     else if (ctx.get?.("agentPresets") !== undefined || ctx.agentPresets !== undefined) {

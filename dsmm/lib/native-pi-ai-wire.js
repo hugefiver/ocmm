@@ -3,14 +3,16 @@ import { brandString } from "@deepseek-ai/dsh-brand";
 import { PiAiAdapter, Config } from "@deepseek-ai/dsh-llm-pi-ai";
 import { createModels, createProvider, envApiKeyAuth, hasApi } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { buildBaseOptions } from "@earendil-works/pi-ai/api/simple-options";
 import { LlmError, ReasoningEffortId, assertUsableApiKey, attributionHeaders, freezeMessage, resolveImageAttachmentAccess, resolveRetryPolicy } from "@deepseek-ai/dsh-llm";
-import { snapshotDsmmCall } from "./host-llm.js";
+import { singleUsePreparedStream, snapshotDsmmCall } from "./host-llm.js";
 import { DsmmMissingProviderError, modelRouteToCall } from "./role-llm.js";
 import { normalizeModelRouteJson } from "./route-json.js";
 function normalizeDeclaredProfiles(config) {
     const profiles = new Map();
-    for (const [provider, profile] of Object.entries(Config(config).providers.get())) {
+    const normalized = Config(config);
+    for (const [provider, profile] of Object.entries(normalized.providers.get())) {
         if (profile.api !== "openai-completions" || !profile.baseURL || !profile.apiKeyEnv || !profile.models?.length
             || profile.modelOverrides !== undefined && Object.keys(profile.modelOverrides).length > 0) {
             throw new LlmError("Raw execution requires an explicit completions endpoint, credential reference and finite model list without catalog overrides", "UNSUPPORTED_ROUTE_PARAMETERS");
@@ -30,8 +32,15 @@ function normalizeDeclaredProfiles(config) {
                 throw new LlmError("Declared models must have input modalities", "INVALID_CONFIG");
             if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0 || !Number.isSafeInteger(maxTokens) || maxTokens <= 0)
                 throw new LlmError("Model capacities must be positive integers", "INVALID_CONFIG");
+            const efforts = entry.reasoningEfforts;
+            const thinkingLevelMap = {
+                off: null, minimal: null, low: null, medium: null, high: null, xhigh: null, max: null,
+                ...(efforts || {}),
+            };
+            if (efforts && efforts.off === null)
+                delete thinkingLevelMap.off;
             return { id: entry.id, name: entry.name ?? entry.id, provider, api: "openai-completions", baseUrl: profile.baseURL,
-                reasoning: false, input, contextWindow: contextWindow, maxTokens: maxTokens,
+                reasoning: !!efforts, ...(efforts ? { thinkingLevelMap } : {}), input, contextWindow: contextWindow, maxTokens: maxTokens,
                 cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
                 compat: { ...profile.compat, ...entry.compat } };
         });
@@ -68,7 +77,7 @@ function protectedHeaders(headers) {
     return Object.fromEntries(result);
 }
 /** Public provider composition preserves the SDK's native content/replay/stream translator. */
-function rawProvider(provider, generation, request, assertCurrent) {
+function rawProvider(provider, generation, request, assertCurrent, effortSource) {
     return {
         ...provider,
         streamSimple(model, context, options) {
@@ -92,14 +101,22 @@ function rawProvider(provider, generation, request, assertCurrent) {
                     if (tokenField !== undefined && !Object.hasOwn(payload, tokenField))
                         throw new LlmError("Raw token field does not match the declared model protocol", "INVALID_REQUEST");
                     const body = { ...payload, ...request.customParameters };
-                    if (request.reasoningEffort !== undefined)
+                    if (effortSource === "dsmm-config" && request.reasoningEffort !== undefined)
                         Reflect.set(body, "reasoning_effort", request.reasoningEffort);
                     if (request.stop !== undefined)
                         Reflect.set(body, "stop", [...request.stop]);
                     return body;
                 },
             };
-            return generation.stream(exact, context, { ...wireOptions, transformHeaders: protectedHeaders });
+            const transformHeaders = (headers) => {
+                assertCurrent();
+                request.signal?.throwIfAborted();
+                return protectedHeaders(headers);
+            };
+            if (effortSource === "native")
+                return generation.streamSimple(exact, context, { ...options,
+                    ...(typeof rawBudget === "number" ? { maxTokens: rawBudget } : {}), onPayload: wireOptions.onPayload, transformHeaders });
+            return generation.stream({ ...exact, reasoning: false, thinkingLevelMap: undefined }, context, { ...wireOptions, transformHeaders });
         },
     };
 }
@@ -186,6 +203,8 @@ export function createDsmmPiAiProviderOwner(ctx, options, borrowed) {
     for (const profile of profiles.values())
         models.setProvider(profile.piProvider);
     const owner = Object.freeze({ stockAdapter, providers,
+        requiresRaw: (config) => config.customParameters !== undefined || config.stop !== undefined && profiles.has(config.provider),
+        supportsNativeStop: (provider) => !profiles.has(provider),
         async resolveRoute(input, signal) {
             const route = normalizeModelRouteJson(input);
             signal?.throwIfAborted();
@@ -213,16 +232,22 @@ export function createDsmmPiAiProviderOwner(ctx, options, borrowed) {
                 throw new LlmError("Provider is not owned by this Host", "NO_ADAPTER");
             return Object.freeze({ identity, signal: borrowed === undefined ? life.signal : AbortSignal.any([life.signal, borrowed.signal]), retryPolicy: profile.retryPolicy, assertCurrent,
                 ...(profile.reasoning === undefined ? {} : { defaultReasoningEffort: ReasoningEffortId(profile.reasoning) }),
-                async prepareCall(selectedProvider, model, signal, assertAdmission) {
+                async prepareCall(selectedProvider, model, signal, assertAdmission, effortSource) {
                     const assertCall = () => { signal.throwIfAborted(); assertCurrent(); assertAdmission?.(); };
                     assertCall();
                     if (selectedProvider !== provider || models.getModel(provider, model) === undefined)
                         throw new LlmError("Provider has no exact declared model", "UNKNOWN_MODEL");
-                    const metadata = await (borrowed?.adapter ?? stockAdapter).resolveModel(provider, model, signal);
+                    const prepared = await (borrowed?.adapter ?? stockAdapter).prepareCall(provider, model, signal);
                     assertCall();
-                    return { model: metadata, stream(request) {
+                    if (prepared.model.provider !== provider || prepared.model.id !== model)
+                        throw new LlmError("Provider resolved another model", "INVALID_ADAPTER");
+                    const catalogProvider = getBuiltinProviders().find(id => id === provider);
+                    const catalogModel = catalogProvider !== undefined && getBuiltinModels(catalogProvider).some(entry => entry.id === model);
+                    return { model: prepared.model, stream: singleUsePreparedStream(request => {
                             assertCall();
                             request.signal?.throwIfAborted();
+                            if (request.provider !== provider || request.model !== model)
+                                throw new LlmError("Raw request changed its prepared route", "INVALID_PREPARED_CALL");
                             const extended = request;
                             const checked = snapshotDsmmCall({ provider: request.provider, model: request.model,
                                 ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
@@ -231,8 +256,17 @@ export function createDsmmPiAiProviderOwner(ctx, options, borrowed) {
                                 ...(request.stop === undefined ? {} : { stop: request.stop }),
                                 ...(extended.customParameters === undefined ? {} : { customParameters: extended.customParameters }),
                             });
-                            const projectedProfiles = new Map([...profiles].map(([id, item]) => [id, { ...item, reasoning: undefined,
-                                    piProvider: rawProvider(item.piProvider, models, { ...request, ...checked }, assertCall) }]));
+                            if (catalogModel)
+                                throw new LlmError("Raw execution cannot reproduce implicit catalog model semantics", "UNSUPPORTED_ROUTE_PARAMETERS");
+                            const source = effortSource?.() ?? "dsmm-config";
+                            if (source === "native") {
+                                if (prepared.model.reasoning !== undefined && models.getModel(provider, model)?.thinkingLevelMap === undefined
+                                    || Object.hasOwn(checked.customParameters ?? {}, "reasoning_effort")) {
+                                    throw new LlmError("Native raw execution requires its declared wire mapping and cannot replace native effort with raw effort", "UNSUPPORTED_ROUTE_PARAMETERS");
+                                }
+                            }
+                            const projectedProfiles = new Map([...profiles].map(([id, item]) => [id, { ...item, reasoning: source === "native" ? item.reasoning : undefined,
+                                    piProvider: rawProvider(item.piProvider, models, { ...request, ...checked }, assertCall, source) }]));
                             const credentialSignal = request.signal === undefined ? life.signal : AbortSignal.any([life.signal, request.signal]);
                             const rawAdapter = new PiAiAdapter({ ...adapterOptions, profiles: () => projectedProfiles,
                                 resolveApiKey: async (selectedProvider, selectedProfile) => {
@@ -248,8 +282,8 @@ export function createDsmmPiAiProviderOwner(ctx, options, borrowed) {
                                 const { replayState: _replay, ...source } = message.source;
                                 return freezeMessage({ ...message, source });
                             });
-                            return rawAdapter.stream({ ...native, messages });
-                        } };
+                            return rawAdapter.stream({ ...native, ...(source === "native" && request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}), messages });
+                        }) };
                 },
             });
         },

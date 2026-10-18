@@ -1,6 +1,6 @@
 # DSMM Safety Guards
 
-DSMM uses DSH 0.2-native safety guards on the tools pipeline. The guards use `tools/pre-execute` for allow, deny, and ask decisions, and `tools/post-execute` for accepted-result truncation. They do not use OpenCode hook names and do not mutate tool arguments. Profile configuration belongs in the `id: dsmm` Loader entry's `config` object, not the removed settings.yaml namespace.
+DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`. Its guards use `tools/pre-execute` for allow, deny and ask decisions, and `tools/post-execute` for accepted-result truncation. They don't use OpenCode hook names or mutate tool arguments. Deployment overrides belong in the `id: dsmm` Loader entry's `config` object, not a settings.yaml namespace.
 
 ## Scope
 

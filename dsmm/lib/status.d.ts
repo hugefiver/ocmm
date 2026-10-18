@@ -1,7 +1,7 @@
 import type { DshAgent } from "./dsh-types.js";
 import type { DsmmModelFamily } from "./model-family.js";
 import type { DsmmRoleId } from "./roles.js";
-import type { DeepseekCalibration, DsmmModelRoute, DsmmProfileAdmission, DsmmSettings } from "./settings.js";
+import type { DsmmModelRoute, DsmmProfileAdmission, DsmmSettings } from "./settings.js";
 import type { DsmmRateLimitPolicy, DsmmRoutingStrategy } from "./routing-policy.js";
 import type { DsmmRoleAvailabilityState, DsmmRoleRuntimeState, SubagentRuntimeAdmissionView, ProfileDiagnostic } from "./profile-types.js";
 import type { DsmmLspRuntimeState } from "./lsp.js";
@@ -46,15 +46,7 @@ export interface DsmmStatusSnapshot {
         provider?: string;
         model?: string;
         family: DsmmModelFamily;
-        deepseekV4Pro: boolean;
-        deepseekFlash: boolean;
         currentReasoningEffort?: string;
-    };
-    calibration: {
-        mode: DeepseekCalibration;
-        applies: boolean;
-        policyEffort?: "off" | "low" | "high" | "max";
-        action: "disabled" | "out-of-scope" | "non-target-route" | "preserve-explicit" | "fill-missing" | "enforce" | "native-owned" | "fixed-role-policy";
     };
     rolePolicy: {
         role?: DsmmRoleId;

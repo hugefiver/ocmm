@@ -6,6 +6,9 @@ import { copyRouteJson, normalizeModelRouteJson } from "../route-json.js";
 export function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+export function scopeSchema(snapshot: DeploymentEditorSnapshot, layer: "global" | "profile"): DeploymentSchemaNode {
+  return layer === "profile" ? snapshot.nativeSchema ?? snapshot.schema : snapshot.schema;
+}
 export function at(value: unknown, path: readonly string[]): unknown {
   return path.reduce<unknown>((node, key) => record(node) && Object.hasOwn(node, key) ? node[key] : undefined, value);
 }
@@ -83,7 +86,7 @@ export function enumValues(schema: DeploymentSchemaNode): Array<string | number 
 }
 
 export function visibleDeploymentPath(path: readonly string[]): boolean {
-  return path[0] !== "lsp" && (path[0] !== "permissionControl" || path.length === 1 || path.length === 2 && path[1] === "enabled");
+  return !["lsp", "modeName", "section"].includes(path[0]);
 }
 
 /** Only visible Host-projected inspector layers, never raw sparse editor input. */

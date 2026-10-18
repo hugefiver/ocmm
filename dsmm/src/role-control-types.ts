@@ -1,33 +1,22 @@
 /** Browser-safe child control vocabulary; no Host or filesystem authority. */
 import type { DsmmInvocationView, DsmmRoleRouteComparison, SubagentRuntimeAdmissionView } from "./profile-types.js";
-import type { ChildAdmissionEvidenceView } from "./child-evidence.js";
 import type { SubagentPromptReceipt, SubagentPromptRequest, SubagentInterruptReceipt } from "@deepseek-ai/dsh-subagent";
 
-export type { DsmmInvocationView, DsmmRoleRouteComparison, ChildAdmissionEvidenceView, SubagentPromptRequest, SubagentPromptReceipt, SubagentInterruptReceipt };
+export type { DsmmInvocationView, DsmmRoleRouteComparison, SubagentPromptRequest, SubagentPromptReceipt, SubagentInterruptReceipt };
 
 export const ROLE_CONTROL_DISABLED_REASONS = [
-  "module-off", "role-disabled", "read-only", "background-disabled", "jobs-unavailable",
-  "starting", "already-background", "already-settled", "cancelled", "one-shot", "unknown-mode", "not-direct-child",
-  "delivery-fence-unavailable", "evidence-unavailable", "legacy-capability-denied", "unavailable",
+  "module-off", "role-disabled", "read-only", "one-shot", "unknown-mode", "not-direct-child",
+  "evidence-unavailable", "unavailable",
 ] as const;
 export type RoleControlDisabledReason = typeof ROLE_CONTROL_DISABLED_REASONS[number];
 export type RoleControlAvailability = { enabled: true } | { enabled: false; reason: RoleControlDisabledReason };
 
 export interface RoleControlCapabilities {
-  background: RoleControlAvailability;
   prompt: RoleControlAvailability;
   interrupt: RoleControlAvailability;
   /** The native attachment/model admission still validates each image. */
   images: RoleControlAvailability;
   runtime: SubagentRuntimeAdmissionView;
-}
-export interface RoleControlRunView {
-  sessionId: string;
-  toolCallId: string;
-  state: "starting" | "running" | "background" | "settled" | "cancelled";
-  /** Absent before the real native run is published. */
-  invocation?: DsmmInvocationView;
-  background: RoleControlAvailability;
 }
 export interface RoleControlChildView {
   id: string;
@@ -38,13 +27,11 @@ export interface RoleControlChildView {
   readonly: boolean;
   invocation?: DsmmInvocationView;
   routeComparison?: DsmmRoleRouteComparison;
-  evidence?: ChildAdmissionEvidenceView;
   controls: { prompt: RoleControlAvailability; interrupt: RoleControlAvailability };
 }
 export interface ChildSessionSnapshot {
   sessionId: string;
   admissionEpoch: string;
-  runs: RoleControlRunView[];
   children: RoleControlChildView[];
   capabilities: RoleControlCapabilities;
 }
@@ -56,24 +43,13 @@ export interface RoleControlDescendantsSnapshot {
   admissionEpoch: string;
   descendants: RoleControlDescendantView[];
 }
-export interface RoleControlBackgroundRequest {
-  sessionId: string;
-  toolCallId: string;
-  runId: string;
-  expectedAdmissionEpoch: string;
-}
-export interface BackgroundTransitionResult {
-  status: "background" | "already-background" | "already-settled" | "cancelled";
-  runId: string;
-  jobId?: string;
-}
 export interface RoleControlInterruptRequest {
   parentSessionId: string;
   childSessionId: string;
   mode: "continuable";
 }
 export const ROLE_CONTROL_ERROR_CODES = ["validation", "not-owned", "unavailable", "cancelled", "conflict", "not-found", "not-resumable", "invalid-content", "invalid-time-zone", "disabled"] as const;
-export const ROLE_CONTROL_ERROR_FIELDS = ["sessionId", "parentSessionId", "childSessionId", "toolCallId", "runId", "expectedAdmissionEpoch", "request", "content", "clientTimeZone"] as const;
+export const ROLE_CONTROL_ERROR_FIELDS = ["sessionId", "parentSessionId", "childSessionId", "request", "content", "clientTimeZone"] as const;
 export interface RoleControlErrorInfo {
   code: typeof ROLE_CONTROL_ERROR_CODES[number];
   field?: typeof ROLE_CONTROL_ERROR_FIELDS[number];

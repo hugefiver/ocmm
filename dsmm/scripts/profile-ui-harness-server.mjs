@@ -5,7 +5,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path
 import { COMPOSITION_ID, bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph } from "./profile-ui-harness-browser.mjs";
 
 const SESSION_PROVIDER_IDS = ["@deepseek-ai/dsh-api-remote-access", "@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-file-upload", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-session"];
-export const NATIVE_IDS = ["@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-typert-registry", "@deepseek-ai/dsh-api-gateway", ...SESSION_PROVIDER_IDS];
+export const NATIVE_IDS = ["@deepseek-ai/dsh-client-modules", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-typert-registry", "@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-ui-tool", ...SESSION_PROVIDER_IDS];
 const mime = { ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf" };
 
 export async function resolveNativeClientBundle(nativeRequire, id) {
@@ -41,7 +41,8 @@ export async function startProfileUiServer({ nativeRequire, packageRoot, sha256,
     // Scope owners activate unchanged; their installed native metadata owns
     // the full package dependency graph, not harness-invented service aliases.
     const declaration = SESSION_PROVIDER_IDS.includes(id) ? manifest.dsh.client : undefined;
-    const inject = declaration?.inject ?? (id === "@deepseek-ai/dsh-api-gateway" ? ["@deepseek-ai/dsh-typert-registry", COMPOSITION_ID] : []);
+    const inject = declaration?.inject ?? (id === "@deepseek-ai/dsh-api-gateway" ? ["@deepseek-ai/dsh-typert-registry", COMPOSITION_ID]
+      : id === "@deepseek-ai/dsh-client-ui-tool" ? ["@deepseek-ai/dsh-api-gateway", COMPOSITION_ID] : []);
     for (const dependency of inject) assert.ok(NATIVE_IDS.includes(dependency) || dependency === COMPOSITION_ID, `${id} requires unprovided native client package ${dependency}`);
     rows.push({ id, url, inject, external: declaration?.external ?? [] });
   }

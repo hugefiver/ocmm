@@ -27,17 +27,14 @@ async function auditIdentity(namespace: string, entryId: string) {
           assert.equal(method, "describe"); return { revision: "global-fixture" };
         } }],
         ["loader", { entries() { return [
-          { id: "include:agent", options: { id: "agent", name: "@deepseek-ai/dsh-agent" }, disabled: true },
-          { id: "include:subagent", options: { id: "subagent", name: "@deepseek-ai/dsh-subagent" }, disabled: true },
-          { id: "include:dsmm-registry", options: { id: "dsmm-agent-registry", name: "@dsmm/dsmm/agent-registry" }, fiber: { state: 2 } },
-          { id: "include:dsmm-runtime", options: { id: "dsmm-runtime", name: "@dsmm/dsmm/subagent-runtime" }, fiber: { state: 2 } },
+          { id: "include:agent", options: { id: "agent", name: "@deepseek-ai/dsh-agent" }, fiber: { state: 2 } },
+          { id: "include:subagent", options: { id: "subagent", name: "@deepseek-ai/dsh-subagent" }, fiber: { state: 2 } },
           { id: "include:dsmm", options: { id: "dsmm", name: "@dsmm/dsmm" }, fiber: { state: 2 } }
         ]; } }],
         ["agents", { list() { return []; } }],
         ["subagents", {}],
         ["profileContext", { startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsmm/dsmm"], overlays }],
-        ["dsmmProfileRuntime", { getSettings: { subagentRuntime() { return { binding: "dsmm", deliveryFenceReady: false, restartRequired: false }; } } }],
-        ["dsmmRuntimeIntegration", undefined],
+        ["dsmmProfileRuntime", { getSettings: { subagentRuntime() { return { binding: "stock", deliveryFenceReady: false, restartRequired: false }; } } }],
         ["settings", { writable: true, describe() {
           settingsLookups++;
           throw Object.assign(new Error("owned Settings boundary fault"), { code: "EACCES" });
@@ -51,11 +48,11 @@ async function auditIdentity(namespace: string, entryId: string) {
   } finally { rmSync(owned, { recursive: true, force: false }); }
 }
 
-test("native Core releases its empty DSMM startup config overlay before native Settings lookup", async () => {
+test("native Core preserves current startup overlay input before native Settings lookup", async () => {
   const result = await auditIdentity("dsmm", "include:dsmm");
   assert.equal(result.exitStatus, 1);
   assert.equal(result.settingsLookups, 1);
-  assert.equal(Object.hasOwn(result.overlays[0], "config"), false);
+  assert.deepEqual(result.overlays[0], { id: "dsmm", name: "@dsmm/dsmm", config: {} });
   assert.deepEqual(result.overlays[1], { id: "other", config: { keep: true } });
   assert.deepEqual(result.receipt, { outcome: "FAILED", stage: "native-core-loader-and-profile", errorCode: "EACCES", errorName: "Error" });
 });

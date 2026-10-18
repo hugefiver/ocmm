@@ -7,7 +7,8 @@ import { capturedRoleInvocation } from "./role-invocation.js";
 import type { DsmmSettings } from "./settings.js";
 
 export function sessionEvents(session: DshSession | undefined): readonly DshSessionEvent[] {
-  return session?.snapshotEvents?.() ?? session?.events ?? [];
+  return (session?.snapshotEvents?.() ?? session?.events ?? []).map(event => event.type === "plugin:dsmm/mode"
+    ? { ...event, type: "deepwork/mode" } : event.type === "plugin:dsmm/role-policy" ? { ...event, type: "dsmm/role-policy" } : event);
 }
 
 export function resolveSelectedAgentPreset(session: DshSession | undefined): string | undefined {

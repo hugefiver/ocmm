@@ -12,7 +12,7 @@ import dsmmPlugin from "../lib/index.js";
 import type { DshContext } from "../lib/dsh-types.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import { ProfileStore } from "../lib/profile-store.js";
-import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
+import { nativeRoutingFixture } from "./native-routing-fixture.ts";
 
 function gate() {
   let release!: () => void;
@@ -33,9 +33,9 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin, t: TestCont
     const saved = await runtime.save({ id: "locked-startup", content: '{"version":1,"id":"locked-startup","settings":{"roleRouting":{"dsmm-orchestrator":{"primary":{"provider":"fixture","model":"pinned-startup"}}}}}', expectedRevision: null });
     await runtime.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
     const retained = await f.create({ agentPreset: "dsmm-orchestrator" });
+    const store = ProfileStore.fromCentral(f.home, f.profileDir, runtime.admission().deployment!.entryId);
     await f.dsmmFiber.dispose();
     assert.equal(f.agents.get(retained.id), retained, "native Agent lifetime is independent of reinstalling DSMM");
-    const store = ProfileStore.fromCentral(f.home, f.profileDir, runtime.admission().deployment!.entryId);
     const profileDir = store.profileDir;
     const pointer = await readFile(join(store.stateDir, ".selection.json"));
     const lock = join(profileDir, ".lock");
@@ -72,7 +72,7 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin, t: TestCont
       throw failure ?? new Error("Native startup settled before reading its persisted admission");
     })]);
     assert.equal(f.ctx.get("dsmmProfileRuntime"), undefined);
-    await runFixtureTurn(retained);
+    await assert.rejects(f.create({ agentPreset: "dsmm-orchestrator" }));
     assert.equal(f.adapter.calls.length, 0, "pending native profile startup must admit no provider request");
     assert.equal(tools, 0, "pending native profile startup must execute no tools");
     assert.equal(retained.session.snapshotEvents().some((event) => event.type === "request/header" || event.type === "tool/call" || event.type === "tool/result"), false);
@@ -92,6 +92,6 @@ async function verifyPendingNativeStartup(plugin: typeof dsmmPlugin, t: TestCont
   }
 }
 
-test("real native DSMM reinstall with pending admission read refuses retained-Agent provider/tool work before readiness", async t => {
+test("real native DSMM reinstall with pending admission read refuses fresh-root creation before readiness", async t => {
   await verifyPendingNativeStartup(dsmmPlugin, t);
 });

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { LlmError, ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import type { ModelSelection, ModelSelectionRef } from "@deepseek-ai/dsh-agent";
 import type { Agent } from "@deepseek-ai/dsh-agent";
+import type {} from "@deepseek-ai/dsh-api-session-controller";
 import type { DshAgent, DshContext } from "../lib/dsh-types.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import { headerRoutes, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
@@ -27,7 +28,9 @@ test("native root model selection stays authoritative before and after explicit 
   try {
     const selection: ModelSelectionRef = { current: { provider: "fixture", model: "native-default", reasoningEffort: ReasoningEffortId("high") }, assembled: undefined };
     const initial = { ...selection.current! };
-    const agent = await fixture.create({}, selection); await runFixtureTurn(agent);
+    const agent = await fixture.create({}, selection, { setup(scope) {
+      scope.on("agent/request", async (_frame, next) => ({ ...await next(), temperature: 0, maxTokens: 80, stop: ["END"] }));
+    } }); await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent), [initial]);
     const runtime = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
     const admitted = runtime.admission(agent as unknown as DshAgent);
@@ -39,15 +42,16 @@ test("native root model selection stays authoritative before and after explicit 
     assert.deepEqual(headerRoutes(agent), [initial, manual]);
     await runFixtureTurn(agent);
     assert.deepEqual(fixture.adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), [initial, manual, manual]);
+    assert.ok(fixture.adapter.calls.every(call => call.temperature === 0 && call.maxTokens === 80));
   } finally { await fixture.dispose(); }
 });
 
-test("native effort-only and omitted-effort selections remain exact under strict Deepwork calibration", async () => {
+test("native effort-only and omitted-effort selections remain authoritative", async () => {
   const route = { provider: "deepseek-official", model: "deepseek-v4-pro", reasoningEffort: "max" };
-  const fixture = await nativeRoutingFixture({ deepseekV4ProCalibration: "strict", roleRouting: { "dsmm-reviewer": { primary: route } } });
+  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-orchestrator": { primary: route } } });
   try {
     const selection: ModelSelectionRef = { current: { ...route, reasoningEffort: ReasoningEffortId("max") }, assembled: undefined };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection); await runFixtureTurn(agent);
+    const agent = await fixture.create({ agentPreset: "dsmm-orchestrator" }, selection); await runFixtureTurn(agent);
     await nativeSelect(agent, selection, { ...route, reasoningEffort: "low" }); await runFixtureTurn(agent);
     await nativeSelect(agent, selection, { provider: route.provider, model: route.model }); await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent).map(({ reasoningEffort }) => reasoningEffort), ["max", "low", "high"]);
@@ -56,10 +60,10 @@ test("native effort-only and omitted-effort selections remain exact under strict
 });
 
 test("a native selection committed during assembly applies only on the later step captured by native assembly", async () => {
-  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary } } });
+  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-orchestrator": { primary } } });
   try {
     const selection: ModelSelectionRef = { current: { ...primary, reasoningEffort: ReasoningEffortId("max") }, assembled: undefined };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection);
+    const agent = await fixture.create({ agentPreset: "dsmm-orchestrator" }, selection);
     await nativeSelect(agent, selection, primary); await runFixtureTurn(agent);
     let switched = false;
     const dispose = agent.ctx.on("system-prompt/assemble", async (_assembly, _context, next) => {
@@ -76,11 +80,11 @@ test("a native selection committed during assembly applies only on the later ste
 });
 
 for (const sameValue of [false, true]) test(`native ${sameValue ? "same-value reselection" : "route selection"} during backoff invalidates the old retry without native always fallthrough`, async () => {
-  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [{ provider: "fixture", model: "stale-fallback" }],
+  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-orchestrator": { primary, fallbackRoutes: [{ provider: "fixture", model: "stale-fallback" }],
     strategy: "rate-limit-fallback", rateLimit: { maxRetries: 1, initialDelayMs: 40, maxDelayMs: 40, maxTotalDelayMs: 40, switchAfterRateLimits: 1, maxSwitches: 1 } } } });
   try {
     const selection: ModelSelectionRef = { current: { ...primary, reasoningEffort: ReasoningEffortId("max") }, assembled: undefined };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection);
+    const agent = await fixture.create({ agentPreset: "dsmm-orchestrator" }, selection);
     await nativeSelect(agent, selection, primary);
     let failed!: () => void; const firstFailure = new Promise<void>((resolve) => { failed = resolve; });
     fixture.ctx.on("agent/assistant-stream", ({ frame }) => { if (frame.type === "end") failed(); });
@@ -90,8 +94,8 @@ for (const sameValue of [false, true]) test(`native ${sameValue ? "same-value re
     const turn = runFixtureTurn(agent); await firstFailure;
     const runtime = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
     const admission = runtime.admission(agent as unknown as DshAgent);
-    for (let tick = 0; tick < 20 && roleRouteRuntimeState(agent as unknown as DshAgent, admission.settings, "dsmm-reviewer", admission.epoch).totalDelayMs === 0; tick++) await Promise.resolve();
-    assert.equal(roleRouteRuntimeState(agent as unknown as DshAgent, admission.settings, "dsmm-reviewer", admission.epoch).totalDelayMs, 40);
+    for (let tick = 0; tick < 20 && roleRouteRuntimeState(agent as unknown as DshAgent, admission.settings, "dsmm-orchestrator", admission.epoch).totalDelayMs === 0; tick++) await Promise.resolve();
+    assert.equal(roleRouteRuntimeState(agent as unknown as DshAgent, admission.settings, "dsmm-orchestrator", admission.epoch).totalDelayMs, 40);
     const chosen = sameValue ? primary : manual;
     await nativeSelect(agent, selection, chosen); await turn;
     assert.equal(fixture.adapter.calls.length, 1); assert.equal(hostCalls, 0);
@@ -104,11 +108,11 @@ for (const sameValue of [false, true]) test(`native ${sameValue ? "same-value re
 });
 
 test("native user selection between retry admission and pending request application stops the stale request before provider dispatch", async () => {
-  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [{ provider: "fixture", model: "stale-fallback" }],
+  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-orchestrator": { primary, fallbackRoutes: [{ provider: "fixture", model: "stale-fallback" }],
     strategy: "rate-limit-fallback", rateLimit: { initialDelayMs: 0, maxDelayMs: 0, maxTotalDelayMs: 0, maxRetries: 1, switchAfterRateLimits: 1, maxSwitches: 1 } } } });
   try {
     const selection: ModelSelectionRef = { current: { ...primary, reasoningEffort: ReasoningEffortId("max") }, assembled: undefined };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection); await nativeSelect(agent, selection, primary);
+    const agent = await fixture.create({ agentPreset: "dsmm-orchestrator" }, selection); await nativeSelect(agent, selection, primary);
     let requests = 0;
     const dispose = agent.ctx.on("agent/request", async (_frame, next) => {
       const config = await next();
@@ -125,27 +129,22 @@ test("native user selection between retry admission and pending request applicat
   } finally { await fixture.dispose(); }
 });
 
-test("backend profile admission alone does not rewrite native user selection, and the restored native header survives cold admission", async () => {
-  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary } } });
+test("future profile defaults do not rewrite an admitted root's native user selection", async () => {
+  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-orchestrator": { primary } } });
   try {
     const selection: ModelSelectionRef = { current: { ...primary, reasoningEffort: ReasoningEffortId("max") }, assembled: undefined };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection); await nativeSelect(agent, selection, manual); await runFixtureTurn(agent);
+    const agent = await fixture.create({ agentPreset: "dsmm-orchestrator" }, selection); await nativeSelect(agent, selection, manual); await runFixtureTurn(agent);
     const runtime = (fixture.ctx as unknown as DshContext).get!<DsmmProfileRuntime>("dsmmProfileRuntime")!;
     const next = await runtime.save({ id: "new-default", expectedRevision: null, content: JSON.stringify({ version: 1, id: "new-default", settings: {
-      roleRouting: { "dsmm-reviewer": { primary: { ...primary, model: "new-profile-default" }, strategy: "rate-limit-fallback" } } } }) });
-    const snapshot = await runtime.getSession(agent as unknown as DshAgent);
-    await runtime.selectSession({ sessionId: agent.id, id: next.id, expectedRevision: next.revision,
-      expectedSelectionRevision: snapshot.selection.selectionRevision, expectedAdmissionEpoch: snapshot.admissionEpoch }, agent as unknown as DshAgent);
+      roleRouting: { "dsmm-orchestrator": { primary: { ...primary, model: "new-profile-default" }, strategy: "rate-limit-fallback" } } } }) });
+    await runtime.select({ id: next.id, expectedRevision: next.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
     await runFixtureTurn(agent);
     assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [manual.model, manual.model]);
-    assert.equal(runtime.getSettings(agent as unknown as DshAgent).roleRouting["dsmm-reviewer"]!.primary!.model, "new-profile-default");
-    const seed = JSON.parse(JSON.stringify(agent.session.snapshotEvents()));
-    const restored = agent.session.requestHeader()!;
-    const coldSelection: ModelSelectionRef = { current: { provider: restored.config.provider, model: restored.config.model,
-      ...(restored.adapterDefaults?.reasoningEffort === true || restored.config.reasoningEffort === undefined ? {} : { reasoningEffort: restored.config.reasoningEffort }) }, assembled: undefined };
-    const cold = await fixture.create({ agentPreset: "dsmm-reviewer" }, coldSelection, { seed });
-    await runFixtureTurn(cold);
-    assert.deepEqual(headerRoutes(cold).at(-1), manual, "native restored header selection remains authoritative on this fresh root");
+    assert.equal(runtime.getSettings(agent as unknown as DshAgent).roleRouting["dsmm-orchestrator"]!.primary!.model, primary.model);
+    const fresh = await fixture.create({ agentPreset: "dsmm-orchestrator" }, { current: selection.current, assembled: undefined });
+    await runFixtureTurn(fresh);
+    assert.equal(runtime.getSettings(fresh as unknown as DshAgent).roleRouting["dsmm-orchestrator"]!.primary!.model, "new-profile-default");
+    assert.deepEqual(headerRoutes(fresh), [manual]);
   } finally { await fixture.dispose(); }
 });
 
@@ -172,20 +171,17 @@ test("an auxiliary manual native route retains its policy-authorized fallback un
 
 test("a parent's explicit native model choice does not replace auxiliary role defaults or native child overrides", async () => {
   const reviewer = { provider: "fixture", model: "auxiliary-reviewer", reasoningEffort: "high" };
-  const fixture = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary }, "dsmm-reviewer": { primary: reviewer } } });
+  const fixture = await nativeRoutingFixture({ defaultActive: true, subagents: { allowRouteOverride: true }, roleRouting: { "dsmm-orchestrator": { primary }, "dsmm-reviewer": { primary: reviewer } } });
   try {
     const selection: ModelSelectionRef = { current: { ...primary, reasoningEffort: ReasoningEffortId("max") }, assembled: undefined };
     const parent = await fixture.create({}, selection); await nativeSelect(parent, selection, manual); await runFixtureTurn(parent);
     for (const overridden of [false, true]) {
-      const child = await fixture.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Auxiliary route", delivery: "caller", signal: new AbortController().signal,
-        request: { parent, prompt: [{ type: "text", text: "Use the auxiliary role's native route" }],
-          ...(overridden ? { agentOptions: { ...manual, reasoningEffort: ReasoningEffortId("low") } } : {}) } });
-      const childAgent = fixture.agents.get(child.childId);
-      assert.ok(childAgent);
+      const childAgent = await fixture.createAuxiliary("dsmm-reviewer", undefined, "one-shot", parent,
+        overridden ? { agentOptions: { ...manual, reasoningEffort: ReasoningEffortId("low") } } : {});
       try {
-        assert.equal((await child.result).stopReason, "completed");
+        await runFixtureTurn(childAgent);
         assert.deepEqual(headerRoutes(childAgent), [overridden ? manual : reviewer]);
-      } finally { await child.dispose(); }
+      } finally { await fixture.releaseAuxiliary(childAgent); }
     }
   } finally { await fixture.dispose(); }
 });

@@ -1,13 +1,14 @@
+import { configurationVersionState } from "./configuration-display.js";
 /** Presentation only: admitted identity never substitutes for sidecar CAS. */
 export function sessionProfileLabels(session, t) {
     const admitted = session.admittedSelection;
     const profile = admitted === undefined ? t("sessionGlobalCaptured")
         : admitted.selectedId === null ? t("sessionBaseline")
-            : t("sessionAdmittedProfile", { id: admitted.selectedId, revision: admitted.appliedRevision ?? "—" });
+            : t("sessionAdmittedProfile", { id: admitted.selectedId, revision: t(configurationVersionState(admitted.sourceRevision)) });
     const future = session.globalDefault;
     return {
-        admitted: t("sessionState", { id: session.sessionId, profile, scope: session.scope, epoch: session.admissionEpoch }),
-        futureDefault: t("sessionFutureDefault", { profile: future.selectedId === null ? t("sessionBaseline") : t("sessionAdmittedProfile", { id: future.selectedId, revision: future.appliedRevision ?? "—" }) }),
+        admitted: t("sessionState", { profile, scope: session.scope }),
+        futureDefault: t("sessionFutureDefault", { profile: future.selectedId === null ? t("sessionBaseline") : t("sessionAdmittedProfile", { id: future.selectedId, revision: t(configurationVersionState(future.sourceRevision)) }) }),
     };
 }
 //# sourceMappingURL=session-labels.js.map

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { installModelSelection } from "@deepseek-ai/dsh-agent";
 import type { ModelSelectionRef } from "@deepseek-ai/dsh-agent";
+import type {} from "@deepseek-ai/dsh-api-session-controller";
 import { LlmError, ReasoningEffortId, ToolCallId } from "@deepseek-ai/dsh-llm";
 import type { DshAgent, DshContext } from "../lib/dsh-types.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
@@ -27,34 +28,35 @@ test("ordinary active roots keep the native model tab instead of implicitly appl
 });
 
 test("a top-level role preset does not preflight an unavailable profile primary over the native root model", async () => {
-  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary: configured } } });
+  const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-orchestrator": { primary: configured } } });
   try {
     fixture.adapter.unavailableModels.add(configured.model);
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, selection());
+    const agent = await fixture.create({ agentPreset: "dsmm-orchestrator" }, selection());
     await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent), [native]);
     assert.equal(fixture.adapter.calls.length, 1);
   } finally { await fixture.dispose(); }
 });
 
-test("historically accepted model intent never replays over a root's different native assembled selection", async () => {
+test("accepted model intent never replays over a root's later native assembled selection", async () => {
   const fixture = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary: configured } } });
   try {
-    const original = await fixture.create({}, selection(configured));
+    const picked = selection(configured);
+    const original = await fixture.create({}, picked);
     original.session.append("model/selection", { ...configured, reasoningEffort: ReasoningEffortId(configured.reasoningEffort) });
     await runFixtureTurn(original);
-    const cold = await fixture.create({}, selection(), { seed: JSON.parse(JSON.stringify(original.session.snapshotEvents())) });
-    await runFixtureTurn(cold);
-    assert.deepEqual(headerRoutes(cold).at(-1), native, "DSMM must not replay the older accepted event over native downstream");
+    picked.current = selection().current;
+    await runFixtureTurn(original);
+    assert.deepEqual(headerRoutes(original).at(-1), native, "DSMM must not replay the older accepted event over native downstream");
     assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [configured.model, native.model]);
   } finally { await fixture.dispose(); }
 });
 
-for (const effort of ["low", undefined]) test(`root strict calibration preserves the native ${effort ?? "adapter-default"} effort`, async () => {
-  const fixture = await nativeRoutingFixture({ deepseekV4ProCalibration: "strict" });
+for (const effort of ["low", undefined]) test(`root routing preserves the native ${effort ?? "adapter-default"} effort`, async () => {
+  const fixture = await nativeRoutingFixture();
   try {
     const current = { provider: "deepseek-official", model: "deepseek-v4-pro", ...(effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) }) };
-    const agent = await fixture.create({ agentPreset: "dsmm-reviewer" }, { current, assembled: undefined });
+    const agent = await fixture.create({ agentPreset: "dsmm-orchestrator" }, { current, assembled: undefined });
     await runFixtureTurn(agent);
     assert.deepEqual(headerRoutes(agent), [{ ...current, reasoningEffort: effort ?? "high" }]);
   } finally { await fixture.dispose(); }
@@ -141,5 +143,37 @@ for (const output of ["text", "tool-fragment"] as const) test(`partial root ${ou
     assert.equal(agent.session.snapshotEvents().some((event) => event.type === "tool/call" || event.type === "tool/result"), false);
     const attempts = agent.session.snapshotEvents().filter((event) => event.type === "assistant/attempt");
     assert.equal(attempts.length, 1); assert.ok(attempts[0].data.stream.length > 1);
+  } finally { await fixture.dispose(); }
+});
+
+test("native cancellation after downstream assembly prevents provider dispatch", async () => {
+  const fixture = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary: configured } } });
+  try {
+    const agent = await fixture.create({}, selection(), { setup(scope) {
+      scope.on("agent/request", async (frame, next) => {
+        const config = await next();
+        frame.agent.cancel({ kind: "hook", reason: "local request cancellation" });
+        return config;
+      });
+    } });
+    await runFixtureTurn(agent);
+    assert.equal(fixture.adapter.calls.length, 0);
+    assert.deepEqual(headerRoutes(agent), []);
+  } finally { await fixture.dispose(); }
+});
+
+test("native cancellation of a no-output failure does not dispatch another retry", async () => {
+  const fixture = await nativeRoutingFixture({ defaultActive: true, roleRouting: { "dsmm-orchestrator": {
+    rateLimit: { maxRetries: 2, initialDelayMs: 0, maxDelayMs: 0, maxTotalDelayMs: 0 }
+  } } });
+  try {
+    const agent = await fixture.create({}, selection());
+    fixture.adapter.rateLimitModels.add(native.model);
+    fixture.ctx.on("agent/assistant-stream", ({ agent: subject, frame }) => {
+      if (subject === agent && frame.type === "end") agent.cancel({ kind: "hook", reason: "local retry cancellation" });
+    });
+    await runFixtureTurn(agent);
+    assert.equal(fixture.adapter.calls.length, 1);
+    assert.deepEqual(headerRoutes(agent), [native]);
   } finally { await fixture.dispose(); }
 });

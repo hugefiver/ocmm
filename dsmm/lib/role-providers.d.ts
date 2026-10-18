@@ -1,17 +1,14 @@
 import type { SubagentProvider } from "@deepseek-ai/dsh-subagent";
-import type { Agent, AgentOptions } from "@deepseek-ai/dsh-agent";
-import type { DshContext } from "./dsh-types.js";
+import type { Context } from "@deepseek-ai/cordis";
 export { roleProviderName } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
-import type { DsmmSettings, DsmmSettingsGetter } from "./settings.js";
-import type { DsmmRolePolicy } from "./role-policy.js";
+import type { DsmmSettingsGetter } from "./settings.js";
+import type { NativeAdmission } from "./native-admission.js";
 export interface DsmmSubagentRegistry {
     getProvider(name: string): SubagentProvider | undefined;
     registerProvider(provider: SubagentProvider): () => void;
     resolveMaxDepth?(configured?: number): number | undefined;
 }
-export declare function roleFromProviderName(provider: string): DsmmRoleId | undefined;
-export declare function roleAgentOptions(parent: Agent, role: DsmmRoleId, settings: DsmmSettings, signal: AbortSignal, explicit?: AgentOptions): Promise<AgentOptions | undefined>;
-/** The native manager owns descriptors, capability admission and activations. */
-export declare function registerRoleProviders(ctx: DshContext, getSettings: DsmmSettingsGetter, getDeploymentSettings?: DsmmSettingsGetter, policy?: DsmmRolePolicy): void;
+export declare function roleFromProviderName(name: string): DsmmRoleId | undefined;
+export declare function registerRoleProviders(ctx: Context, getSettings: DsmmSettingsGetter, admission: NativeAdmission): void;
 //# sourceMappingURL=role-providers.d.ts.map

@@ -14,6 +14,7 @@ import { LlmRuntime, ToolCallId } from "@deepseek-ai/dsh-llm";
 import { SessionId, SessionStore } from "@deepseek-ai/dsh-session";
 import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
 import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
+import { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import * as NativeFs from "@deepseek-ai/dsh-tool-fs";
 import * as ManagedFs from "../src/permission-fs.ts";
@@ -27,6 +28,7 @@ import { FixedConfigFileStore } from "../src/config-file-store.ts";
 import { profileStoreFilePrimitives } from "../src/profile-store.ts";
 import { DsmmProfileError } from "../src/profiles.ts";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
+import { mountPermissionHostCore, permissionHostProfile, waitForPermissionHost } from "./permission-host-fixture.ts";
 
 useIsolatedDshEnvironment();
 function deferred<T>() {
@@ -88,12 +90,14 @@ async function fixture(policy: PermissionControlSchemaInput = {}, lateCore = fal
     }
   }
   const mountCore = async () => {
-    const fiber = ctx.plugin(DsmmPlugin as never, { defaultActive: false, lsp: { enabled: false }, presets: { root: join(directory, "presets") } } as never);
-    await fiber.await(); assert.equal(fiber.state, 2); return fiber;
+    const fiber = await mountPermissionHostCore(ctx, DsmmPlugin);
+    if (lateCore) await waitForPermissionHost(ctx, controller => controller.toolCoverage().length === (controller.rules.status().mounted ? 5 : 0));
+    return fiber;
   };
   try {
-    ctx.provide("profileContext", { home, dir: directory });
-    for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: "native" }], [ApprovalService, { policy: "ask" }], [OwnedFs], [AgentLoop, {}]] as const) await ctx.plugin(plugin as never, config as never).await();
+    ctx.provide("profileContext", permissionHostProfile(directory, home,
+      { defaultActive: false, lsp: { enabled: false }, presets: { root: join(directory, "presets") } }));
+    for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: "native" }], [ApprovalService, { policy: "ask" }], [OwnedFs], [SubagentRuntime, {}], [AgentLoop, {}]] as const) await ctx.plugin(plugin as never, config as never).await();
     await ctx.plugin(WorkingDirectory.default, { defaultDirectory: workspace }).await();
     ctx.provide("sandboxPolicy", { resolve() { return { mode: fullAccess ? "danger-full-access" : "workspace-write", workspaceRoot: workspace }; } });
     await ctx.plugin(WebRuntime, {}).await();
@@ -111,6 +115,7 @@ async function fixture(policy: PermissionControlSchemaInput = {}, lateCore = fal
     const webFiber = ctx.plugin(ManagedWeb, { fetch: true }); await webFiber.await();
     for (const fiber of [fsFiber, searchFiber, webFiber]) assert.equal(fiber.state, 2);
     for (const name of ["read", "write", "edit", "glob", "grep", "web_search", "web_fetch"]) assert.ok(ctx.tools.get(name), `${name} must be registered before permission checks`);
+    if (!lateCore) await waitForPermissionHost(ctx, controller => controller.toolCoverage().length === (controller.rules.status().mounted ? 5 : 0));
     const create = async (parentAgent?: Agent) => {
       const handle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), ...parentAgent === undefined ? {} : { parentAgent }, meta: { cwd: workspace, ...parentAgent === undefined ? {} : { origin: "subagent" as const } }, agentOptions: { provider: "unused-local", model: "unused-local" } });
       handles.push(handle); handle.agent.session.append("turn/start", { turn: 1 }); return handle.agent;
@@ -257,7 +262,7 @@ test("unmapped native write/edit retain their original sandbox approval and muta
   } finally { await f.dispose(); }
 });
 
-test("native registration is captured after late Core load, and cold-off retains original startup", async () => {
+test("late Core load fences unbound roots while new roots honor the captured permission setting", async () => {
   for (const enabled of [true, false]) {
     const f = await fixture({ enabled, outsideReads: "deny" }, true);
     try {
@@ -266,9 +271,12 @@ test("native registration is captured after late Core load, and cold-off retains
       assert.equal((await f.execute(root, "read", { file_path: join(f.outside, "outside.txt") })).isError, false);
       assert.equal(f.counts().reads, 1); assert.equal(f.counts().approvals, 0);
       await f.mountCore();
-      assert.equal((await f.execute(root, "read", { file_path: join(f.outside, "outside.txt") })).isError, enabled);
+      assert.equal((await f.execute(root, "read", { file_path: join(f.outside, "outside.txt") })).isError, true);
+      assert.equal(f.counts().reads, 1);
+      const admitted = await f.create();
+      assert.equal((await f.execute(admitted, "read", { file_path: join(f.outside, "outside.txt") })).isError, enabled);
       assert.equal(f.counts().reads, enabled ? 1 : 2); assert.equal(f.counts().approvals, 0);
-      assert.equal(f.controller().toolCoverage(root).length, enabled ? 5 : 0);
+      assert.equal(f.controller().toolCoverage(admitted).length, enabled ? 5 : 0);
     } finally { await f.dispose(); }
   }
 });

@@ -5,6 +5,8 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+// @ts-expect-error Source-only release contract is deliberately not published.
+import { dshPolicyForVersion } from "../scripts/release-contract.mjs";
 
 const { runSessionHistorySmoke } = await import(new URL("../scripts/session-history-smoke.mjs", import.meta.url).href);
 
@@ -50,18 +52,20 @@ test("packed history rejects absent, invalid, or mismatched frozen identity befo
   assert.equal(wrongName.nativeLoads, 0);
 });
 
-test("030 history proof writes and cold-reads current rc1 native data without a repair surface", async () => {
+test("031 history proof uses the packaged SDK policy while writing and cold-reading current native data", async () => {
   const ownedRoot = await mkdtemp(join(tmpdir(), "dsmm-history-current-"));
   try {
+    const version = "0.3.1", policy = dshPolicyForVersion(version);
     const artifact = join(ownedRoot, "candidate.tgz"), operatorPackageRoot = join(ownedRoot, "installed");
     const bytes = Buffer.from("synthetic frozen identity for current native persistence proof");
     await writeFile(artifact, bytes);
     await mkdir(operatorPackageRoot);
-    await writeFile(join(operatorPackageRoot, "package.json"), JSON.stringify({ name: "@dsmm/dsmm", version: "0.3.0" }));
+    await writeFile(join(operatorPackageRoot, "package.json"), JSON.stringify({ name: "@dsmm/dsmm", version }));
     const receipt = await runSessionHistorySmoke({ artifact, sha256: createHash("sha256").update(bytes).digest("hex"), ownedRoot,
-      operatorPackageRoot, operatorRequire: createRequire(import.meta.url), expectedPackage: { name: "@dsmm/dsmm", version: "0.3.0" } });
+      operatorPackageRoot, operatorRequire: createRequire(import.meta.url), expectedPackage: { name: "@dsmm/dsmm", version } });
     assert.equal(receipt.outcome, "COMPLETED");
-    assert.equal(receipt.nativeVersion, "0.2.1-rc.1");
+    assert.equal(receipt.packageVersion, version);
+    assert.equal(receipt.nativeVersion, policy.sdkVersion);
     assert.equal(receipt.currentNativeWriteRead, true);
     assert.equal(receipt.currentIgnorableMetadata, true);
     assert.equal(receipt.retainedModelVisibleHistory, true);

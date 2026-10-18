@@ -5,8 +5,10 @@ export const isSource020 = (version) => version === "0.2.0";
 export const isSource021 = (version) => version === "0.2.1";
 export const isSource022 = (version) => version === "0.2.2";
 export const isSource030 = (version) => version === "0.3.0";
+export const isSource031 = (version) => version === "0.3.1";
 export const isStableNativeSource = (version) => isSource021(version) || isSource022(version) || isSource030(version);
-export const isReviewedSource = (version) => isSource020(version) || isStableNativeSource(version);
+export const isBuildOnlyRelease = (version) => isSource030(version) || isSource031(version);
+export const isReviewedSource = (version) => isSource020(version) || isStableNativeSource(version) || isSource031(version);
 export const isReviewedReleaseVersion = (version) => ["0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7", "0.1.8", "0.1.9"].includes(version) || isReviewedSource(version);
 export function assertReviewedReleaseVersion(version) {
   assert.equal(isReviewedReleaseVersion(version), true, "unreviewed release version");
@@ -28,14 +30,28 @@ const DSH_RC1_030_POLICY = Object.freeze({
   engines: Object.freeze({ node: ">=22", dsh: ">=0.2.1-rc.1 <0.3.0-0" }),
   sourceCommit: "1600d8a1e140dcde43a1a0941940a0480712c011",
 });
+export const OFFICIAL_RUNTIME_PACKAGES_031 = Object.freeze({
+  registry: "@deepseek-ai/dsh-agent",
+  runtime: "@deepseek-ai/dsh-subagent",
+  jsonl: "@deepseek-ai/dsh-session-persistence-jsonl",
+});
+const DSH_RC2_031_POLICY = Object.freeze({
+  runtimeVersion: "0.2.1-rc.2",
+  sdkVersion: "0.2.1-rc.2",
+  peerVersion: "0.2.1-rc.2",
+  integrity: "sha512-tvY+yhfKRifthbqPe/OK0AYxM5ZkvqfYq/jMYgJcEUxiRRL1Vwra3Ti5TB6AXgSWQdiPHYh/Vp6SJa9yHwMNuw==",
+  engines: Object.freeze({ node: ">=22", dsh: "0.2.1-rc.2" }),
+  officialRuntime: OFFICIAL_RUNTIME_PACKAGES_031,
+});
 export function dshPolicyForVersion(version) {
   assertReviewedReleaseVersion(version);
-  return isSource030(version) ? DSH_RC1_030_POLICY : DSH_RC2_POLICY;
+  return isSource031(version) ? DSH_RC2_031_POLICY : isSource030(version) ? DSH_RC1_030_POLICY : DSH_RC2_POLICY;
 }
 export function startupProfileContract(version, { sourceContract } = {}) {
   if (sourceContract === undefined) return "historical-read-lock";
   assert.equal(isReviewedSource(sourceContract), true, "unreviewed source contract");
   assert.equal(version, sourceContract);
+  if (isSource031(version)) return "stable-native-first-031";
   if (isSource030(version)) return "stable-native-first-030";
   if (isSource022(version)) return "stable-native-first-022";
   return isSource021(version) ? "stable-native-first-021" : "central-read-lock-free-020";
@@ -68,8 +84,8 @@ export const ROLE_TOOLS_022 = Object.freeze(["dsmm_category", "dsmm_clarifier", 
   "dsmm_oracle", "dsmm_oracle_2nd", "dsmm_plan_critic", "dsmm_planner", "dsmm_reviewer"].sort());
 export const PRESET_NAMES_030 = Object.freeze([...PRESET_NAMES_022]);
 export const ROLE_TOOLS_030 = Object.freeze([...ROLE_TOOLS_022]);
-export const presetNamesForVersion = (version) => isSource030(version) ? PRESET_NAMES_030 : isSource022(version) ? PRESET_NAMES_022 : isSource021(version) ? PRESET_NAMES_021 : PRESET_NAMES_020;
-export const roleToolsForVersion = (version) => isSource030(version) ? ROLE_TOOLS_030 : isSource022(version) ? ROLE_TOOLS_022 : isSource021(version) ? ROLE_TOOLS_021 : ROLE_TOOLS_020;
+export const presetNamesForVersion = (version) => isSource030(version) || isSource031(version) ? PRESET_NAMES_030 : isSource022(version) ? PRESET_NAMES_022 : isSource021(version) ? PRESET_NAMES_021 : PRESET_NAMES_020;
+export const roleToolsForVersion = (version) => isSource030(version) || isSource031(version) ? ROLE_TOOLS_030 : isSource022(version) ? ROLE_TOOLS_022 : isSource021(version) ? ROLE_TOOLS_021 : ROLE_TOOLS_020;
 export const COMPILED_NAMES_020 = Object.freeze([
   "config-file-store", "deployment-config", "modules", "native-scope", "role-policy", "skills", "prompt-content",
   "roles", "role-subagents", "preset-registry", "preset-materializer", "mode", "state", "prompts", "commands",
@@ -99,7 +115,28 @@ export const COMPILED_NAMES_022 = Object.freeze([
   "permission-fs", "permission-fs-search", "permission-web"
 ]);
 const RETIRED_COMPATIBILITY_MODULES_030 = new Set(["legacy-read-host", "legacy-read-contracts", "legacy-read-composition", "legacy-read-integration", "legacy-read-proxy", "legacy-child-policy"]);
-export const COMPILED_NAMES_030 = Object.freeze([...COMPILED_NAMES_022.filter((name) => !RETIRED_COMPATIBILITY_MODULES_030.has(name)), "agent-registry"]);
+export const COMPILED_NAMES_030 = Object.freeze([...new Set([
+  ...COMPILED_NAMES_022, "agent-registry",
+  "child-admission", "child-admission-contract", "child-capture", "child-evidence", "commands", "config-file-store", "config-revision",
+  "core-permission-authority", "core-permissions", "delivery-authority", "deployment-config", "deployment-permission-rules", "dsh-events", "dsh-home", "dsh-types",
+  "guards", "host-llm", "host-llm-startup", "index", "legacy-child-policy", "legacy-read-composition", "legacy-read-contracts", "legacy-read-host",
+  "legacy-read-integration", "legacy-read-proxy", "live-pi-ai-owner", "llm-runtime", "lsp", "managed-settings", "mode", "model-family",
+  "model-parameter-policy", "model-routing", "modules", "native-child-evidence", "native-pi-ai-wire", "native-scope", "permission-bash",
+  "permission-control", "permission-controller", "permission-errors", "permission-fs", "permission-fs-search", "permission-native-access",
+  "permission-native-command", "permission-native-rules", "permission-pwsh", "permission-remote", "permission-rpc", "permission-rules",
+  "permission-settings", "permission-shell", "permission-web", "plan-validation", "preset-materializer", "preset-registry", "preset-skills",
+  "profile-diagnostics", "profile-locale", "profile-remote", "profile-rpc", "profile-runtime", "profile-store", "profile-types", "profiles",
+  "prompt-content", "prompts", "recovery-policy", "role-control-remote", "role-control-rpc", "role-control-types", "role-identity", "role-invocation",
+  "role-llm", "role-llm-runtime", "role-policy", "role-providers", "role-routing", "role-runs", "role-subagents", "roles", "route-json",
+  "routing-policy", "runtime-composition", "runtime-integration", "runtime-recovery", "session-metadata", "session-persistence", "session-scope",
+  "settings", "shell-command", "skills", "state", "status", "subagent-runtime",
+  "client/ChildrenPanel", "client/children-controller", "client/children-locales", "client/configuration-display", "client/controller",
+  "client/DeploymentFields", "client/DeploymentPage", "client/deployment-controller", "client/deployment-data", "client/deployment-locales",
+  "client/deployment-modules", "client/deployment-workspace", "client/diagnostics", "client/EditableChoice", "client/index", "client/locales",
+  "client/NativeCommandEntries", "client/permission-client", "client/permission-controller", "client/permission-locales", "client/PermissionsPanel",
+  "client/plugins-contract", "client/ProfilesSection", "client/RoleAvailability", "client/RoleToolView", "client/RoleToolView-data",
+  "client/RoleToolView-locales", "client/SessionProfiles", "client/session-labels", "client/StructuredEditor", "client/structured", "client/styles",
+])].filter(name => !RETIRED_COMPATIBILITY_MODULES_030.has(name)));
 export const PUBLIC_RUNTIME_EXPORTS_022 = Object.freeze({
   ...PUBLIC_RUNTIME_EXPORTS_021,
   "./llm-runtime": "lib/llm-runtime.js",
@@ -114,11 +151,50 @@ export const PUBLIC_RUNTIME_EXPORTS_030 = Object.freeze({
   ...Object.fromEntries(Object.entries(PUBLIC_RUNTIME_EXPORTS_022).filter(([name]) => name !== "./legacy-read-host")),
   "./agent-registry": "lib/agent-registry.js",
 });
+export const REQUIRED_PUBLIC_EXPORTS_031 = Object.freeze({
+  ".": Object.freeze({ types: "./lib/index.d.ts", default: "./lib/index.js" }),
+  "./client": Object.freeze({ types: "./lib/client/index.d.ts", default: "./lib/client.js" }),
+  "./package.json": "./package.json",
+  "./locale/en.json": "./locale/en.json",
+  "./locale/zh.json": "./locale/zh.json",
+});
+const RETIRED_OWNER_EXPORTS_031 = new Set(["./agent-registry", "./subagent-runtime", "./session-persistence", "./legacy-read-host"]);
+function safePublicTarget(target) {
+  return typeof target === "string" && /^\.\/[a-z0-9][a-z0-9._/-]*$/u.test(target)
+    && target.slice(2).split("/").every((part) => part !== "" && part !== "." && part !== "..");
+}
+export function validatePublicExports031(exports, hasFile = () => true) {
+  assert.ok(exports && typeof exports === "object" && !Array.isArray(exports), "031 public exports must be an object");
+  assert.equal(typeof hasFile, "function", "031 export resolver is required");
+  for (const [name, declaration] of Object.entries(REQUIRED_PUBLIC_EXPORTS_031)) assert.deepEqual(exports[name], declaration, `031 required public export ${name}`);
+  const resolved = {};
+  for (const [name, declaration] of Object.entries(exports)) {
+    assert.ok(name === "." || /^\.\/[a-z0-9][a-z0-9._/-]*$/u.test(name), `invalid 031 public export name: ${name}`);
+    assert.equal(RETIRED_OWNER_EXPORTS_031.has(name), false, `retired custom owner export is forbidden: ${name}`);
+    if (typeof declaration === "string") {
+      assert.equal(declaration, name, `031 public resource export must resolve to itself: ${name}`);
+      assert.ok(declaration === "./package.json" || declaration.endsWith(".json"), `031 public resource export must be JSON: ${name}`);
+      assert.ok(safePublicTarget(declaration) && hasFile(declaration.slice(2)), `031 public resource is not delivered: ${name}`);
+      resolved[name] = declaration.slice(2);
+      continue;
+    }
+    assert.ok(declaration && typeof declaration === "object" && !Array.isArray(declaration), `031 public module export must be an object: ${name}`);
+    assert.deepEqual(Object.keys(declaration).sort(), ["default", "types"], `031 public module export conditions: ${name}`);
+    assert.ok(safePublicTarget(declaration.default) && /^\.\/lib\/.+\.js$/u.test(declaration.default), `031 public JavaScript target is invalid: ${name}`);
+    assert.ok(safePublicTarget(declaration.types) && /^\.\/lib\/.+\.d\.ts$/u.test(declaration.types), `031 public declaration target is invalid: ${name}`);
+    assert.ok(hasFile(declaration.default.slice(2)) && hasFile(declaration.types.slice(2)), `031 public module is not delivered: ${name}`);
+    resolved[name] = declaration.default.slice(2);
+  }
+  return Object.freeze(resolved);
+}
 export const COLD_PROFILE_SCRIPTS_022 = Object.freeze([
   "scripts/migrate-cold-profile.mjs", "scripts/cold-profile-composition.mjs", "scripts/cold-profile-sources.mjs"
 ]);
 export const STABLE_UI_CHECKS_022 = Object.freeze([...STABLE_UI_CHECKS_021]);
-export const STABLE_UI_CHECKS_030 = Object.freeze([...STABLE_UI_CHECKS_022]);
+export const STABLE_UI_CHECKS_030 = Object.freeze([
+  "publicNativeCapturedChildV3", "browserDeploymentPageConfigCas", "browserPermissionsRulesCas",
+  "browserRoleToolRequestedIdentity", "browserRoleToolValidatedActualIdentity", "browserNativeDeliveryFence",
+]);
 export function stableUiChecksForVersion(version) {
   assert.equal(isStableNativeSource(version), true, "unreviewed stable native version");
   return isSource030(version) ? STABLE_UI_CHECKS_030 : isSource022(version) ? STABLE_UI_CHECKS_022 : STABLE_UI_CHECKS_021;
@@ -143,7 +219,7 @@ export const SKILL_EXECUTABLES_022 = Object.freeze([...SKILL_EXECUTABLES_021]);
 export const SKILL_EXECUTABLES_030 = Object.freeze([...SKILL_EXECUTABLES_022]);
 export function skillExecutablesForVersion(version) {
   assert.equal(isReviewedSource(version), true, "unreviewed source resource version");
-  return isSource030(version) ? SKILL_EXECUTABLES_030 : isSource022(version) ? SKILL_EXECUTABLES_022 : isSource021(version) ? SKILL_EXECUTABLES_021 : SKILL_EXECUTABLES_020;
+  return isSource030(version) || isSource031(version) ? SKILL_EXECUTABLES_030 : isSource022(version) ? SKILL_EXECUTABLES_022 : isSource021(version) ? SKILL_EXECUTABLES_021 : SKILL_EXECUTABLES_020;
 }
 export function validateStableBootstrap(proof, { template = "web", requireDeliveryFence = true, version } = {}) {
   assert.deepEqual(proof?.startedBundles, ["@deepseek-ai/dsh-base", template === "web" ? "@deepseek-ai/dsh-web-app" : "@deepseek-ai/dsh-headless", "@dsmm/dsmm"]);
@@ -164,6 +240,13 @@ export function validateStableBootstrap(proof, { template = "web", requireDelive
   for (const entry of proof.loader) { assert.ok(typeof entry.id === "string" && entry.id.length > 0); assert.equal(entry.state, 2); }
   if (version030) assert.equal(proof.legacyCompatibility, "not-composed");
   else assert.equal(proof.experimentalLegacyRead, "unconfigured/unavailable");
+  if (isSource030(version)) {
+    assert.equal(proof.runtimeMode, "auto");
+    assert.equal(proof.autoRuntimeEntries, 1);
+    assert.equal(proof.manualRuntimeEntries, 0);
+    assert.equal(proof.loader.find(entry => entry.name === "@dsmm/dsmm/subagent-runtime")?.id, "dsmm-auto-subagent-runtime");
+    assert.equal(proof.loader.some(entry => entry.id === "dsmm-subagent-runtime"), false);
+  }
   if (requireDeliveryFence) { assert.equal(proof.deliveryFenceReady, true); assert.equal(proof.restartRequired, false); }
   return proof;
 }

@@ -14,7 +14,7 @@ export const PROFILE_DIAGNOSTIC_REASONS = {
     "deployment-ceiling": "A named profile cannot enable capabilities outside its captured deployment ceiling.",
     "blank-label": "The label is blank; the profile ID is used for display."
 };
-export const DEPRECATED_DSMM_FIELDS = ["deepseekV4ProMaxReasoningPresets", "deepseekFlashMaxReasoningPresets"];
+export const DEPRECATED_DSMM_FIELDS = ["deepseekV4ProMaxReasoningPresets", "deepseekFlashMaxReasoningPresets", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
 function schemaFieldShape(schema) {
     if (schema.type === "transform")
         return schemaFieldShape(schema.inner);
@@ -36,7 +36,7 @@ const configFields = {
     locale: null, modeName: null, section: null, defaultActive: null, promptOrder: null,
     deepseekV4ProCalibration: null, deepseekV4ProDefaultReasoningEffort: null, deepseekFlashCalibration: null, deepseekFlashDefaultReasoningEffort: null,
     deepseekV4ProMaxReasoningPresets: null, deepseekFlashMaxReasoningPresets: null,
-    modules: { deepwork: { enabled: null } }, sessionPersistence: { root: null, compression: null },
+    modules: { deepwork: { enabled: null } },
     skills: "skills", roles: "roles", roleRouting: "role-routing", runtimePolicy: { strategy: null, rateLimit },
     presets: { materialize: null, plannerRootEnabled: null, root: null }, subagents: { toolTopology: null, allowRouteOverride: null, enableRunInBackground: null, backgroundMode: null, maxDepth: null },
     workflow: { policy: null, strictGates: null, reviewCap: null, finalReviewPolicy: null },

@@ -14,6 +14,7 @@ import { DSMM_ROUTE_SOURCES } from "./profile-types.js";
 import type { DsmmInvocationView, DsmmInitialRoleRoute, DsmmLiveRoleRoute, DsmmRoleRouteComparison } from "./profile-types.js";
 import { diagnostic, isSafeDiagnosticField, PROFILE_DIAGNOSTIC_REASONS } from "./profile-diagnostics.js";
 import { normalizeModelRouteJson } from "./route-json.js";
+import { isConfigRevision, isProfileReference } from "./config-revision.js";
 
 export interface DsmmConfigRemote {
   describe(): Promise<RemoteResult<GlobalConfigSnapshot>>;
@@ -78,9 +79,25 @@ function id(value: unknown): string {
   return result;
 }
 function revision(value: unknown): string {
-  const result = text(value, "revision", 64);
-  if (!revisionPattern.test(result)) fail("revision");
+  const result = text(value, "revision", 128);
+  if (!isConfigRevision(result)) fail("revision");
   return result;
+}
+function epoch(value: unknown): string {
+  if (typeof value !== "string" || !revisionPattern.test(value)) fail("epoch");
+  return value;
+}
+function reference(value: unknown): string {
+  if (!isProfileReference(value)) fail("reference");
+  return value;
+}
+function modeRevision(value: unknown): string {
+  if (typeof value !== "string" || !(/^(?:[a-f0-9]{64}|mode-v1-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/u).test(value)) fail("mode revision");
+  return value;
+}
+function refresh(value: unknown): true { if (value !== true) fail("refreshRequired"); return true; }
+function observedRevision(value: unknown, row: Record<string, unknown>): string {
+  return value === "unavailable" && row.refreshRequired === true ? value : selectionRevision(value);
 }
 function selectionRevision(value: unknown): string { return value === "absent" ? value : revision(value); }
 /** Opaque native identities are never interpreted as paths. */
@@ -165,14 +182,14 @@ function roleAvailabilityList(value: unknown): DsmmRoleAvailabilityState[] {
 }
 export function parseSubagentRuntimeAdmissionView(value: unknown): SubagentRuntimeAdmissionView {
   const row = object(value, ["binding", "deliveryFenceReady", "restartRequired"], ["reason"]);
-  if (typeof row.binding !== "string" || !["stock", "dsmm", "unavailable"].includes(row.binding) || row.reason !== undefined && (typeof row.reason !== "string" || !["explicit-composition-required", "duplicate-provider", "authority-not-ready"].includes(row.reason))) fail("subagentRuntime");
+  if (typeof row.binding !== "string" || !["stock", "unavailable"].includes(row.binding) || row.reason !== undefined && row.reason !== "authority-not-ready") fail("subagentRuntime");
   const ready = boolean(row.deliveryFenceReady, "deliveryFenceReady");
-  if (ready && (row.binding !== "dsmm" || row.reason !== undefined)) fail("subagentRuntime readiness");
+  if (ready && (row.binding === "unavailable" || row.reason !== undefined)) fail("subagentRuntime readiness");
   return { binding: row.binding as SubagentRuntimeAdmissionView["binding"], deliveryFenceReady: ready, restartRequired: boolean(row.restartRequired, "restartRequired"), ...(row.reason === undefined ? {} : { reason: row.reason as SubagentRuntimeAdmissionView["reason"] }) };
 }
 function readResult(value: unknown): ProfileReadResult {
-  const item = object(value, ["id", "revision", "content"], ["label", "warnings"]);
-  return { id: id(item.id), revision: revision(item.revision), content: content(item.content), ...optional(item, "label", (input) => text(input, "label", 120)), ...optional(item, "warnings", warnings) };
+  const item = object(value, ["id", "revision", "content"], ["label", "warnings", "refreshRequired"]);
+  return { id: id(item.id), revision: item.revision === "unavailable" && item.refreshRequired === true ? "unavailable" : revision(item.revision), content: content(item.content), ...optional(item, "refreshRequired", refresh), ...optional(item, "label", (input) => text(input, "label", 120)), ...optional(item, "warnings", warnings) };
 }
 function content(value: unknown): string {
   const result = text(value, "content", 128 * 1024);
@@ -180,7 +197,7 @@ function content(value: unknown): string {
   return result;
 }
 function snapshot(value: unknown): ProfileSnapshot {
-  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction", "selectedWarnings"]);
+  const item = object(value, ["profiles", "selectedId", "appliedRevision", "selectionRevision"], ["selectionError", "roles", "editorDefaults", "origin", "readOnly", "writeRestriction", "selectedWarnings", "sourceRevision", "refreshRequired"]);
   if (!Array.isArray(item.profiles) || item.profiles.length > 128) fail("profiles");
   return {
     profiles: item.profiles.map((input) => {
@@ -188,8 +205,9 @@ function snapshot(value: unknown): ProfileSnapshot {
       return { id: text(row.id, "id", 64), revision: row.revision === null ? null : revision(row.revision), ...optional(row, "label", (input) => text(input, "label", 120)), ...optional(row, "error", errorInfo), ...optional(row, "warnings", warnings) };
     }),
     selectedId: item.selectedId === null ? null : id(item.selectedId),
-    appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision),
-    selectionRevision: item.selectionRevision === "unavailable" && Object.hasOwn(item, "selectionError") ? "unavailable" : selectionRevision(item.selectionRevision),
+    appliedRevision: item.appliedRevision === null ? null : reference(item.appliedRevision),
+    selectionRevision: item.selectionRevision === "unavailable" && Object.hasOwn(item, "selectionError") ? "unavailable" : observedRevision(item.selectionRevision, item),
+    ...optional(item, "sourceRevision", revision), ...optional(item, "refreshRequired", refresh),
     ...optional(item, "selectionError", errorInfo),
     ...optional(item, "selectedWarnings", warnings),
     ...optional(item, "roles", (input) => {
@@ -269,15 +287,26 @@ export function parseDsmmInvocationView(value: unknown): DsmmInvocationView {
   return { role: target, label: text(row.label, "label", 120), level: row.level as DsmmInvocationView["level"], routeSource: row.routeSource as DsmmInvocationView["routeSource"], mode: row.mode as DsmmInvocationView["mode"], ...optional(row, "route", modelRoute), ...optional(row, "runId", sessionId), ...optional(row, "childId", sessionId), ...optional(row, "jobId", sessionId), ...(routeComparison === undefined ? {} : { routeComparison }) };
 }
 function selectionState(value: unknown): ProfileSelectionState {
-  const item = object(value, ["selectedId", "appliedRevision", "selectionRevision"]);
-  return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : revision(item.appliedRevision), selectionRevision: selectionRevision(item.selectionRevision) };
+  const item = object(value, ["selectedId", "appliedRevision", "selectionRevision"], ["sourceRevision", "refreshRequired"]);
+  return { selectedId: item.selectedId === null ? null : id(item.selectedId), appliedRevision: item.appliedRevision === null ? null : reference(item.appliedRevision), selectionRevision: observedRevision(item.selectionRevision, item), ...optional(item, "sourceRevision", revision), ...optional(item, "refreshRequired", refresh) };
+}
+function actionUnavailableReason(value: unknown): NonNullable<SessionProfileSnapshot["selectModelUnavailableReason"]> {
+  if (typeof value !== "string" || !["busy", "maintenance", "module-off", "runtime-unavailable", "model-unconfigured", "model-service-unavailable", "new-session-required"].includes(value)) fail("actionUnavailableReason");
+  return value as NonNullable<SessionProfileSnapshot["selectModelUnavailableReason"]>;
 }
 function sessionSnapshot(value: unknown): SessionProfileSnapshot {
-  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed"], ["admittedSelection", "switchUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration", "warnings", "roles", "subagentRuntime"]);
+  const item = object(value, ["sessionId", "globalDefault", "selection", "scope", "admissionEpoch", "switchAllowed", "canSelectModel", "canToggleMode", "canApplyOverlay"], ["admittedSelection", "switchUnavailableReason", "selectModelUnavailableReason", "toggleModeUnavailableReason", "applyOverlayUnavailableReason", "rolePolicy", "profileModel", "deepwork", "modules", "configuration", "warnings", "roles", "subagentRuntime", "refreshRequired"]);
   if (typeof item.scope !== "string" || !["global-default", "session-override", "deployment-baseline"].includes(item.scope)) fail("scope");
   return {
     sessionId: sessionId(item.sessionId), globalDefault: selectionState(item.globalDefault), selection: selectionState(item.selection),
-    scope: item.scope as SessionProfileSnapshot["scope"], admissionEpoch: revision(item.admissionEpoch), switchAllowed: boolean(item.switchAllowed, "switchAllowed"),
+    scope: item.scope as SessionProfileSnapshot["scope"], admissionEpoch: epoch(item.admissionEpoch), switchAllowed: boolean(item.switchAllowed, "switchAllowed"),
+    canSelectModel: boolean(item.canSelectModel, "canSelectModel"),
+    canToggleMode: boolean(item.canToggleMode, "canToggleMode"),
+    canApplyOverlay: boolean(item.canApplyOverlay, "canApplyOverlay"),
+    ...optional(item, "selectModelUnavailableReason", actionUnavailableReason),
+    ...optional(item, "toggleModeUnavailableReason", actionUnavailableReason),
+    ...optional(item, "applyOverlayUnavailableReason", actionUnavailableReason),
+    ...optional(item, "refreshRequired", refresh),
     ...optional(item, "admittedSelection", selectionState),
     ...optional(item, "switchUnavailableReason", (input) => {
       if (typeof input !== "string" || !["busy", "maintenance", "disposed", "not-owned", "unavailable"].includes(input)) fail("switchUnavailableReason");
@@ -292,7 +321,7 @@ function sessionSnapshot(value: unknown): SessionProfileSnapshot {
     ...optional(item, "subagentRuntime", parseSubagentRuntimeAdmissionView),
     ...optional(item, "deepwork", (input) => {
       const mode = object(input, ["active", "explicit", "locked", "revision"]);
-      return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: revision(mode.revision) };
+      return { active: boolean(mode.active, "active"), explicit: boolean(mode.explicit, "explicit"), locked: boolean(mode.locked, "locked"), revision: modeRevision(mode.revision) };
     }),
   };
 }
@@ -310,11 +339,11 @@ function selectRequest(value: unknown): ProfileSelectRequest {
 function sessionSelectRequest(value: unknown): SessionProfileSelectRequest {
   const item = object(value, ["sessionId", "id", "expectedSelectionRevision", "expectedAdmissionEpoch"], ["expectedRevision"]);
   const { sessionId: inputSessionId, expectedAdmissionEpoch, ...profileRequest } = item;
-  return { ...selectRequest(profileRequest), sessionId: sessionId(inputSessionId), expectedAdmissionEpoch: revision(expectedAdmissionEpoch) };
+  return { ...selectRequest(profileRequest), sessionId: sessionId(inputSessionId), expectedAdmissionEpoch: epoch(expectedAdmissionEpoch) };
 }
 function modeSelectRequest(value: unknown): SessionModeSelectRequest {
   const item = object(value, ["sessionId", "active", "expectedModeRevision", "expectedAdmissionEpoch"]);
-  return { sessionId: sessionId(item.sessionId), active: boolean(item.active, "active"), expectedModeRevision: revision(item.expectedModeRevision), expectedAdmissionEpoch: revision(item.expectedAdmissionEpoch) };
+  return { sessionId: sessionId(item.sessionId), active: boolean(item.active, "active"), expectedModeRevision: modeRevision(item.expectedModeRevision), expectedAdmissionEpoch: epoch(item.expectedAdmissionEpoch) };
 }
 function codec(symbol: string, parse: (value: unknown) => unknown): TypertCodec {
   return { mode: "strict", typeSymbol: `@dsmm/dsmm#${symbol}`, create: () => ({ parse: value => parse(jsonData(value)) }) };
@@ -345,9 +374,9 @@ function jsonData(value: unknown, depth = 0, active = new Set<object>()): unknow
   return result;
 }
 function globalSnapshot(value: unknown): GlobalConfigSnapshot {
-  const row = object(value, ["config", "revision"]);
+  const row = object(value, ["config", "revision"], ["refreshRequired"]);
   object(row.config, [], Object.keys(row.config as object));
-  return { config: jsonData(row.config) as GlobalConfigSnapshot["config"], revision: selectionRevision(row.revision) };
+  return { config: jsonData(row.config) as GlobalConfigSnapshot["config"], revision: observedRevision(row.revision, row), ...optional(row, "refreshRequired", refresh) };
 }
 function admissionView(value: unknown): DeploymentAdmissionView {
   const row = object(value, ["settings", "sources", "captures", "restartRequired", "named"], ["modelParameterPolicy"]);
@@ -360,7 +389,7 @@ function admissionView(value: unknown): DeploymentAdmissionView {
   const named = row.named === null ? null : object(row.named, ["id", "revision"]);
   return { ...optional(row, "modelParameterPolicy", value => parseModelParameterPolicy(jsonData(value))), settings: readOnlySettingsData(row.settings), sources: jsonData(row.sources) as Record<string, string>,
     captures: jsonData(row.captures) as Record<string, string>, restartRequired: row.restartRequired.map(value => text(value, "field", 256)),
-    named: named === null ? null : { id: id(named.id), revision: revision(named.revision) } };
+    named: named === null ? null : { id: id(named.id), revision: reference(named.revision) } };
 }
 function readOnlySettingsData(value: unknown): Record<string, unknown> {
   const settings = jsonData(value) as Record<string, unknown>;
@@ -384,16 +413,19 @@ function readOnlySettingsData(value: unknown): Record<string, unknown> {
   return settings;
 }
 function editorSnapshot(value: unknown): DeploymentEditorSnapshot {
-  const row = object(value, ["entryId", "namespace", "hostProfileKey", "global", "globalRevision", "profile", "nativeRevision", "nativeFormRevision", "nativeForm", "desired", "sources", "startup", "defaults", "schema", "nextRoot", "modules"], ["startupSources"]);
+  const row = object(value, ["entryId", "namespace", "hostProfileKey", "global", "globalRevision", "profile", "nativeRevision", "nativeFormRevision", "nativeForm", "desired", "sources", "startup", "defaults", "schema", "nextRoot", "modules"], ["startupSources", "nativeSchema", "subagentRuntime"]);
   const result = jsonData(row) as DeploymentEditorSnapshot;
   text(row.entryId, "entryId", 256); if (row.namespace !== null) text(row.namespace, "namespace", 256);
-  revision(row.hostProfileKey); selectionRevision(row.globalRevision); revision(row.nativeRevision);
+  epoch(row.hostProfileKey); selectionRevision(row.globalRevision);
+  if (row.nativeRevision !== "unavailable" && (typeof row.nativeRevision !== "string" || !/^native-v1-\d+$/u.test(row.nativeRevision))) fail("nativeRevision");
   if (row.nativeFormRevision !== null) integer(row.nativeFormRevision, "nativeFormRevision");
   for (const key of ["global", "profile", "desired", "sources", "startup", "defaults", "schema"]) object(row[key], [], Object.keys(row[key] as object));
   if (row.nativeForm !== null) object(row.nativeForm, ["base", "user"]);
   if (row.nextRoot !== null) result.nextRoot = admissionView(row.nextRoot);
   result.desired = readOnlySettingsData(row.desired); result.startup = readOnlySettingsData(row.startup);
   result.schema = schemaNode(row.schema);
+  if (row.nativeSchema !== undefined) result.nativeSchema = schemaNode(row.nativeSchema);
+  if (row.subagentRuntime !== undefined) result.subagentRuntime = parseSubagentRuntimeAdmissionView(row.subagentRuntime);
   for (const map of [result.sources, result.startupSources]) {
     if (map === undefined) continue;
     object(map, [], Object.keys(map));

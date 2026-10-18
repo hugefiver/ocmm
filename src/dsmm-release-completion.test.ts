@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BOOTSTRAP, computeDigests, resolveReleaseContext, validateTarballBuffer } from "../scripts/dsmm-release.mjs";
-import { makeAcceptedFixture, makeInstallFixture } from "./dsmm-trusted-release-fixtures.mjs";
+import {
+  BOOTSTRAP, POLICY, computeDigests, createArtifactIdentity, deterministicChecksums,
+  resolveReleaseContext, validateTarballBuffer,
+} from "../scripts/dsmm-release.mjs";
+import {
+  archiveFiles, contextInput, makeInstallFixture, packageFiles, receiptFixture,
+} from "./dsmm-trusted-release-fixtures.mjs";
 import {
   COMPILED_FILES, PUBLIC_EXPORTS, REQUIRED_CHECKS, lifecycleCommands,
 } from "../scripts/dsmm-registry-install-probe.mjs";
@@ -33,6 +38,27 @@ function fixture() {
   }));
   const expected = { runId: "123", runAttempt: "1", controlSha };
   return { identity, run, workflow, jobs, expected };
+}
+
+function makeHistoricalAcceptedFixture() {
+  const context = resolveReleaseContext(contextInput());
+  const tarball = archiveFiles(packageFiles(context.version));
+  const receipt = receiptFixture(context.version, computeDigests(tarball).sha256);
+  const receiptBytes = Buffer.from(JSON.stringify(receipt));
+  const identity = createArtifactIdentity(context, tarball, receiptBytes, { sourceChecks: "COMPLETED" });
+  const assets = new Map([
+    [identity.filename, tarball],
+    [POLICY.receiptFilename, receiptBytes],
+    [POLICY.checksumsFilename, deterministicChecksums(identity)],
+  ]);
+  const release = {
+    id: 44, tag_name: identity.tag, draft: true, prerelease: false,
+    assets: [...assets].map(([name, bytes], index) => ({
+      id: index + 100, name, state: "uploaded", size: bytes.length,
+      digest: `sha256:${computeDigests(bytes).sha256}`,
+    })),
+  };
+  return { context, tarball, receipt, receiptBytes, identity, assets, release };
 }
 
 function installFixture(identity: ReturnType<typeof fixture>["identity"]) {
@@ -88,7 +114,7 @@ test("bootstrap import must succeed, while future import is explicitly skipped a
     const copy = structuredClone(f); copy.jobs[0].conclusion = conclusion;
     assert.throws(() => validateRunEvidence(copy.run, copy.workflow, copy.jobs, copy.identity, copy.expected));
   }
-  const { identity } = makeAcceptedFixture();
+  const { identity } = makeHistoricalAcceptedFixture();
   const run = { ...f.run, id: Number(identity.runId), event: "push", head_sha: identity.controlSha, head_branch: identity.tag };
   const jobs = f.jobs.map(job => ({ ...job, run_id: Number(identity.runId), conclusion: job.name === "import-bootstrap" ? "skipped" : "success" }));
   const expected = { runId: identity.runId, runAttempt: identity.runAttempt, controlSha: identity.controlSha };
@@ -165,7 +191,7 @@ test("terminal completion traverses exact public surfaces and binds CI native pr
   const { writeFileSync } = await import("node:fs");
   const { join } = await import("node:path");
   async function scenario(change?: "missing-proof" | "wrong-attempt" | "wrong-file-hash" | "wrong-locale-description" | "wrong-locale-title" | "wrong-locale-hash" | "wrong-artifact-id" | "wrong-artifact-digest" | "unexpected-import" | "import-performed") {
-    const accepted = makeAcceptedFixture();
+    const accepted = makeHistoricalAcceptedFixture();
     const { identity } = accepted;
     const f = fixture();
     const expected = { runId: identity.runId, runAttempt: identity.runAttempt, controlSha: identity.controlSha };
@@ -253,6 +279,5 @@ test("DSMM workflow keeps ordinary publication permissions isolated from recover
   }
   assert.equal(workflow.jobs["import-bootstrap"].permissions.contents, "write");
   assert.equal(workflow.jobs["github-release"].permissions.contents, "write");
-  assert.deepEqual(workflow.jobs.verify.needs, ["prepare", "publish", "prepare-recovery-022", "publish-recovery-022"]);
-  assert.ok(workflow.jobs["github-release"].needs.includes("prepare-recovery-022"));
+  assert.deepEqual(workflow.jobs["github-release"].needs, ["prepare", "publish", "prepare-recovery-022", "publish-recovery-022"]);
 });

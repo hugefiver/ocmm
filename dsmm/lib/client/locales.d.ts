@@ -61,6 +61,8 @@ export declare const en: {
     headerCompactProfiles: string;
     headerCompactRefresh: string;
     headerNoSession: string;
+    sessionNewRequired: string;
+    sessionModuleOff: string;
     headerModeEnable: string;
     headerModeDisable: string;
     headerModePreset: string;
@@ -99,6 +101,11 @@ export declare const en: {
     dirty: string;
     savedNotApplied: string;
     savedApplied: string;
+    versionObserved: string;
+    versionAbsent: string;
+    versionUnknown: string;
+    savedRelationshipUnknown: string;
+    savedRefreshRequired: string;
     saved: string;
     applied: string;
     resetDone: string;

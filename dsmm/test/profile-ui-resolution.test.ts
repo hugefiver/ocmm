@@ -11,13 +11,14 @@ import type { Context as NativeContext } from "@deepseek-ai/cordis";
 import { withNativeProfileResolution } from "../scripts/profile-ui-acceptance.mjs";
 
 const dshManifest = process.env.DSMM_TEST_DSH_ENTRY;
-assert.ok(dshManifest && isAbsolute(dshManifest), "direct resolver tests require an explicit installed native SDK manifest");
-const nativeRequire = createRequire(dshManifest);
-const { Context } = nativeRequire("@deepseek-ai/cordis") as { Context: typeof NativeContext };
-const { PluginPackages } = nativeRequire("@deepseek-ai/dsh-app-boot");
-const { foldSubagentDescriptor } = nativeRequire("@deepseek-ai/dsh-subagent");
+const sdkOnly = { skip: dshManifest === undefined ? "not covered: requires explicit installed SDK anchor DSMM_TEST_DSH_ENTRY" : false };
 
 async function fixture() {
+  assert.ok(dshManifest && isAbsolute(dshManifest), "direct resolver tests require an explicit installed native SDK manifest");
+  const nativeRequire = createRequire(dshManifest);
+  const { Context } = nativeRequire("@deepseek-ai/cordis") as { Context: typeof NativeContext };
+  const { PluginPackages } = nativeRequire("@deepseek-ai/dsh-app-boot");
+  const { foldSubagentDescriptor } = nativeRequire("@deepseek-ai/dsh-subagent");
   const home = await realpath(await mkdtemp(join(tmpdir(), "dsmm-ui-resolution-")));
   const profileDir = join(home, "profiles", "owned");
   const packageDir = join(profileDir, "node_modules", "@dsmm", "resolution-fixture");
@@ -45,6 +46,7 @@ async function fixture() {
   }
   const observedNativeRequire = (name: string) => name === "@deepseek-ai/cordis" ? { ...nativeRequire(name), Context: OwnedContext } : nativeRequire(name);
   return {
+    nativeRequire, PluginPackages, foldSubagentDescriptor,
     options: { nativeRequire: observedNativeRequire, dshManifest, profilePackage, env: { DSH_HOME: home } },
     profileRequire: createRequire(packageManifest), modules, missing: pathToFileURL(missing).href,
     assertDisposed() { assert.equal(disposed, true); assert.ok(context); assert.equal(context.get("pluginPackages"), undefined); },
@@ -52,8 +54,9 @@ async function fixture() {
   };
 }
 
-test("native profile resolution admits the real SDK peer only for the awaited owned phase", async () => {
+test("native profile resolution admits the real SDK peer only for the awaited owned phase", sdkOnly, async () => {
   const f = await fixture();
+  const { nativeRequire, PluginPackages, foldSubagentDescriptor } = f;
   try {
     assert.throws(() => f.profileRequire.resolve("@deepseek-ai/dsh-subagent"), { code: "MODULE_NOT_FOUND" });
     await assert.rejects(import(f.modules.before), { code: "ERR_MODULE_NOT_FOUND" });
@@ -71,8 +74,9 @@ test("native profile resolution admits the real SDK peer only for the awaited ow
   } finally { await f.dispose(); }
 });
 
-test("a refused parent phase preserves its error and awaits native resolver disposal", async () => {
+test("a refused parent phase preserves its error and awaits native resolver disposal", sdkOnly, async () => {
   const f = await fixture();
+  const { PluginPackages, foldSubagentDescriptor } = f;
   try {
     const refused = Object.assign(new Error("owned phase refusal"), { code: "OWNED_PHASE_REFUSED" });
     await assert.rejects(withNativeProfileResolution(f.options, async (ctx: NativeContext) => {
@@ -86,7 +90,7 @@ test("a refused parent phase preserves its error and awaits native resolver disp
   } finally { await f.dispose(); }
 });
 
-test("native peer resolution does not supply missing ordinary dependencies or mask their codes", async () => {
+test("native peer resolution does not supply missing ordinary dependencies or mask their codes", sdkOnly, async () => {
   const f = await fixture();
   try {
     await assert.rejects(withNativeProfileResolution(f.options, () => import(f.missing)), { code: "ERR_MODULE_NOT_FOUND" });
@@ -95,7 +99,7 @@ test("native peer resolution does not supply missing ordinary dependencies or ma
   } finally { await f.dispose(); }
 });
 
-test("a rejected native profile load disposes the owned Context without invoking the parent phase", async () => {
+test("a rejected native profile load disposes the owned Context without invoking the parent phase", sdkOnly, async () => {
   const f = await fixture();
   try {
     await writeFile(f.options.profilePackage, "{invalid-profile");

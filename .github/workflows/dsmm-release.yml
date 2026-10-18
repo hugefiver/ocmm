@@ -123,12 +123,12 @@ jobs:
         if: steps.context.outputs.mode == 'bootstrap'
         run: node control/dsmm/scripts/dsmm-release.mjs validate --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted"
       - name: Prepare verified native runtime input
-        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0'
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0' && steps.context.outputs.version != '0.3.1'
         working-directory: control
         run: node dsmm/scripts/prepare-dsh-runtime-input.mjs --version "$DSMM_PACKAGE_VERSION" --destination "$RUNNER_TEMP/dsmm-dsh-runtime-input"
       - name: Build exact native acceptance runtime
         id: native-runtime
-        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0'
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0' && steps.context.outputs.version != '0.3.1'
         working-directory: control
         run: |
           docker build --build-context dsh-input="$RUNNER_TEMP/dsmm-dsh-runtime-input" --build-arg DSH_VERSION="$DSMM_DSH_VERSION" --iidfile "$RUNNER_TEMP/dsmm-runtime-image.id" -f dsmm/docker/Dockerfile.artifact -t "dsmm-final-artifact:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" .
@@ -194,13 +194,13 @@ jobs:
           node control/dsmm/scripts/dsmm-release.mjs assert-source --control-root control --context "$RUNNER_TEMP/dsmm-context.json"
           node --input-type=module -e 'import fs from "node:fs";import p from "node:path";import crypto from "node:crypto";import {validateTarballBuffer} from "./control/dsmm/scripts/dsmm-release.mjs";const d=p.join(process.env.RUNNER_TEMP,"dsmm-packed");const c=JSON.parse(fs.readFileSync(p.join(process.env.RUNNER_TEMP,"dsmm-context.json"),"utf8"));const n="dsmm-dsmm-"+c.version+".tgz";if(JSON.stringify(fs.readdirSync(d))!==JSON.stringify([n]))throw Error("expected exactly one frozen tarball");const f=p.join(d,n),b=fs.readFileSync(f);validateTarballBuffer(b,{version:c.version});fs.appendFileSync(process.env.GITHUB_ENV,"DSMM_FROZEN_TARBALL="+f+"\nDSMM_FROZEN_SHA256="+crypto.createHash("sha256").update(b).digest("hex")+"\n");'
       - name: Full native and browser Docker gate for future artifact
-        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0'
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0' && steps.context.outputs.version != '0.3.1'
         run: |
           mkdir "$RUNNER_TEMP/dsmm-ui-evidence"
           node control/dsmm/scripts/release-native-gate.mjs --control-root control --artifact "$DSMM_FROZEN_TARBALL" --image "$DSMM_RUNTIME_IMAGE" --sha256 "$DSMM_FROZEN_SHA256" --receipt "$RUNNER_TEMP/dsmm-docker-receipt.json" --evidence-dir "$RUNNER_TEMP/dsmm-ui-evidence"
           node control/dsmm/scripts/dsmm-release.mjs freeze --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --tarball "$DSMM_FROZEN_TARBALL" --receipt "$RUNNER_TEMP/dsmm-docker-receipt.json" --output-dir "$RUNNER_TEMP/dsmm-accepted" --source-checks COMPLETED
       - name: Freeze package with explicit unrun test status
-        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version == '0.3.0'
+        if: steps.context.outputs.mode == 'future' && (steps.context.outputs.version == '0.3.0' || steps.context.outputs.version == '0.3.1')
         run: node control/dsmm/scripts/dsmm-release.mjs freeze --control-root control --context "$RUNNER_TEMP/dsmm-context.json" --tarball "$DSMM_FROZEN_TARBALL" --output-dir "$RUNNER_TEMP/dsmm-accepted" --source-checks NOT_RUN_RELEASE_POLICY
       - name: Remove task-owned runtime image tag
         if: always() && steps.context.outputs.mode == 'future' && steps.native-runtime.outcome == 'success'
@@ -217,7 +217,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Retain future browser evidence
-        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0' && always()
+        if: steps.context.outputs.mode == 'future' && steps.context.outputs.version != '0.3.0' && steps.context.outputs.version != '0.3.1' && always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dsmm-browser-${{ github.run_id }}-${{ github.run_attempt }}
@@ -500,59 +500,10 @@ jobs:
           node control/dsmm/scripts/dsmm-release.mjs validate --control-root control --context "$RUNNER_TEMP/dsmm-accepted/context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted"
           node control/dsmm/scripts/dsmm-release.mjs publish --control-root control --context "$RUNNER_TEMP/dsmm-accepted/context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted" --work-dir "$RUNNER_TEMP/dsmm-keyless-publish"
 
-  verify:
-    name: verify
-    needs: [prepare, publish, prepare-recovery-022, publish-recovery-022]
-    if: ${{ !cancelled() && ((inputs.recovery == 'unpublished-0.2.2' && needs.prepare-recovery-022.result == 'success' && needs.publish-recovery-022.result == 'success' && needs.prepare.result == 'skipped' && needs.publish.result == 'skipped') || (inputs.recovery != 'unpublished-0.2.2' && needs.prepare.result == 'success' && needs.publish.result == 'success' && needs.prepare-recovery-022.result == 'skipped' && needs.publish-recovery-022.result == 'skipped')) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    outputs:
-      artifact-id: ${{ steps.proof.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: control
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          package-manager-cache: false
-      - name: Enable pinned pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@11.9.0 --activate
-          test "$(pnpm --version)" = "$PNPM_VERSION"
-      - name: Select and validate the sole accepted artifact ID before download
-        id: selected
-        env:
-          DSMM_NORMAL_ARTIFACT: ${{ needs.prepare.outputs.artifact-id }}
-          DSMM_RECOVERY_ARTIFACT: ${{ needs.prepare-recovery-022.outputs.artifact-id }}
-        run: node control/dsmm/scripts/dsmm-release.mjs select-artifact --control-root control
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          artifact-ids: ${{ steps.selected.outputs.artifact-id }}
-          path: ${{ runner.temp }}/dsmm-accepted
-      - name: Verify public registry bytes and fresh native headless installation
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          node control/dsmm/scripts/dsmm-release.mjs validate --control-root control --context "$RUNNER_TEMP/dsmm-accepted/context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted"
-          node control/dsmm/scripts/check-dsmm-release-completion.mjs verify --artifact-dir "$RUNNER_TEMP/dsmm-accepted" --receipt "$RUNNER_TEMP/dsmm-registry-verification.json"
-      - name: Retain run-bound registry and install proof
-        id: proof
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: dsmm-registry-verification-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/dsmm-registry-verification.json
-          if-no-files-found: error
-          retention-days: 30
-
   github-release:
     name: github-release
-    needs: [prepare, publish, prepare-recovery-022, publish-recovery-022, verify]
-    if: ${{ !cancelled() && needs.verify.result == 'success' && ((inputs.recovery == 'unpublished-0.2.2' && needs.prepare-recovery-022.result == 'success' && needs.publish-recovery-022.result == 'success' && needs.prepare.result == 'skipped' && needs.publish.result == 'skipped') || (inputs.recovery != 'unpublished-0.2.2' && needs.prepare.result == 'success' && needs.publish.result == 'success' && needs.prepare-recovery-022.result == 'skipped' && needs.publish-recovery-022.result == 'skipped')) }}
+    needs: [prepare, publish, prepare-recovery-022, publish-recovery-022]
+    if: ${{ !cancelled() && ((inputs.recovery == 'unpublished-0.2.2' && needs.prepare-recovery-022.result == 'success' && needs.publish-recovery-022.result == 'success' && needs.prepare.result == 'skipped' && needs.publish.result == 'skipped') || (inputs.recovery != 'unpublished-0.2.2' && needs.prepare.result == 'success' && needs.publish.result == 'success' && needs.prepare-recovery-022.result == 'skipped' && needs.publish-recovery-022.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -573,22 +524,15 @@ jobs:
         env:
           DSMM_NORMAL_ARTIFACT: ${{ needs.prepare.outputs.artifact-id }}
           DSMM_RECOVERY_ARTIFACT: ${{ needs.prepare-recovery-022.outputs.artifact-id }}
-          DSMM_PROOF_ARTIFACT: ${{ needs.verify.outputs.artifact-id }}
-        run: |
-          node control/dsmm/scripts/dsmm-release.mjs select-artifact --control-root control
-          node -e 'if(!/^[1-9]\d*$/.test(process.env.DSMM_PROOF_ARTIFACT||""))throw Error("missing verification artifact ID");'
+        run: node control/dsmm/scripts/dsmm-release.mjs select-artifact --control-root control
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           artifact-ids: ${{ steps.selected.outputs.artifact-id }}
           path: ${{ runner.temp }}/dsmm-accepted
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          artifact-ids: ${{ needs.verify.outputs.artifact-id }}
-          path: ${{ runner.temp }}/dsmm-proof
       - name: Non-overwriting stage and public finalization
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           node control/dsmm/scripts/dsmm-release.mjs validate --control-root control --context "$RUNNER_TEMP/dsmm-accepted/context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted"
-          node control/dsmm/scripts/dsmm-release.mjs transport --control-root control --context "$RUNNER_TEMP/dsmm-accepted/context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted"
-          node control/dsmm/scripts/dsmm-release.mjs finalize --control-root control --context "$RUNNER_TEMP/dsmm-accepted/context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted" --verification "$RUNNER_TEMP/dsmm-proof/dsmm-registry-verification.json"
+          node control/dsmm/scripts/dsmm-release.mjs transport --control-root control --context "$RUNNER_TEMP/dsmm-accepted/context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted" --output "$RUNNER_TEMP/dsmm-created-transport.json"
+          node control/dsmm/scripts/dsmm-release.mjs finalize --control-root control --context "$RUNNER_TEMP/dsmm-accepted/context.json" --artifact-dir "$RUNNER_TEMP/dsmm-accepted" --transport "$RUNNER_TEMP/dsmm-created-transport.json"

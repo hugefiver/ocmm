@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,8 +25,6 @@ function fault(code: string) {
   return (error: unknown) => error instanceof DsmmProfileError && error.code === code;
 }
 
-function sha(content: string): string { return createHash("sha256").update(content).digest("hex"); }
-
 test("fixed config missing reads have no side effects and exact bytes/revisions are persisted only at the fixed path", async () => {
   const f = fixture();
   try {
@@ -36,7 +33,7 @@ test("fixed config missing reads have no side effects and exact bytes/revisions 
     assert.throws(() => new FixedConfigFileStore("relative"), fault("unsafe-path"));
     const raw = '\uFEFF{ "defaultActive": false }\n';
     const saved = await f.store.save(raw, "absent");
-    assert.deepEqual(saved, { content: raw, revision: sha(raw) });
+    assert.equal(saved.content, raw);
     assert.deepEqual(f.store.read(), saved);
     assert.equal(readFileSync(f.path, "utf8"), raw);
     assert.deepEqual(readdirSync(f.root), ["config.json"]);
@@ -58,7 +55,8 @@ test("fixed config CAS rejects stale and external edits and cooperative writers 
     const external = '{"defaultActive":false,"guards":{}}\n';
     writeFileSync(f.path, external);
     await assert.rejects(f.store.save("{}", observed.revision), fault("conflict"));
-    assert.deepEqual(f.store.read(), { content: external, revision: sha(external) });
+    assert.equal(f.store.read().content, external);
+    assert.notEqual(f.store.read().revision, observed.revision);
   } finally { f.cleanup(); }
 });
 

@@ -18,8 +18,14 @@ export interface ChildAuthorityCeiling {
     allowRouteOverride: boolean;
     maxDepth: number;
 }
-export type ChildRuntimePolicyCapture = Pick<DsmmSettings, "modules" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery" | "defaultActive" | "deepseekV4ProCalibration" | "deepseekV4ProDefaultReasoningEffort" | "deepseekFlashCalibration" | "deepseekFlashDefaultReasoningEffort" | "skills"> & {
+export type ChildRuntimePolicyCapture = Pick<DsmmSettings, "modules" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery" | "defaultActive" | "skills"> & {
     subagents: Pick<DsmmSettings["subagents"], "enableRunInBackground" | "backgroundMode">;
+};
+export type HistoricalChildRuntimePolicyCapture = ChildRuntimePolicyCapture & {
+    deepseekV4ProCalibration: "off" | "auto" | "strict";
+    deepseekFlashCalibration: "off" | "auto" | "strict";
+    deepseekV4ProDefaultReasoningEffort: "off" | "low" | "high";
+    deepseekFlashDefaultReasoningEffort: "off" | "low" | "high";
 };
 interface ChildAdmissionCaptureBase {
     childSessionId: string;
@@ -42,18 +48,22 @@ interface ChildAdmissionCaptureBase {
 }
 export interface ChildAdmissionCaptureV1 extends ChildAdmissionCaptureBase {
     version: 1;
+    runtimePolicyCapture: HistoricalChildRuntimePolicyCapture;
 }
 export interface ChildAdmissionCaptureV2 extends ChildAdmissionCaptureBase {
     version: 2;
+    runtimePolicyCapture: HistoricalChildRuntimePolicyCapture;
     modelParameterPolicy: ResolvedModelParameterPolicy;
     invocation: ChildAdmissionCaptureBase["invocation"] & {
         requestedRoute: DsmmModelRoute;
         effortSource: "native" | "dsmm-config";
     };
 }
-export interface ChildAdmissionCaptureV3 extends Omit<ChildAdmissionCaptureV2, "version"> {
+export interface ChildAdmissionCaptureV3 extends ChildAdmissionCaptureBase {
     version: 3;
     delegationMode: "one-shot" | "continuable";
+    modelParameterPolicy: ResolvedModelParameterPolicy;
+    invocation: ChildAdmissionCaptureV2["invocation"];
 }
 export type ChildAdmissionCapture = ChildAdmissionCaptureV1 | ChildAdmissionCaptureV2 | ChildAdmissionCaptureV3;
 /** Trusted native folds only; never synthesized from the current parent's settings. */

@@ -2,7 +2,7 @@ import type { ConfigFormSnapshot, ConfigForm } from "@deepseek-ai/dsh-client-ui-
 import type { ConnectionGenerationState } from "@deepseek-ai/dsh-client-connection/client";
 import type { DsmmConfigRemote } from "../profile-remote.js";
 import type { DeploymentEditorSnapshot, SessionProfileSnapshot } from "../profile-types.js";
-export type DeploymentIssue = "unavailable" | "not-owned" | "conflict" | "validation" | "transport";
+export type DeploymentIssue = "unavailable" | "not-owned" | "conflict" | "validation" | "transport" | "unconfirmed";
 export interface DeploymentView {
     snapshot: DeploymentEditorSnapshot | null;
     draft: Record<string, unknown>;
@@ -11,6 +11,12 @@ export interface DeploymentView {
     issue: DeploymentIssue | null;
     saved: boolean;
     session: SessionProfileSnapshot | null;
+    raw: Readonly<Record<string, {
+        text: string;
+        invalid: boolean;
+    }>>;
+    invalidFields: readonly string[];
+    refreshRequired: boolean;
 }
 export interface NativePageForm {
     state: ConfigFormSnapshot<Record<string, unknown>>;
@@ -31,6 +37,7 @@ export declare class DeploymentController {
     private connection;
     private connectionBaseline;
     private stopConnection;
+    private children;
     constructor(remote: DsmmConfigRemote, layer: "global" | "profile", rowNamespace?: string | null);
     readonly getSnapshot: () => DeploymentView;
     readonly subscribe: (listener: () => void) => (() => void);
@@ -42,6 +49,11 @@ export declare class DeploymentController {
     private publish;
     attachForm(form: NativePageForm | null): void;
     setInvalid(path: string, invalid: boolean): void;
+    setRaw(path: string, text: string, invalid: boolean): void;
+    clearRaw(prefix: string): void;
+    canEdit(): boolean;
+    canSave(): boolean;
+    pendingPaths(): readonly string[];
     canWriteProfile(snapshot?: DeploymentEditorSnapshot | null): boolean;
     edit(path: readonly string[], value: unknown): void;
     refresh(discard?: boolean): Promise<void>;

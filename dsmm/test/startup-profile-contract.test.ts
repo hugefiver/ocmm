@@ -114,7 +114,8 @@ test("actual cold central runtime rejects corrupt and unstable disk selection be
     const host = join(home, "profiles", "owned"); fs.mkdirSync(host, { recursive: true });
     const store = ProfileStore.fromCentral(home, host, "trusted-direct");
     const saved = await store.save({ id: "cold", content: '{"version":1,"id":"cold","settings":{"workflow":{"reviewCap":7}}}\n', expectedRevision: null });
-    await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
+    const selected = await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
+    assert.equal(selected.selection.sourceRevision, saved.revision);
     const pointer = join(store.stateDir, ".selection.json"), before = fs.readFileSync(pointer);
     let installedListeners = 0;
     const ctx = { get: ((name: string) => name === "profileContext" ? { dir: host, home } : undefined) as any, on() { installedListeners += 1; } };
@@ -133,6 +134,6 @@ test("actual cold central runtime rejects corrupt and unstable disk selection be
     await assert.rejects(createProfileRuntime(ctx, resolveConfig()), { code: "conflict" });
     assert.equal(changed, true); assert.equal(installedListeners, 0);
     assert.equal(fs.readFileSync(pointer, "utf8"), external);
-    assert.equal(fs.readFileSync(join(store.profileDir, ".revisions", `${saved.revision}.jsonc`), "utf8"), saved.content);
+    assert.equal(fs.readFileSync(join(store.profileDir, ".revisions", `${selected.selection.appliedRevision}.jsonc`), "utf8"), saved.content);
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(home, { recursive: true, force: false }); }
 });

@@ -70,7 +70,7 @@ async function nativeIntentFixture() {
   // this held RPC acknowledgment. No store.write/set or synthetic invalidate.
   const directory = new ModelDirectory({ selectModel: () => nativeAck.promise }, root.id, () => true, catalog, projection, () => true);
   const profileAck = deferred<RemoteResult<SessionProfileSnapshot>>();
-  const initial: SessionProfileSnapshot = { sessionId: root.id, globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, selection: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, scope: "global-default", admissionEpoch: "old-epoch", switchAllowed: true };
+  const initial: SessionProfileSnapshot = { sessionId: root.id, globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, selection: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, scope: "global-default", admissionEpoch: "old-epoch", switchAllowed: true, canSelectModel: true, canToggleMode: true, canApplyOverlay: true };
   const remote: DsmmProfilesRemote = {
     describe: async () => success({ profiles: [{ id: "p", revision }], ...initial.globalDefault }),
     describeSession: async () => success(initial), selectSession: () => profileAck.promise,

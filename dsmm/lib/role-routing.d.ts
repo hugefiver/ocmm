@@ -43,11 +43,9 @@ export declare function pinRoleRoute(agent: DshAgent, identity: string, route: D
 }): RoleRouteLock;
 export declare function clearRoleRouteLock(agent: DshAgent): void;
 export declare function roleRouteRuntimeState(agent: DshAgent, settings: DsmmSettings, role: DsmmRoleId | undefined, epoch?: string): DsmmRoleRuntimeState;
-export declare function rolePolicyIdentity(settings: DsmmSettings, role: DsmmRoleId | undefined, epoch?: string): string | undefined;
-/** Durable profile choice is not permission to retain a former process's route lock. */
 export declare function liveRolePolicyIdentity(agent: DshAgent, settings: DsmmSettings, role: DsmmRoleId | undefined, epoch?: string): string | undefined;
 /** Native custom events are model-hidden log facts, retained across surface compaction. */
-export declare function establishRolePolicy(frame: AgentRequestFrame, settings: DsmmSettings, role: DsmmRoleId | undefined, ctx?: DshContext, epoch?: string): Promise<string | undefined>;
+export declare function establishRolePolicy(frame: AgentRequestFrame, settings: DsmmSettings, role: DsmmRoleId | undefined, _ctx?: DshContext, epoch?: string): Promise<string | undefined>;
 export declare function recordAdmittedRecoveryRoute(frame: AgentRequestFrame, route: DsmmModelRoute): void;
 export declare function takeAdmittedRecoveryRoute(frame: AgentRequestFrame): DsmmModelRoute | undefined;
 export declare function effectiveRoleFallbackRoutes(settings: DsmmSettings, role: DsmmRoleId | undefined): readonly DsmmModelRoute[];

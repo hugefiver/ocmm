@@ -57,7 +57,11 @@ async function fixture(profile: DsmmPluginConfig = {}, initialEnabled?: boolean,
     await ctx.plugin(MemoryCredentials).await();
     await ctx.plugin(NativeConnection).await();
     ctx.provide("profileContext", { home: root, dir: root });
-    ctx.provide("webServer", { host: "127.0.0.1" }); ctx.provide("settings", { writable: true });
+    // Unit-test Host boundary: one owned entry and an explicitly mutable form descriptor.
+    const nativeDescriptor = { ns: "dsmm", revision: 0 };
+    ctx.fiber.entry = { id: "include:dsmm", options: { id: nativeDescriptor.ns, config: profile }, fiber: ctx.fiber } as Context["fiber"]["entry"];
+    ctx.provide("webServer", { host: "127.0.0.1" });
+    ctx.provide("settings", { writable: true, describe: () => [{ ...nativeDescriptor }] });
     const deployment = new DsmmDeploymentConfig(ctx as unknown as DshContext, profile);
     if (initialEnabled !== undefined) await deployment.saveGlobal({ expectedRevision: "absent", edits: [
       { op: "set", path: ["permissionControl", "enabled"], value: initialEnabled }
@@ -101,9 +105,11 @@ async function fixture(profile: DsmmPluginConfig = {}, initialEnabled?: boolean,
       const agent: DshAgent = { id: session.id, session: session as unknown as DshAgent["session"], ctx: ctx as unknown as DshContext,
         status: "idle", runMaintenance: task => task(new AbortController().signal) };
       await ctx.agents.register(agent as unknown as Agent);
+      const candidate = await runtime.prepareRoot(agent, new AbortController().signal);
+      runtime.publish(agent, candidate);
       return agent;
     };
-    return { root, ctx, startup, runtime, deployment, rules, controllerFiber, config, profiles, createRoot,
+    return { root, ctx, nativeDescriptor, startup, runtime, deployment, rules, controllerFiber, config, profiles, createRoot,
       async dispose() { await ctx.fiber.dispose(); if (home === undefined) await rm(root, { recursive: true, force: true }); } };
   } catch (error) { await ctx.fiber.dispose(); if (home === undefined) await rm(root, { recursive: true, force: true }); throw error; }
 }
@@ -139,14 +145,6 @@ test("native Gateway and Host module collections preserve all four startup-pinne
         assert.equal(permission(described.modules!).desired.enabled, desiredEnabled);
         assert.equal(admission.settings.permissionControl.enabled, startupEnabled);
         assert.equal(admission.restartRequired!.includes("permissionControl.enabled"), startupEnabled !== desiredEnabled);
-        const named = await f.runtime.save({ id: "module-overlay", expectedRevision: null,
-          content: '{"version":1,"id":"module-overlay","settings":{"workflow":{"reviewCap":2}}}' });
-        const applied = await f.profiles<SessionProfileSnapshot>("selectSession", { sessionId: agent.id, request: {
-          sessionId: agent.id, id: named.id, expectedRevision: named.revision,
-          expectedSelectionRevision: described.selection.selectionRevision, expectedAdmissionEpoch: described.admissionEpoch
-        } });
-        assert.deepEqual(applied.modules, f.runtime.getSettings.moduleStates!(agent));
-        assert.equal(permission(applied.modules!).admitted, startupEnabled);
         assert.equal(f.runtime.getSettings(agent).permissionControl.enabled, startupEnabled);
         assert.equal(f.runtime.admission(old), oldAdmission);
         assert.equal(oldAdmission.settings.permissionControl.enabled, startupEnabled);

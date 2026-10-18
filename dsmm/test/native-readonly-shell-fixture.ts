@@ -12,10 +12,12 @@ import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import type { DsmmPluginConfig } from "../src/settings.ts";
 import * as ManagedBash from "../lib/permission-bash.js";
 import * as ManagedPwsh from "../lib/permission-pwsh.js";
-import DsmmPlugin from "../lib/index.js";
 import { PermissionRefusal } from "../lib/permission-control.js";
 import { scopeParentOf } from "../lib/native-scope.js";
+import { DsmmRolePolicy } from "../lib/role-policy.js";
+import { DeepworkModeController } from "../lib/state.js";
 import { nativeFixturePlugin, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
+import { waitForPermissionHost } from "./permission-host-fixture.ts";
 
 const sandbox = await nativeFixturePlugin("@deepseek-ai/dsh-sandbox-policy");
 const approval = await nativeFixturePlugin("@deepseek-ai/dsh-user-approval");
@@ -23,7 +25,7 @@ const approval = await nativeFixturePlugin("@deepseek-ai/dsh-user-approval");
 async function shellFixture(managed: boolean, config: DsmmPluginConfig = {}, nativePresets = true, ownShells = false) {
   const f = await nativeRoutingFixture({ defaultActive: true, guards: { scope: "off" },
     presets: { plannerRootEnabled: true }, ...config }, {
-    nativePresets, nativeFs: true, nativeJobs: true, fixtureShells: false, persistence: true,
+    nativePresets, nativePermissionSettings: true, nativeFs: true, nativeJobs: true, fixtureShells: false, persistence: true,
     async beforeDsmm(ctx) {
       const noWeb = async (): Promise<never> => { throw new Error("No external web requests in readonly shell regression"); };
       ctx.provide("web", { search: noWeb, fetch: noWeb });
@@ -50,6 +52,11 @@ async function shellFixture(managed: boolean, config: DsmmPluginConfig = {}, nat
   f.ctx.on("approval/request", (_request, next) => { approvals++; return next(); }, { global: true, prepend: true });
   try {
     let pwshScope: typeof f.ctx, pwshPlugin: typeof ManagedPwsh, pwshFiber: typeof f.ctx.fiber;
+    const registerAlias = (scope: typeof f.ctx, kind: "bash" | "pwsh", agent?: Agent) => {
+      const tools = scope.get("tools")!, definition = tools.get(kind, agent);
+      assert.ok(definition);
+      scope.effect(() => tools.register({ ...definition, name: `fixture_${kind}_alias` }));
+    };
     const mountShells = async (agent?: Agent) => {
       const base = agent === undefined ? f.ctx : agent.ctx.isolate("tools");
       if (agent !== undefined) base.provide("tools", f.ctx.get("agentPresets")!.serviceFor(agent, "tools") ?? agent.ctx.get("tools")!);
@@ -63,6 +70,8 @@ async function shellFixture(managed: boolean, config: DsmmPluginConfig = {}, nat
         const plugin = managed ? kind === "bash" ? ManagedBash : ManagedPwsh : await nativeFixturePlugin(`@deepseek-ai/dsh-tool-${kind}`);
         const fiber = scope.plugin(plugin, {});
         await fiber.await();
+        if (managed) await waitForPermissionHost(f.ctx, controller => controller.coverage(agent).some(row => row.name === kind));
+        registerAlias(fiber.ctx, kind, agent);
         if (kind === "pwsh") { pwshScope = scope; pwshPlugin = plugin; pwshFiber = fiber; }
       }
     };
@@ -77,9 +86,12 @@ async function shellFixture(managed: boolean, config: DsmmPluginConfig = {}, nat
       { name: "write", args: { file_path: join(f.profileDir, "write-marker"), content: "write control\n" }, content: "write control\n" },
       { name: "edit", args: { file_path: subject, old_string: "unchanged", new_string: "changed" }, content: "changed readonly sentinel\n" },
       { name: "bash", args: { command: "pwd -P; printf 'bash control\\n' > 'bash-marker'", description: "Task-owned shell control", workdir: f.profileDir }, content: "bash control\n" },
-      { name: "pwsh", args: { command: `[IO.File]::WriteAllText('${join(f.profileDir, "pwsh-marker")}', 'pwsh control')`, description: "Task-owned shell control", workdir: f.profileDir }, content: "pwsh control" }
+      { name: "pwsh", args: { command: `[IO.File]::WriteAllText('${join(f.profileDir, "pwsh-marker")}', 'pwsh control')`, description: "Task-owned shell control", workdir: f.profileDir }, content: "pwsh control" },
+      { name: "fixture_bash_alias", args: { command: "printf 'bash alias control\\n' > 'bash-alias-marker'", description: "Task-owned native shell alias control", workdir: f.profileDir }, content: "bash alias control\n" },
+      { name: "fixture_pwsh_alias", args: { command: `[IO.File]::WriteAllText('${join(f.profileDir, "pwsh-alias-marker")}', 'pwsh alias control')`, description: "Task-owned native shell alias control", workdir: f.profileDir }, content: "pwsh alias control" }
     ];
-    const paths = [join(f.profileDir, "write-marker"), subject, join(f.profileDir, "bash-marker"), join(f.profileDir, "pwsh-marker")];
+    const paths = [join(f.profileDir, "write-marker"), subject, join(f.profileDir, "bash-marker"), join(f.profileDir, "pwsh-marker"),
+      join(f.profileDir, "bash-alias-marker"), join(f.profileDir, "pwsh-alias-marker")];
     const toolsFor = (agent: Agent) => {
       const raw = f.ctx.get("agentPresets")?.serviceFor(agent, "tools");
       return raw === undefined ? agent.ctx.get("tools")! : getTraceable(agent.ctx, raw);
@@ -111,9 +123,17 @@ async function shellFixture(managed: boolean, config: DsmmPluginConfig = {}, nat
       }
       const before = starts;
       for (const [index, request] of requests.entries()) {
+        const beforeRequest = starts;
         const result = await execute(agent, request.name, request.args);
-        assert.equal(result.isError, false, JSON.stringify(result));
-        if (request.name === "bash" || request.name === "pwsh") {
+        if (managed && request.name.endsWith("_alias")) {
+          // Managed bodies require their exact registered name and call identity.
+          assert.equal(result.isError, true, JSON.stringify({ request, result }));
+          assert.equal(starts, beforeRequest);
+          assert.equal(existsSync(paths[index]), false);
+          continue;
+        }
+        assert.equal(result.isError, false, JSON.stringify({ request, result }));
+        if (request.name === "bash" || request.name === "pwsh" || request.name.endsWith("_alias")) {
           const evidence = JSON.stringify({ name: request.name, args: request.args, spawnCwd, result });
           assert.equal((result as { value?: { exitCode?: number } }).value?.exitCode, 0, evidence);
           assert.equal(realpathSync(spawnCwd!), realpathSync(f.profileDir), evidence);
@@ -122,12 +142,15 @@ async function shellFixture(managed: boolean, config: DsmmPluginConfig = {}, nat
         assert.equal(readFileSync(paths[index], "utf8"), request.content);
         if (paths[index] === subject) writeFileSync(subject, original); else unlinkSync(paths[index]);
       }
-      assert.equal(starts - before, 2); noApprovals(agent); noEffects();
+      assert.equal(starts - before, managed ? 2 : 4); noApprovals(agent); noEffects();
     };
-    const denied = async (agent: Agent, missingPwsh = false) => {
-      full(agent); await read(agent); const before = starts;
+    const denied = async (agent: Agent, options: { missingPwsh?: boolean; admissionFailed?: boolean } = {}) => {
+      full(agent);
+      if (options.admissionFailed) assert.equal((await execute(agent, "read", { file_path: subject })).isError, true);
+      else await read(agent);
+      const before = starts;
       assert.equal((await execute(agent, "read", { file_path: paths[0] })).isError, true);
-      if (managed) for (const name of missingPwsh ? ["bash"] : ["bash", "pwsh"]) {
+      if (managed) for (const name of options.missingPwsh ? ["bash"] : ["bash", "pwsh"]) {
         assert.ok(f.ctx.get("dsmmPermissionController")!.coverage(ownShells ? agent : undefined).some(row => row.name === name));
         if (!ownShells) assert.equal(toolsFor(agent).get(name, agent), f.tools.get(name, agent), "the tested selected tool must be the managed registration");
       }
@@ -139,7 +162,8 @@ async function shellFixture(managed: boolean, config: DsmmPluginConfig = {}, nat
     };
     return { ...f, requests, execute, control, denied, full, read, noEffects, noApprovals, toolsFor, mountShells, starts: () => starts,
       async unmountPwsh() { await pwshFiber.dispose(); },
-      async mountPwsh() { pwshFiber = pwshScope.plugin(pwshPlugin, {}); await pwshFiber.await(); },
+      async mountPwsh() { pwshFiber = pwshScope.plugin(pwshPlugin, {}); await pwshFiber.await(); registerAlias(pwshFiber.ctx, "pwsh");
+        if (managed) await waitForPermissionHost(f.ctx, controller => controller.coverage().some(row => row.name === "pwsh")); },
       dispose: async () => { subprocess.spawn = spawn; await f.dispose(); } };
   } catch (error) { subprocess.spawn = spawn; await f.dispose(); throw error; }
 }
@@ -164,7 +188,7 @@ for (const managed of [false, true]) {
       assert.equal(presets.composedPreset(root.ctx), "standard");
       assert.deepEqual(["bash", "pwsh"].map(name => f.toolsFor(root).get(name, root)), shells);
       await f.control(root);
-      t.diagnostic("own-layer-only real shell: ordinary sameargs starts=2; readonly selection/reconcile succeeds, four mutations denied, starts=0; read and switchback succeed; approvals=0");
+      t.diagnostic("own-layer native shells and aliases: ordinary native controls execute; managed bodies refuse alias substitution; readonly mutations denied before spawn; read and switchback succeed; approvals=0");
     } finally { await f.dispose(); }
   });
 
@@ -174,9 +198,10 @@ for (const managed of [false, true]) {
       const parent = await f.create({ agentPreset: "standard" }); await f.control(parent);
       const child = await f.createAuxiliary("dsmm-reviewer", undefined, "one-shot", parent);
       const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
-      assert.equal(runtime.admission(child as unknown as DshAgent).childCapture?.authorityCeiling.readOnly, true);
+      const policy = new DsmmRolePolicy(f.ctx as unknown as DshContext, runtime.getSettings, new DeepworkModeController(f.ctx as unknown as DshContext));
+      assert.equal(policy.identity(child as unknown as DshAgent).readOnly, true);
+      assert.equal(f.ctx.get("dsmmNativeAdmission")!.invocation(child)?.target, "dsmm-reviewer");
       assert.equal(f.agents.isOwnedBy(child.id, parent), true);
-      assert.equal(f.toolsFor(child).get("read", child), f.toolsFor(parent).get("read", parent));
       await f.denied(child);
       const results: Array<{ name: string; result: ToolExecutionResult }> = [];
       f.ctx.on("tools/result", (exec, result) => { if (exec.agent === child) results.push({ name: exec.name, result }); }, { global: true });
@@ -196,11 +221,11 @@ for (const managed of [false, true]) {
         yield { type: "finish", reason: { kind: "tool-calls" } };
       };
       const before = f.starts(), calls = f.adapter.calls.length; await runFixtureTurn(child);
-      assert.equal(f.adapter.calls.length - calls, 6);
+      assert.equal(f.adapter.calls.length - calls, loopRequests.length + 1);
       assert.deepEqual(results.map(row => [row.name, row.result.isError]), [["read", false], ...f.requests.map(row => [row.name, true])]);
       assert.ok(results[0].result.content.some(block => block.type === "text" && block.text.includes("unchanged readonly sentinel")));
       assert.equal(f.starts(), before); f.noEffects(); f.noApprovals(child);
-      t.diagnostic("parent real shell starts=2; child direct+6-turn AgentLoop starts=0; read succeeds, four mutations denied per path; approvals=0");
+      t.diagnostic("parent ordinary shells execute and alias permission decisions are preserved; child direct and AgentLoop starts=0; read succeeds and all mutations are denied; approvals=0");
     } finally { await f.dispose(); }
   });
 
@@ -237,7 +262,7 @@ for (const managed of [false, true]) {
       await f.unmountPwsh();
       await presets.select(late, "dsmm-planner");
       assert.equal(presets.composedPreset(late.ctx), "dsmm-planner");
-      await f.denied(late, true);
+      await f.denied(late, { missingPwsh: true });
       await f.mountPwsh();
       await f.denied(late);
       const selectedTools = presets.serviceFor(late, "tools") ?? late.ctx.get("tools")!;
@@ -250,60 +275,55 @@ for (const managed of [false, true]) {
         await presets.select(late, "dsmm-planner");
         assert.equal(presets.composedPreset(late.ctx), "dsmm-planner");
         await assert.rejects(f.ctx.serial("tools/change"), error => error === failure);
-        await f.denied(late);
+        await f.denied(late, { admissionFailed: true });
         await presets.select(late, "standard");
       } finally { plannerTools.restrict = restrict; }
       await f.control(late);
-      t.diagnostic("same Root ordinary→Planner→ordinary; optional pwsh absent/late and throwing schema restriction retain four-tool runtime denial, read and native switchback");
+      t.diagnostic("legal Root ordinary→Planner→ordinary; optional pwsh absent/late retains readonly; failed restriction admission denies reads and mutations; native switchback restores ordinary controls");
     } finally { await f.dispose(); }
   });
 
-  test(`retained, reinstalled and cold-reopened reviewer keeps real ${managed ? "managed" : "raw"} shell denial from its original readonly ceiling`, async t => {
+  test(`live reviewer keeps real ${managed ? "managed" : "raw"} shell denial across parent off and future defaults; retired owner cannot recover it`, async t => {
     const config: DsmmPluginConfig = { defaultActive: true, guards: { scope: "off" }, presets: { plannerRootEnabled: true },
       subagents: { enableRunInBackground: true, backgroundMode: "continuable" } };
-    const f = await shellFixture(managed, config, false);
-    let reinstall: ReturnType<typeof f.ctx.plugin> | undefined;
+    const f = await shellFixture(managed, config);
     try {
       const parent = await f.create({ agentPreset: "standard" }); await f.control(parent);
-      let child = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", parent);
+      const child = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", parent);
       // The native pre-step hold keeps this exact Agent resident until drain/resume.
       f.full(child);
       const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
       const captured = runtime.admission(child as unknown as DshAgent);
-      assert.equal(captured.childCapture?.authorityCeiling.readOnly, true);
-      assert.equal(captured.childCapture.authorityCeiling.toolFilter, undefined);
+      const policy = new DsmmRolePolicy(f.ctx as unknown as DshContext, runtime.getSettings, new DeepworkModeController(f.ctx as unknown as DshContext));
+      const identity = policy.identity(child as unknown as DshAgent);
+      assert.equal(identity.readOnly, true);
+      assert.equal(identity.parent, parent);
       await f.denied(child);
       const mode = await runtime.getSession(parent as unknown as DshAgent);
       await runtime.selectMode({ sessionId: parent.id, active: false, expectedModeRevision: mode.deepwork!.revision,
         expectedAdmissionEpoch: mode.admissionEpoch }, parent as unknown as DshAgent);
       const overlay = await runtime.save({ id: "readonly-parent-overlay", expectedRevision: null,
         content: '{"version":1,"id":"readonly-parent-overlay","settings":{"workflow":{"reviewCap":2},"guards":{"scope":"off"}}}' });
-      const session = await runtime.getSession(parent as unknown as DshAgent);
-      await runtime.selectSession({ sessionId: parent.id, id: overlay.id, expectedRevision: overlay.revision,
-        expectedSelectionRevision: session.selection.selectionRevision, expectedAdmissionEpoch: session.admissionEpoch }, parent as unknown as DshAgent);
-      assert.notEqual(runtime.admission(parent as unknown as DshAgent).epoch, captured.epoch);
+      await runtime.select({ id: overlay.id, expectedRevision: overlay.revision,
+        expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+      const fresh = await f.create({ agentPreset: "standard" });
+      assert.equal(runtime.admission(fresh as unknown as DshAgent).settings.workflow.reviewCap, 2);
+      assert.notEqual(runtime.admission(fresh as unknown as DshAgent).epoch, captured.epoch);
       assert.equal(runtime.admission(child as unknown as DshAgent), captured);
+      assert.equal(policy.identity(child as unknown as DshAgent), identity);
       await f.denied(child);
       const active = await runtime.getSession(parent as unknown as DshAgent);
       await runtime.selectMode({ sessionId: parent.id, active: true, expectedModeRevision: active.deepwork!.revision,
         expectedAdmissionEpoch: active.admissionEpoch }, parent as unknown as DshAgent);
+      await runFixtureTurn(child);
+      const before = f.starts(), calls = f.adapter.calls.length;
       await f.dsmmFiber.dispose();
-      reinstall = f.ctx.plugin({ name: "readonly-shell-reinstall", inject: [...DsmmPlugin.inject], apply(ctx) {
-        return DsmmPlugin.apply(ctx as unknown as DshContext, { ...config, presets: { ...config.presets, root: join(f.profileDir, "agent-presets") } });
-      } });
-      await reinstall.await();
-      const replacement = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
-      await f.subagents.sendMessage(parent, child.id, [{ type: "text", text: "Retain original readonly capture" }], { signal: new AbortController().signal });
-      assert.equal(f.agents.get(child.id) === child, true, "retained child must be the same exact live Agent");
-      assert.deepEqual(replacement.admission(child as unknown as DshAgent).childCapture, captured.childCapture);
-      await f.denied(child);
-      const original = child;
-      child = await f.resumeAuxiliary(child);
-      assert.notEqual(child, original); assert.equal(child.id, original.id);
-      assert.deepEqual(replacement.admission(child as unknown as DshAgent).childCapture, captured.childCapture);
-      assert.equal(replacement.admission(child as unknown as DshAgent).epoch, captured.epoch);
-      await f.denied(child);
-      t.diagnostic("original readOnly=true ceiling survives parent mode/profile, reinstall and native session resume; real shell starts=0 at every child boundary");
-    } finally { await f.dispose(); await reinstall?.dispose(); }
+      assert.equal(f.agents.get(child.id), undefined);
+      await assert.rejects(f.subagents.sendMessage(parent, child.id, [{ type: "text", text: "Retired owner cannot recover this child" }], { signal: new AbortController().signal }));
+      assert.equal(f.adapter.calls.length, calls);
+      assert.equal(f.starts(), before);
+      f.noEffects(); f.noApprovals(child);
+      t.diagnostic("live reviewer retains readonly across parent off and future defaults; owner retirement revokes delivery without model or shell execution");
+    } finally { await f.dispose(); }
   });
 }

@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import type { DshContext } from "../lib/dsh-types.js";
 import { DSMM_STATUS_COMMAND } from "../lib/commands.js";
-import { apply } from "../lib/index.js";
 import { DEFAULT_DSMM_LSP_SETTINGS } from "../lib/lsp.js";
 import { DSMM_ROLES } from "../lib/roles.js";
 import { DSMM_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA, DSMM_SKILL_NAMES, DEFAULT_DSMM_SETTINGS, resolveConfig, resolveRoleRuntimePolicy, registerSettings } from "../lib/settings.js";
@@ -175,7 +174,7 @@ const DEFAULT_PERMISSION_CONTROL_SETTINGS = {
   nativeCommands: { enabled: false, entries: [] }
 };
 
-test("default settings keep deepwork opt-in and calibration automatic", () => {
+test("default settings keep deepwork opt-in", () => {
   assert.deepEqual(DEFAULT_DSMM_SETTINGS, {
     permissionControl: DEFAULT_PERMISSION_CONTROL_SETTINGS,
     modelParameters: { passthrough: true },
@@ -183,10 +182,6 @@ test("default settings keep deepwork opt-in and calibration automatic", () => {
     modeName: "deepwork",
     defaultActive: false,
     promptOrder: 50,
-    deepseekV4ProCalibration: "auto",
-    deepseekV4ProDefaultReasoningEffort: "high",
-    deepseekFlashCalibration: "auto",
-    deepseekFlashDefaultReasoningEffort: "high",
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     roleRouting: {},
@@ -213,7 +208,7 @@ test("current Loader config installs without legacy settings registration or sys
     get() { return undefined; },
     inject() { throw new Error("settings must not depend on service injection"); }
   };
-  const settings = registerSettings(context, { workflow: { policy: "legacy", strictGates: false, reviewCap: 2 }, deepseekFlashCalibration: "off" }, {
+  const settings = registerSettings(context, { workflow: { policy: "legacy", strictGates: false, reviewCap: 2 } }, {
     install(ready, getSettings) {
       assert.equal(ready, context);
       assert.equal(getSettings().workflow.policy, "legacy");
@@ -223,22 +218,16 @@ test("current Loader config installs without legacy settings registration or sys
   assert.equal(installed, 1);
   assert.equal(settings.workflow.strictGates, false);
   assert.equal(settings.workflow.reviewCap, 2);
-  assert.equal(settings.deepseekFlashCalibration, "off");
-  assert.equal(settings.deepseekV4ProCalibration, "auto");
 });
 
 test("resolveConfig overlays plugin config on defaults", () => {
-  assert.deepEqual(resolveConfig({ modeName: "dw", promptOrder: 60, deepseekV4ProCalibration: "off" }), {
+  assert.deepEqual(resolveConfig({ modeName: "dw", promptOrder: 60 }), {
     permissionControl: DEFAULT_PERMISSION_CONTROL_SETTINGS,
     modelParameters: { passthrough: true },
     modules: { deepwork: { enabled: true } },
     modeName: "dw",
     defaultActive: false,
     promptOrder: 60,
-    deepseekV4ProCalibration: "off",
-    deepseekV4ProDefaultReasoningEffort: "high",
-    deepseekFlashCalibration: "auto",
-    deepseekFlashDefaultReasoningEffort: "high",
     skills: DEFAULT_SKILL_SETTINGS,
     roles: DEFAULT_ROLE_SETTINGS,
     roleRouting: {},
@@ -267,12 +256,6 @@ test("resolveConfig reserves only the exact dsmm-status mode name", () => {
 
   for (const [modeName, expected] of cases) {
     assert.equal(resolveConfig({ modeName }).modeName, expected);
-  }
-});
-
-test("resolveConfig supports every DeepSeek V4 Pro default reasoning effort", () => {
-  for (const effort of ["off", "low", "high"] as const) {
-    assert.equal(resolveConfig({ deepseekV4ProDefaultReasoningEffort: effort }).deepseekV4ProDefaultReasoningEffort, effort);
   }
 });
 
@@ -493,45 +476,11 @@ test("Config reinstallation makes a separate baseline and cannot replace an old 
   assert.throws(() => registerSettings({}, invalid));
 });
 
-test("Config normalizes reserved command names for getters, installation and command registration", () => {
+test("Config normalizes reserved command names for getters and installation", () => {
   const installed: string[] = [];
   const getSettings = registerSettings({}, { modeName: DSMM_STATUS_COMMAND }, {
     install(_ctx, settings) { installed.push(settings().modeName); }
   });
   assert.equal(getSettings().modeName, DEFAULT_DSMM_SETTINGS.modeName);
   assert.deepEqual(installed, [DEFAULT_DSMM_SETTINGS.modeName]);
-  const commands: string[] = [];
-  apply({ systemPrompt: { section() { return () => {}; } }, commands: { register(command) { commands.push(command.name); } } }, { modeName: DSMM_STATUS_COMMAND });
-  assert.deepEqual(commands, [DEFAULT_DSMM_SETTINGS.modeName, DSMM_STATUS_COMMAND]);
-});
-
-test("apply registers recovery request hooks before the existing llm model-routing injection", () => {
-  const injections: string[][] = [];
-  const registrations: Array<{ event: string; options: unknown }> = [];
-  const timeline: string[] = [];
-
-  apply({
-    on(event, _listener, options) {
-      registrations.push({ event, options });
-      timeline.push(`on:${event}`);
-      return () => {};
-    },
-    inject(dependencies) {
-      injections.push([...dependencies]);
-      timeline.push(`inject:${dependencies.join(",")}`);
-    }
-  });
-
-  assert.deepEqual(injections.filter((dependencies) => dependencies.includes("settings")), []);
-  assert.deepEqual(injections.filter((dependencies) => dependencies.join(",") === "llm"), [["llm"]]);
-  assert.deepEqual(registrations.filter(({ event }) => ["agent/assistant-stream", "agent/request", "agent/request-error", "agent/turn-stopping"].includes(event)).slice(0, 4), [
-    { event: "agent/assistant-stream", options: { prepend: true } },
-    { event: "agent/request", options: { prepend: true } },
-    { event: "agent/request-error", options: { prepend: true } },
-    { event: "agent/turn-stopping", options: undefined }
-  ]);
-  assert.ok(timeline.indexOf("on:agent/request") < timeline.indexOf("inject:llm"));
-  assert.ok(timeline.indexOf("on:agent/request-error") < timeline.indexOf("inject:llm"));
-  assert.ok(timeline.indexOf("on:agent/assistant-stream") < timeline.indexOf("inject:llm"));
-  assert.ok(timeline.indexOf("on:agent/turn-stopping") < timeline.indexOf("inject:llm"));
 });

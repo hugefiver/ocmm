@@ -44,6 +44,10 @@ test("product native consumer applies exact once modes, single SDK/A gates and d
   const { installPermissionController } = await import("../src/permission-controller.ts");
   const { installDeploymentPermissionRules } = await import("../src/deployment-permission-rules.ts");
   const { DsmmDeploymentConfig } = await import("../src/deployment-config.ts");
+  const { DSMM_NATIVE_CONFIG_SCHEMA } = await import("../src/settings.ts");
+  const { permissionHostProfile } = await import("./permission-host-fixture.ts");
+  const { Loader } = await sdk("cordis-plugin-loader"), { ConfigEditor } = await sdk("dsh-config-editor"), { SettingsForms } = await sdk("dsh-settings");
+  const { mountRootInclude, readProfilePatches } = await sdk("dsh-app-boot");
   const parent = await realpath(tmpdir()), owned = await mkdtemp(join(parent, "dsmm-product-permission-"));
   ownedDirectories.push({ directory: owned, parent });
   const workspace = join(owned, "workspace"), outside = join(owned, "outside"), home = join(owned, "home");
@@ -66,8 +70,23 @@ test("product native consumer applies exact once modes, single SDK/A gates and d
     for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: "native" }], [ApprovalService, { policy: "ask" }], [SandboxPolicyService, { mode: "workspace-write", workspaceRoot: workspace }], [LocalSubprocessRuntime], [LocalSandboxProvider, {}], [SandboxPwshExecutor, { cwd: workspace, timeoutMs: 30000, maxTimeoutMs: 90000, maxOutputBytes: 4096, graceMs: 200 }], [LocalJobRegistry, { pumpPollMs: 20 }], [ShellEnv, { dshHome: home }], [ToolJobs, {}], [AgentLoop, {}]]) await ctx.plugin(plugin, config).await();
     await ctx.plugin(LocalFileSystem, { cwd: workspace }).await();
     await ctx.plugin(WorkingDirectory.default, { defaultDirectory: workspace }).await();
-    ctx.provide("profileContext", { home, dir: owned });
-    const backend = installDeploymentPermissionRules(ctx, { deployment: new DsmmDeploymentConfig(ctx, {}), assertWritable() {}, revoke: () => controller?.permissions.revokePolicy(), notify: async () => { assert.ok(controller); } });
+    const profile = permissionHostProfile(owned, home, {});
+    ctx.provide("profileContext", profile);
+    await ctx.plugin(Loader).await();
+    let deployment;
+    // This native-consumer unit Host supplies execution facts, not Core admission.
+    // Its policy source still belongs to a real Include entry and current native form.
+    const unitHost = { name: "permission-native-consumer-unit-host", Config: DSMM_NATIVE_CONFIG_SCHEMA,
+      apply(scope, config) { deployment = new DsmmDeploymentConfig(scope, config); } };
+    ctx.loader.builtins["permission-fixture-core"] = { default: unitHost };
+    assert.ok(await mountRootInclude(ctx, join(owned, "cordis.json"), readProfilePatches("dsh", profile)));
+    await ctx.loader.await();
+    const entry = ctx.loader.resolve("include:permission-core");
+    await entry.fiber.await(); assert.equal(entry.fiber.state, 2);
+    await ctx.plugin(ConfigEditor).await(); await ctx.plugin(SettingsForms).await();
+    assert.ok(ctx.settings.describe().some(row => row.ns === entry.options.id));
+    assert.equal(deployment.nativeEntry, entry);
+    const backend = installDeploymentPermissionRules(ctx, { deployment, assertWritable() {}, revoke: () => controller?.permissions.revokePolicy(), notify: async () => { assert.ok(controller); } });
     controller = installPermissionController(ctx, { rules: backend.runtime, authority: {
       current(exec) { const current = facts.get(exec.agent); assert.ok(current); return current; },
       assertCurrent(authority, exec) { assert.equal(authority.agent, exec.agent); lifetime.signal.throwIfAborted(); },

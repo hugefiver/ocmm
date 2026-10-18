@@ -6,7 +6,7 @@ export declare const MAX_PROFILE_BYTES: number;
 export declare const MAX_PROFILE_COUNT = 128;
 export declare const MAX_PROFILE_DIRECTORY_ENTRIES = 1024;
 export declare const MAX_PROFILE_REVISIONS = 1024;
-export type DsmmProfileOverlay = Pick<DsmmPluginConfig, "modelParameters" | "defaultActive" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery" | "roles" | "locale" | "deepseekV4ProCalibration" | "deepseekV4ProDefaultReasoningEffort" | "deepseekFlashCalibration" | "deepseekFlashDefaultReasoningEffort"> & {
+export type DsmmProfileOverlay = Pick<DsmmPluginConfig, "modelParameters" | "defaultActive" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery" | "roles" | "locale"> & {
     subagents?: Pick<NonNullable<DsmmPluginConfig["subagents"]>, "toolTopology">;
 };
 export interface DsmmProfileDocument {
@@ -26,6 +26,8 @@ export declare class DsmmProfileError extends Error {
 export declare function profileErrorInfo(error: unknown, fallback?: ProfileErrorCode): ProfileErrorInfo;
 export declare function validateProfileId(id: unknown): asserts id is string;
 export declare function validateProfileRevision(revision: unknown, field?: string): asserts revision is string;
+export { isConfigRevision, isProfileReference } from "./config-revision.js";
+export declare function validateAdmissionEpoch(value: unknown, field?: string): asserts value is string;
 export declare function parseProfileDocument(content: string, expectedId?: string): DsmmProfileDocument;
 export declare function validateProfileDocument(content: string, expectedId?: string): {
     document?: DsmmProfileDocument;

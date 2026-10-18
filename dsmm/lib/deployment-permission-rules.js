@@ -1,6 +1,6 @@
 import { PermissionRefusal, permissionOriginal } from "./permission-control.js";
 import { applyPermissionRulesSave, importPermissionRules, operatorPermissionRulesSource, parsePermissionRules, parsePermissionRulesSave, PermissionRulesRuntimeSync } from "./permission-rules.js";
-import { copyJson, validateSparseConfig } from "./settings.js";
+import { copyJson, validateSparseConfig, validateNativeConfig } from "./settings.js";
 import { parseHostNativeCommands } from "./permission-native-command.js";
 const entries = new WeakMap();
 const claimed = new WeakSet();
@@ -225,7 +225,7 @@ export class DeploymentPermissionRules {
         if (failures.length)
             throw new AggregateError(failures, "Permission configuration is not synchronized.");
     }
-    async transaction(participants, write) {
+    async transaction(participants, write, deferBegin = false) {
         for (const participant of participants) {
             if (participant.busy)
                 throw new PermissionRefusal("stale");
@@ -242,9 +242,15 @@ export class DeploymentPermissionRules {
                         throw new PermissionRefusal("stale");
                     participant.busy = true;
                     locked.add(participant);
-                    updates.set(participant, participant.runtime.begin(participant.snapshot().revision));
                 }
-                result = await write();
+                const begin = () => {
+                    for (const participant of participants)
+                        if (!updates.has(participant))
+                            updates.set(participant, participant.runtime.begin(participant.snapshot().revision));
+                };
+                if (!deferBegin)
+                    begin();
+                result = await write(begin);
             }
             catch (error) {
                 try {
@@ -256,6 +262,10 @@ export class DeploymentPermissionRules {
                 throw error;
             }
             await this.synchronize(updates, false);
+            // A deferred native edit still observes source/lifetime changes before returning.
+            for (const participant of participants)
+                if (!updates.has(participant))
+                    participant.runtime.getPolicy();
             return result;
         }
         finally {
@@ -264,14 +274,16 @@ export class DeploymentPermissionRules {
         }
     }
     async editNative(editor, entry, change) {
-        await this.transaction([this], () => editor.edit(entry, (current, inherited) => {
-            const next = validateSparseConfig(change(current, inherited));
+        await this.transaction([this], begin => editor.edit(entry, (current, inherited) => {
+            const next = validateNativeConfig(change(current, inherited));
             if (next.permissionControl?.nativeCommands !== undefined)
                 parseHostNativeCommands(next.permissionControl.nativeCommands);
+            validateNativeConfig(current);
+            begin();
             if (JSON.stringify(next.permissionControl?.rules) === JSON.stringify(current.permissionControl && typeof current.permissionControl === "object" ? Reflect.get(current.permissionControl, "rules") : undefined))
                 return copyJson(next);
             return copyJson(imported(next, "native-profile-settings", false));
-        }));
+        }), true);
     }
 }
 /** Install in the owned Core fiber with the public `agents` service injected. */

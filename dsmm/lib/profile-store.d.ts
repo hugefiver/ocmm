@@ -1,4 +1,4 @@
-import type { Stats } from "node:fs";
+import type { Stats, BigIntStats } from "node:fs";
 import type { ProfileReadResult, ProfileSaveRequest, ProfileSelectRequest, ProfileSelectionState, ProfileSnapshot, SessionProfileSelectRequest } from "./profile-types.js";
 import type { DsmmProfileDocument } from "./profiles.js";
 import type { ProfileDiagnostic } from "./profile-diagnostics.js";
@@ -23,13 +23,20 @@ export interface SessionProfileCommit<T> {
     /** Synchronous publication after durable commit. Must not throw or await. */
     committed(selection: LoadedSessionProfileSelection, prepared: T): void;
 }
+export interface ProfileCommit<T> {
+    prepare(selection: LoadedProfileSelection, prepared: T): void;
+    committed(selection: LoadedProfileSelection, prepared: T): void;
+}
 export interface ProfileStoreOptions {
     lockTimeoutMs?: number;
     lockPollMs?: number;
     /** Narrow test seam for a failed atomic replacement; never delete the old target. */
     rename?: (source: string, destination: string) => void;
+    /** Optional observation seam, after rename and synchronous admission publication. */
+    observe?: (path: string) => void;
 }
 interface ProfileFile {
+    identity: BigIntStats;
     bytes: Buffer;
     content: string;
     revision: string;
@@ -47,6 +54,7 @@ export declare class ProfileStore {
     private readonly timeoutMs;
     private readonly pollMs;
     private readonly rename;
+    private readonly observe?;
     private rootIdentity?;
     readonly origin: ProfileStoreMetadata["origin"];
     private readonly hostProfile?;
@@ -56,14 +64,15 @@ export declare class ProfileStore {
     static fromLegacy(legacyDir: string, options?: ProfileStoreOptions): ProfileStore;
     describe(): Promise<ProfileSnapshot & ProfileStoreMetadata>;
     read(id: string): Promise<ProfileReadResult>;
-    save(request: ProfileSaveRequest): Promise<ProfileReadResult>;
+    /** The optional fence belongs to the trusted server caller, never the saved document. */
+    save(request: ProfileSaveRequest, assertCurrent?: () => void): Promise<ProfileReadResult>;
     loadSelection(): Promise<LoadedProfileSelection>;
     loadSessionSelection(sessionId: string): Promise<LoadedSessionProfileSelection>;
     selectSession<T>(request: SessionProfileSelectRequest, epoch: string, validateCandidate: (document: DsmmProfileDocument | null) => T | Promise<T>, commit: SessionProfileCommit<T>): Promise<{
         selection: LoadedSessionProfileSelection;
         prepared: T;
     }>;
-    select<T = undefined>(request: ProfileSelectRequest, validateCandidate?: (document: DsmmProfileDocument | null) => T | Promise<T>): Promise<{
+    select<T = undefined>(request: ProfileSelectRequest, validateCandidate?: (document: DsmmProfileDocument | null) => T | Promise<T>, commit?: ProfileCommit<T>, assertCurrent?: () => void): Promise<{
         selection: LoadedProfileSelection;
         prepared: T;
     }>;
@@ -92,7 +101,7 @@ export declare class ProfileStore {
     private locked;
 }
 declare function locked<T>(directory: string, lockName: string, validateRoot: (create: boolean) => void, timeoutMs: number, pollMs: number, operation: (assertLock: () => void) => T | Promise<T>): Promise<T>;
-declare function atomicReplace(target: string, bytes: Buffer, beforeRename: (temporary: string) => void, assertAuthority: () => void, rename: (source: string, destination: string) => void, assertCurrent?: () => void): void;
+declare function atomicReplace(target: string, bytes: Buffer, beforeRename: (temporary: string) => void, assertAuthority: () => void, rename: (source: string, destination: string) => void, assertCurrent?: () => void): BigIntStats;
 declare function trustedHome(home: string): string;
 /** @internal Shared only by the fixed config file adapter; not a wire-path storage API. */
 export declare const profileStoreFilePrimitives: {
@@ -100,13 +109,16 @@ export declare const profileStoreFilePrimitives: {
     validateDirectories: typeof validateDirectories;
     status: typeof status;
     regularFile: typeof regularFile;
-    digest: typeof digest;
+    observeCommitted: typeof observeCommitted;
     boundedOption: typeof boundedOption;
     locked: typeof locked;
     atomicReplace: typeof atomicReplace;
 };
+declare function observeCommitted(path: string, owned: BigIntStats, observe?: (path: string) => void): {
+    revision: string;
+    refreshRequired?: true;
+};
 declare function boundedOption(value: number | undefined, fallback: number, minimum: number, maximum: number): number;
-declare function digest(bytes: Buffer): string;
 declare function status(path: string): Stats | undefined;
 declare function validateDirectories(directory: string, create: boolean, allowMissing?: boolean, identities?: DirectoryIdentities): boolean;
 declare function regularFile(path: string, maximum: number): ProfileFile;

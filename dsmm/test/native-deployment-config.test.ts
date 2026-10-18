@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
+import { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
 import type { DshAgent as PackageDshAgent } from "../lib/dsh-types.js";
 import { nativeConfigRun } from "./native-config-fixture.ts";
 import { runFixtureTurn } from "./native-routing-fixture.ts";
@@ -153,10 +154,10 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
     // without updating or disposing a fiber. Assert the actual lifetime seam.
     a.assertLive(); b.assertLive();
     const liveRoots = a.ctx.agents.list();
-    await assert.rejects(a.create(oldRoot), { code: "UNSUPPORTED_CAPABILITY" }, "direct child creation without managed capture cannot gain admission from parent lineage alone");
+    await assert.rejects(a.create(oldRoot), { code: "UNAUTHORIZED" }, "malformed native child headers cannot gain admission from parent lineage alone");
     assert.deepEqual(a.ctx.agents.list(), liveRoots, "failed child admission is rolled back without disposing its live parent");
     assert.equal(a.runtime.admission(asDshAgent(oldRoot)), oldAdmission);
-    assert.equal(a.lifecycle.agentDisposals, 1, "only the rejected unpublished child is disposed");
+    assert.equal(a.lifecycle.agentDisposals, 1, "only the rejected child is disposed");
     assert.equal(a.lifecycle.scopeDisposals, 0);
     assert.equal(a.lifecycle.updates, 0);
   } finally {
@@ -165,24 +166,32 @@ test("rc.2 native SettingsForms persists sparse DSMM deployment without remounti
   }
 });
 
-test("native config fixture without managed delivery allows Core DWoff but blocks DWon requests", { timeout: 20_000 }, async () => {
-  const run = nativeConfigRun();
+test("official native runtime supports Core off and on requests without an alternate owner", { timeout: 20_000 }, async () => {
+  const run = nativeConfigRun({ stockRuntime: true });
   try {
     const roles = Object.fromEntries(DSMM_ROLE_IDS.map(id => [id, id === "dsmm-orchestrator"]));
     const off = await run.createProfile("core-off", { roles });
     const offRoot = await off.create();
-    assert.equal(off.ctx.get("subagents"), undefined, "managed delivery is opt-in");
+    assert.ok(off.ctx.get("subagents") instanceof SubagentRuntime, "official stock runtime remains available without managed delivery");
+    assert.equal(off.runtime.getSettings.subagentRuntime?.().binding, "stock");
+    assert.equal(off.runtime.getSettings.subagentRuntime?.().deliveryFenceReady, true);
+    const offAdmission = off.runtime.admission(asDshAgent(offRoot));
     await runFixtureTurn(offRoot);
     assert.equal(off.adapter.calls.length, 1);
     assert.doesNotMatch(JSON.stringify(off.adapter.calls[0].messages), /DEEPWORK MODE ENABLED!/);
     assert.ok(offRoot.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
 
     const on = await run.createProfile("no-delivery-on", { roles, defaultActive: true });
+    assert.equal(on.runtime.getSettings().defaultActive, true);
+    assert.equal(on.runtime.getSettings.subagentRuntime?.().binding, "stock");
     const onRoot = await on.create();
-    assert.equal(on.runtime.getSettings(asDshAgent(onRoot)).defaultActive, true);
     await runFixtureTurn(onRoot);
-    assert.equal(on.adapter.calls.length, 0, "DWon must not reach the model without real managed delivery");
-    assert.ok(onRoot.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "error"));
+    assert.equal(on.adapter.calls.length, 1);
+    assert.match(JSON.stringify(on.adapter.calls[0].messages), /DEEPWORK MODE ENABLED!/);
+    assert.equal(on.ctx.agents.get(onRoot.id), onRoot);
+    assert.equal(off.runtime.admission(asDshAgent(offRoot)), offAdmission, "another profile must not alter the Core admission");
+    assert.equal(off.ctx.agents.get(offRoot.id), offRoot);
+    assert.equal(off.adapter.calls.length, 1);
   } finally {
     await run.dispose();
     assert.equal(existsSync(run.root), false, "remove only this run's marked fixture tree");
@@ -190,7 +199,7 @@ test("native config fixture without managed delivery allows Core DWoff but block
 });
 
 test("rc.2 native settings refuses unknown, ordinary and raw-reference edits without changing DSMM config", { timeout: 20_000 }, async () => {
-  const run = nativeConfigRun();
+  const run = nativeConfigRun({ stockRuntime: true });
   try {
     const f = await run.createProfile("refusals");
     const descriptor = f.descriptor();

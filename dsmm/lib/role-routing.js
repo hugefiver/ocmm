@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { LlmError } from "@deepseek-ai/dsh-llm";
-import { assertDsmmMetadataPersistence } from "./session-metadata.js";
+import { appendRolePolicyRecord } from "./session-metadata.js";
 import { isDsmmRoleId } from "./roles.js";
 import { isCurrentRecoveryStep } from "./recovery-policy.js";
 import { childOwnedSessionEvents, sessionEvents } from "./session-scope.js";
@@ -9,7 +10,7 @@ import { canonicalModelRouteJson, normalizeModelRouteJson, sameModelRouteJson } 
 import { DsmmMissingProviderError, modelRouteFromHeader, modelRouteToCall } from "./role-llm.js";
 const admittedRecoveryRoutes = new WeakMap();
 const routeLocks = new WeakMap();
-const agentEntries = new WeakMap();
+const agentPolicies = new WeakMap();
 export const DSMM_ROLE_POLICY_EVENT = "dsmm/role-policy";
 /** Native user selection is authority; inherited headers/default configs are not. */
 export function latestNativeModelSelection(agent) {
@@ -99,35 +100,24 @@ export function roleRouteRuntimeState(agent, settings, role, epoch) {
         ...(lock === undefined ? {} : { route: { ...lock.route } }), retries: lock?.retries ?? 0,
         rateLimitFailures: lock?.rateLimits ?? 0, switches: lock?.switches ?? 0, totalDelayMs: lock?.totalDelayMs ?? 0 };
 }
-export function rolePolicyIdentity(settings, role, epoch) {
-    if (role === undefined)
+export function liveRolePolicyIdentity(agent, settings, role, epoch) {
+    if (role === undefined) {
+        agentPolicies.delete(agent);
         return undefined;
+    }
     const policy = settings.roleRouting[role];
     const resolved = resolveRoleRuntimePolicy(settings, role);
-    const legacy = [policy?.primary, ...resolved.fallbackRoutes].every(route => route === undefined
-        || Object.keys(route).every(key => ["provider", "model", "reasoningEffort"].includes(key)));
-    const seen = new Set(policy?.primary === undefined ? [] : [JSON.stringify([policy.primary.provider, policy.primary.model])]);
-    const identityFallbacks = legacy ? resolved.fallbackRoutes.filter(route => {
-        const key = JSON.stringify([route.provider, route.model]);
-        if (seen.has(key))
-            return false;
-        seen.add(key);
-        return true;
-    }) : resolved.fallbackRoutes;
-    return createHash("sha256").update(JSON.stringify({
-        version: 2, role, epoch: epoch ?? null, primary: policy?.primary === undefined ? null : canonicalRoute(policy.primary),
-        fallbackSource: resolved.fallbackSource, fallbackRoutes: identityFallbacks.map(canonicalRoute),
-        strategy: resolved.strategy, rateLimit: resolved.rateLimit
-    })).digest("hex");
-}
-/** Durable profile choice is not permission to retain a former process's route lock. */
-export function liveRolePolicyIdentity(agent, settings, role, epoch) {
-    let entry = agentEntries.get(agent);
-    if (entry === undefined) {
-        entry = randomUUID();
-        agentEntries.set(agent, entry);
+    const fields = { role, epoch, primary: policy?.primary, levels: policy?.levels,
+        fallbackSource: resolved.fallbackSource, fallbackRoutes: resolved.fallbackRoutes,
+        strategy: resolved.strategy, rateLimit: resolved.rateLimit, modelParameters: settings.modelParameters,
+        recovery: { enabled: settings.runtimeRecovery.enabled, retryOnStatusCodes: settings.runtimeRecovery.retryOnStatusCodes,
+            retryOnCodes: settings.runtimeRecovery.retryOnCodes, maxFallbackAttempts: settings.runtimeRecovery.maxFallbackAttempts } };
+    let observed = agentPolicies.get(agent);
+    if (observed === undefined || !isDeepStrictEqual(observed.fields, fields)) {
+        observed = { fields: structuredClone(fields), identity: randomBytes(32).toString("hex") };
+        agentPolicies.set(agent, observed);
     }
-    return rolePolicyIdentity(settings, role, `${epoch ?? "unscoped"}:${entry}`);
+    return observed.identity;
 }
 function canonicalRoute(route) {
     if (Object.keys(route).every(key => ["provider", "model", "reasoningEffort"].includes(key))) {
@@ -156,7 +146,7 @@ function readPolicyMarker(event) {
     return { role: data.role, policy: data.policy };
 }
 /** Native custom events are model-hidden log facts, retained across surface compaction. */
-export async function establishRolePolicy(frame, settings, role, ctx, epoch) {
+export async function establishRolePolicy(frame, settings, role, _ctx, epoch) {
     const identity = liveRolePolicyIdentity(frame.agent, settings, role, epoch);
     const declared = role !== undefined && (Object.keys(settings.roleRouting[role] ?? {}).length > 0 || settings.runtimeRecovery.fallbackRoutes.length > 0);
     if (frame.signal.aborted)
@@ -173,14 +163,12 @@ export async function establishRolePolicy(frame, settings, role, ctx, epoch) {
         return identity;
     if (identity === undefined || role === undefined || !declared) {
         if (latest !== undefined && latest.policy !== null) {
-            assertDsmmMetadataPersistence(ctx ?? frame.agent.ctx);
-            await frame.agent.session.append(DSMM_ROLE_POLICY_EVENT, { version: 1, role: latest.role, policy: null });
+            appendRolePolicyRecord(frame.agent.session, { version: 1, role: latest.role, policy: null });
         }
         return identity;
     }
     if (latest?.role !== role || latest.policy !== identity) {
-        assertDsmmMetadataPersistence(ctx ?? frame.agent.ctx);
-        await frame.agent.session.append(DSMM_ROLE_POLICY_EVENT, { version: 1, role, policy: identity });
+        appendRolePolicyRecord(frame.agent.session, { version: 1, role, policy: identity });
     }
     return identity;
 }
@@ -203,12 +191,14 @@ export function sameModelRoute(left, right) {
 }
 /** Accepted post-policy route changes are durable host/recovery ownership, not a new primary request. */
 export function persistedRoleRoute(frame, primary, fallbacks = [], identity) {
+    const currentIdentity = agentPolicies.get(frame.agent)?.identity;
     const events = policyEvents(frame);
     let matchingPolicy = false;
     let selected;
     for (const event of events) {
         if (isPresetBoundary(frame, event) || event.type === DSMM_ROLE_POLICY_EVENT) {
-            matchingPolicy = event.type === DSMM_ROLE_POLICY_EVENT && identity !== undefined && readPolicyMarker(event)?.policy === identity;
+            const marker = event.type === DSMM_ROLE_POLICY_EVENT ? readPolicyMarker(event) : undefined;
+            matchingPolicy = identity !== undefined && identity === currentIdentity && marker?.policy === identity;
             selected = undefined;
             continue;
         }

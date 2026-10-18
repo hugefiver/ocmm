@@ -4,7 +4,7 @@ import type {} from "@deepseek-ai/dsh-settings";
 import { PermissionRefusal, permissionOriginal } from "./permission-control.js";
 import { applyPermissionRulesSave, importPermissionRules, operatorPermissionRulesSource, parsePermissionRules, parsePermissionRulesSave, PermissionRulesRuntimeSync } from "./permission-rules.js";
 import type { PermissionRulesBackend, PermissionRulesSaveAuthority, PermissionRulesSaveRequest, PermissionRuleSnapshot, PermissionRulesStatus, PermissionRulesUpdate } from "./permission-rules.js";
-import { copyJson, validateSparseConfig } from "./settings.js";
+import { copyJson, validateSparseConfig, validateNativeConfig } from "./settings.js";
 import type { DsmmPluginConfig } from "./settings.js";
 import type { DsmmDeploymentConfig, GlobalConfigSaveRequest } from "./deployment-config.js";
 import { parseHostNativeCommands } from "./permission-native-command.js";
@@ -183,7 +183,7 @@ export class DeploymentPermissionRules implements PermissionRulesBackend {
     const failures = [...new Set(settled.flatMap(result => result.status === "rejected" ? [result.reason] : []))];
     if (failures.length) throw new AggregateError(failures, "Permission configuration is not synchronized.");
   }
-  private async transaction<T>(participants: DeploymentPermissionRules[], write: () => Promise<T>): Promise<T> {
+  private async transaction<T>(participants: DeploymentPermissionRules[], write: (begin: () => void) => Promise<T>, deferBegin = false): Promise<T> {
     for (const participant of participants) {
       if (participant.busy) throw new PermissionRefusal("stale");
       if (participant.runtime.status().state !== "synced" || participant.runtime.status().savedRevision !== participant.snapshot().revision) await participant.reconcile();
@@ -196,9 +196,12 @@ export class DeploymentPermissionRules implements PermissionRulesBackend {
         for (const participant of participants) {
           if (participant.busy) throw new PermissionRefusal("stale");
           participant.busy = true; locked.add(participant);
-          updates.set(participant, participant.runtime.begin(participant.snapshot().revision));
         }
-        result = await write();
+        const begin = (): void => {
+          for (const participant of participants) if (!updates.has(participant)) updates.set(participant, participant.runtime.begin(participant.snapshot().revision));
+        };
+        if (!deferBegin) begin();
+        result = await write(begin);
       }
       catch (error) {
         try { await this.synchronize(updates, true); }
@@ -206,16 +209,20 @@ export class DeploymentPermissionRules implements PermissionRulesBackend {
         throw error;
       }
       await this.synchronize(updates, false);
+      // A deferred native edit still observes source/lifetime changes before returning.
+      for (const participant of participants) if (!updates.has(participant)) participant.runtime.getPolicy();
       return result;
     } finally { for (const participant of locked) participant.busy = false; }
   }
   async editNative(editor: PermissionConfigEditor, entry: NativeEntry, change: Parameters<NativeEdit>[1]): Promise<void> {
-    await this.transaction([this], () => editor.edit(entry, (current, inherited) => {
-      const next = validateSparseConfig(change(current, inherited));
+    await this.transaction([this], begin => editor.edit(entry, (current, inherited) => {
+      const next = validateNativeConfig(change(current, inherited));
       if (next.permissionControl?.nativeCommands !== undefined) parseHostNativeCommands(next.permissionControl.nativeCommands);
+      validateNativeConfig(current);
+      begin();
       if (JSON.stringify(next.permissionControl?.rules) === JSON.stringify(current.permissionControl && typeof current.permissionControl === "object" ? Reflect.get(current.permissionControl, "rules") : undefined)) return copyJson(next) as Record<string, unknown>;
       return copyJson(imported(next, "native-profile-settings", false)) as Record<string, unknown>;
-    }));
+    }), true);
   }
 }
 

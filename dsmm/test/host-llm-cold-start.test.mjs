@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { inspectStableBootstrap } from "../scripts/stable-native-acceptance.mjs";
+import { inspectSourceCandidateRuntime } from "./host-llm-candidate-support.mjs";
 import { preparedConfigMatches, singleUsePreparedStream, snapshotDsmmCall } from "../src/host-llm.ts";
 import { resolveRoleRuntimePolicy } from "../src/routing-policy.ts";
 
@@ -69,11 +69,6 @@ test("standard cold MAIN constructs its configured official loop only after DSMM
       { id: "agent-loop", disabled: true }, { id: "headless-startup", disabled: true }, { id: "headless-runner", disabled: true },
       { id: "session-persistence-jsonl", disabled: true },
       { id: "llm-pi-ai", config: { providers: {} } },
-      { id: "agent", disabled: true }, { id: "subagent", disabled: true },
-      { insert: [
-        { id: "dsmm-agent-registry", name: "@dsmm/dsmm/agent-registry", config: {} },
-        { id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: {} },
-      ] },
       { id: "dsmm", inject: ["subagents"], config },
     ];
     await writeFile(join(profileDir, "cordis.patch.yml"), JSON.stringify(patches));
@@ -121,7 +116,8 @@ test("standard cold MAIN constructs its configured official loop only after DSMM
     ctx = await boot();
     const ready = cold.assertReady();
     await creation.promise;
-    inspectStableBootstrap(ctx, { template: "headless" });
+    assert.deepEqual(profileContext.startedBundles, ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-headless", "@dsmm/dsmm"]);
+    inspectSourceCandidateRuntime(ctx);
     const ownerEntry = [...ctx.loader.entries()].find(entry => entry.options.id === "dsmm-llm-owner");
     assert.equal(ownerEntry.fiber.state, 2);
     assert.ok(ctx.settings.describe().some(form => form.ns === "dsmm-llm-owner"));
@@ -219,6 +215,7 @@ test("standard cold MAIN constructs its configured official loop only after DSMM
     ctx = await boot();
     cold.assertReady();
     await creation.promise;
+    inspectSourceCandidateRuntime(ctx);
     const resumed = ctx.agents.get(SessionId("dsmm-w1-cold"));
     assert.ok(resumed);
     assert.notEqual(resumed, configured);

@@ -115,9 +115,7 @@ function capture(initialRoute: ChildAdmissionCapture["invocation"]["initialRoute
     originalAdmissionEpoch: "a".repeat(64), invocation: { level: "max", initialRoute, requestedRoute: initialRoute, effortSource: "dsmm-config", routeSource: "level" },
     runtimePolicyCapture: { modules: settings.modules, skills: settings.skills, defaultActive: settings.defaultActive,
       roleRouting: settings.roleRouting, runtimePolicy: settings.runtimePolicy, workflow: settings.workflow, guards: settings.guards,
-      runtimeRecovery: settings.runtimeRecovery, deepseekV4ProCalibration: settings.deepseekV4ProCalibration,
-      deepseekV4ProDefaultReasoningEffort: settings.deepseekV4ProDefaultReasoningEffort, deepseekFlashCalibration: settings.deepseekFlashCalibration,
-      deepseekFlashDefaultReasoningEffort: settings.deepseekFlashDefaultReasoningEffort, subagents: { enableRunInBackground: false, backgroundMode: "one-shot" } },
+      runtimeRecovery: settings.runtimeRecovery, subagents: { enableRunInBackground: false, backgroundMode: "one-shot" } },
     authorityCeiling: { roles: ["dsmm-reviewer"], readOnly: true, allowRouteOverride: false, maxDepth: 1 }, toolTopology: "per-role" };
 }
 
@@ -133,7 +131,8 @@ test("v3 persists full routes and strict v1 restores historical policy without r
     assert.ok(Object.isFrozen(written.invocation.initialRoute.custom_nested));
     assert.deepEqual(await new ProfileStore(store.profileDir).readChildAdmission(input.childSessionId, input.parentSessionId), input);
     const { modelParameterPolicy: _policy, delegationMode: _delegationMode, invocation: { requestedRoute: _requested, effortSource: _source, ...invocation }, ...legacy } = capture({ provider: "fixture", model: "old", reasoningEffort: "low" });
-    const old: ChildAdmissionCapture = { ...legacy, version: 1, invocation };
+    const old: ChildAdmissionCapture = { ...legacy, version: 1, invocation, runtimePolicyCapture: { ...legacy.runtimePolicyCapture,
+      deepseekV4ProCalibration: "auto", deepseekV4ProDefaultReasoningEffort: "high", deepseekFlashCalibration: "off", deepseekFlashDefaultReasoningEffort: "low" } };
     old.childSessionId = "old-child"; old.runtimePolicyCapture.roleRouting = {};
     old.runtimePolicyCapture.runtimeRecovery.fallbackRoutes = [];
     await assert.rejects(store.createChildAdmission(old), { code: "validation" });
@@ -174,7 +173,9 @@ test("strict native route DTO codecs preserve extras while non-route unknown fie
   const parse = descriptor.result.create().parse;
   const snapshot = { sessionId: "session", globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" },
     selection: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, scope: "deployment-baseline",
-    admissionEpoch: "a".repeat(64), switchAllowed: true, profileModel: route };
+    admissionEpoch: "a".repeat(64), switchAllowed: true, profileModel: route,
+    canSelectModel: true, canToggleMode: false, toggleModeUnavailableReason: "runtime-unavailable",
+    canApplyOverlay: false, applyOverlayUnavailableReason: "new-session-required" };
   assert.deepEqual(parse(snapshot), snapshot);
   assert.throws(() => parse({ ...snapshot, profileModel: JSON.parse('{"provider":"p","model":"m","constructor":{}}') }));
 });

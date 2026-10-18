@@ -23,6 +23,7 @@ async function handleDeepworkCommand(
   invocation: DshCommandInvocation
 ): Promise<DshCommandResult> {
   const parsed = parseDeepworkCommandInput(invocation.rawInput);
+  if (parsed.action === "on" && getSettings.subagentRuntime !== undefined && !getSettings.subagentRuntime().deliveryFenceReady) return { kind: "error", text: "Deepwork runtime is unavailable; check native runtime settings and restart status." };
   if (parsed.action === "on" && !getSettings(invocation.agent).modules.deepwork.enabled) return { kind: "error", text: "Deepwork module is not admitted in this session; mode cannot enable it." };
   await controller.select(invocation.agent, parsed.action === "on", getSettings(invocation.agent).defaultActive);
 

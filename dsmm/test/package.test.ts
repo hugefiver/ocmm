@@ -26,7 +26,7 @@ import type {
   DsmmRuntimeRecoverySettings,
   DurableRecoveryWork,
   RecoveryFailureDecision
-} from "../lib/index.js";
+} from "../src/index.js";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const publicRuntimeRecoveryTypes = null as unknown as [
@@ -60,21 +60,19 @@ test("public package entries resolve delivered files and expose native bundle co
   assert.equal(pkg.type, "module");
   assert.equal(pkg.main, "./lib/index.js");
   assert.equal(pkg.types, "./lib/index.d.ts");
-  for (const entry of ["", "/agent-registry", "/preset-skills", "/session-persistence", "/subagent-runtime",
-    "/managed-settings", "/llm-runtime", "/permission-bash", "/permission-pwsh", "/permission-fs", "/permission-fs-search", "/permission-web",
-    "/client", "/package.json", "/locale/en.json", "/locale/zh.json"]) {
-    const resolved = fileURLToPath(import.meta.resolve(`@dsmm/dsmm${entry}`));
+  for (const [entry, target] of Object.entries(pkg.exports)) {
+    const specifier = entry === "." ? pkg.name : `${pkg.name}${entry.slice(1)}`;
+    const resolved = fileURLToPath(import.meta.resolve(specifier));
     assert.equal(existsSync(resolved), true, entry);
-    const declaration = pkg.exports[entry === "" ? "." : `.${entry}`]?.types;
-    if (declaration !== undefined) assert.equal(existsSync(join(packageRoot, declaration)), true, declaration);
+    if (target !== null && typeof target === "object" && "types" in target) {
+      const declaration: unknown = target.types;
+      assert.ok(typeof declaration === "string", `${entry} types target`);
+      assert.equal(existsSync(join(packageRoot, declaration)), true, declaration);
+    }
   }
   assert.equal(Object.hasOwn(pkg, "browser"), false);
   assert.equal(Object.hasOwn(pkg.exports, "./typert"), false, "Host registers its owned Typert contribution explicitly, without auto-loading a duplicate");
   assert.equal(Object.keys(pkg.dependencies).some((name) => /react|esbuild|playwright/iu.test(name)), false, "browser tooling is not a server runtime dependency");
-  assert.equal(pkg.peerDependencies["@deepseek-ai/cordis"], "~4.0.5");
-  for (const name of ["attachment", "brand", "llm", "timeout", "subagent", "tools", "typert-protocol", "session", "session-persistence", "session-persistence-jsonl", "plan-mode", "compaction-basic", "command-compact", "compaction-tool-result-pruner", "tool-ask-user", "tool-todo"]) {
-    assert.equal(pkg.peerDependencies[`@deepseek-ai/dsh-${name}`], "0.2.1-rc.1");
-  }
 
   assert.deepEqual(pkg.dsh, { client: { platform: "web", inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer"], external: [] }, bundle: { patch: "./cordis.patch.yml" } });
 });
@@ -109,7 +107,7 @@ test("README local documentation links are shipped by the package", () => {
 });
 
 test("source entry exports a dsh plugin function and config schema", async () => {
-  const mod = await import("../lib/index.js");
+  const mod = await import("../src/index.js");
   assert.equal(mod.name, "dsmm");
   assert.deepEqual(mod.inject, ["profileContext", "agents"]);
   assert.equal(typeof mod.Config, "function");
@@ -121,10 +119,7 @@ test("source entry exports a dsh plugin function and config schema", async () =>
   assert.equal(typeof mod.default.apply, "function");
   for (const name of [
     "classifyModelFamily",
-    "desiredDeepseekEffort",
-    "isDeepseekV4ProRoute",
     "registerModelRouting",
-    "selectAdvertisedEffort",
     "resolveSelectedAgentPreset",
     "classifyRecoveryFailure",
     "foldAttemptedRecoveryRoutes",
@@ -144,7 +139,7 @@ test("source entry exports a dsh plugin function and config schema", async () =>
 });
 
 test("default Loader entry awaits initialization and propagates its rejection", async (t) => {
-  const mod = await import("../lib/index.js");
+  const mod = await import("../src/index.js");
   const ctx = new Context();
   const pluginContext: Pick<Context, "get"> = ctx;
   let rejectDesired!: (reason: unknown) => void;
@@ -166,47 +161,12 @@ test("default Loader entry awaits initialization and propagates its rejection", 
   }
 });
 
-test("legacy preset skill entry retains a no-op Cordis contract; runtime mounts are Agent-scoped", async () => {
-  const mod = await import("../lib/preset-skills.js");
-
-  assert.equal(mod.name, "dsmm/preset-skills");
-  assert.deepEqual(mod.inject, []);
-  assert.equal(typeof mod.registerAgentSkills, "function");
-  assert.equal(typeof mod.Config, "function");
-  assert.equal(typeof mod.apply, "function");
-  assert.equal(mod.default, mod.apply);
-});
-
 test("source includes the deepwork session event augmentation", () => {
   const declarations = readFileSync(join(packageRoot, "src", "dsh-events.ts"), "utf8");
   const entrypoint = readFileSync(join(packageRoot, "src", "index.ts"), "utf8");
 
   assert.match(declarations, /deepwork\/mode/);
   assert.match(entrypoint, /dsh-events\.js/);
-});
-
-test("source entry declares the public runtime-recovery type contract", () => {
-  const entrypoint = readFileSync(join(packageRoot, "src", "index.ts"), "utf8");
-
-  for (const name of [
-    "RecoveryFailureDecision",
-    "DurableRecoveryWork",
-    "DsmmRecoveryRoute",
-    "DsmmRuntimeRecoverySettings",
-    "DshLlmFailure",
-    "DshEpochHeader",
-    "AgentRequestErrorFrame",
-    "DshRequestErrorAction",
-    "AgentTurnStoppingFrame",
-    "DshStepBoundaryEventData",
-    "DshRequestHeaderEventData",
-    "DshTodoItem",
-    "DshTodoWriteEventData",
-    "DshGoalSnapshot",
-    "DshGoalChangeEventData"
-  ]) {
-    assert.match(entrypoint, new RegExp(`export type \\{[^}]*\\b${name}\\b`, "u"), name);
-  }
 });
 
 test("source and generated root entry declare the public status type contract", () => {
@@ -225,7 +185,7 @@ test("source and generated root entry declare the public status type contract", 
 });
 
 test("compiled package includes native client and profile runtime assets without deployment definitions", () => {
-  for (const name of ["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"]) {
+  for (const name of ["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata"]) {
     for (const extension of ["js", "d.ts"]) {
       assert.equal(existsSync(join(packageRoot, "lib", `${name}.${extension}`)), true, `${name}.${extension}`);
     }

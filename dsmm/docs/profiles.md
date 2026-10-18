@@ -1,6 +1,6 @@
 # Deepwork runtime profiles
 
-This guide describes the built source configuration. A published `@dsmm/dsmm@0.2.0` package doesn't automatically contain uncommitted source features; check the actual artifact before using these interfaces. Package availability and Host compatibility are separate from configuration validity. See [compatibility](compatibility.md) and [releasing](releasing.md).
+DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`. See [compatibility](compatibility.md) for installation boundaries.
 
 A named Deepwork profile is a runtime-policy document, not a native deployment profile or Agent preset. Open **Settings → Deepwork Profiles** to browse and edit it. Native **Plugins → DSMM** edits deployment layers instead, as described in [settings and status](settings-status.md).
 
@@ -15,9 +15,9 @@ A named Deepwork profile is a runtime-policy document, not a native deployment p
 
 Browsing doesn't activate anything. **Save profile** doesn't select or apply it, even when its ID is already selected. **Set as future default** pins the saved revision, not the dirty draft, and leaves existing Agents unchanged. **Use baseline for future sessions** clears that default without deleting documents.
 
-**Apply profile to current session** and **Pin baseline for current session** are separate actions. They target the native view's exact session ID, reserve a truly idle ordinary root, and require both selection CAS and the current admission epoch. Busy, maintenance-owned, disposed, replaced, child or unauthorized targets refuse; nothing is queued. A successful change updates only that root and future children. Existing children keep their original captures.
+**Apply profile to current session** and **Pin baseline for current session** are unavailable in this version (`canApplyOverlay:false`, `new-session-required`). Save and select a future default, then create a new session. Nothing is queued, restarted or silently applied to the current root or its children.
 
-The compact Conversation header menu switches the current-session profile while preserving the native model. Its separate **Use profile model** action asks native model selection to use the current admitted immutable profile's declared main model. It doesn't apply a later saved draft. Native model-default persistence follows the Models tab; newer manual model or effort intent wins. Sessionless controls never create a session.
+The compact Conversation header menu shows the current admission separately from the future default. **Use profile model** asks native model selection to use the admitted immutable configuration's declared main model, not a later saved draft. It doesn't write an overlay pointer or increment the admission epoch. Native model-default persistence follows the Models tab; newer manual model or effort intent, including same-value reselection, wins. `canSelectModel`, `canToggleMode` and `canApplyOverlay` have independent reasons: unavailable live Apply doesn't disable ordinary model selection or mode switching. Sessionless controls never create a session.
 
 ## Document format
 
@@ -47,9 +47,9 @@ A document contains exactly `version: 1`, a filename-matching `id`, optional `la
 
 The provider/model must resolve through native DSH, and an exact effort must be supported. Catalog listings are advisory, not authentication or network-health checks. Manual/unlisted routes remain editable. See [model routing](model-routing.md) for level selection and route precedence.
 
-Allowed runtime fields are `defaultActive`, `locale`, `roles`, `roleRouting`, `runtimePolicy`, `workflow`, `guards`, `runtimeRecovery`, `subagents.toolTopology`, and the `deepseekV4Pro`/`deepseekFlash` Calibration and DefaultReasoningEffort fields. Skills, prompt content, preset installation, LSP, session persistence, provider/account credentials, background/depth settings and `subagents.allowRouteOverride` remain deployment-only. `modules` is global-only. Unknown fields are rejected.
+Allowed runtime fields are `defaultActive`, `locale`, `roles`, `roleRouting`, `modelParameters`, `runtimePolicy`, `workflow`, `guards`, `runtimeRecovery`, and `subagents.toolTopology`. Skills, prompt content, preset installation, LSP, provider/account credentials, background/depth settings and `subagents.allowRouteOverride` aren't named-profile fields. Native persistence remains Host-owned. `modules` is global-only. Unknown fields are rejected.
 
-`deepseekV4ProMaxReasoningPresets` and `deepseekFlashMaxReasoningPresets` are rejected with `deprecated-field`. They aren't silently ignored or migrated. Configure explicit `roleRouting[id].levels.low/high/max` instead; `normal` is the invocation default, not a configurable level entry. Orchestrator levels aren't supported.
+The `deepseekV4Pro`/`deepseekFlash` Calibration, DefaultReasoningEffort and MaxReasoningPresets fields are rejected with `deprecated-field`. They aren't silently ignored or migrated. All models use native capabilities, `modelParameters` and explicit `roleRouting[id]` primary/fallback/level parameters. `normal` is the invocation default, not a configurable level entry. Orchestrator levels aren't supported.
 
 ## Inheritance and ceilings
 
@@ -65,16 +65,20 @@ Structured controls and Advanced JSONC edit the same draft. Path edits preserve 
 
 The only nonblocking warning is `blank-label`: the profile ID is used for display, and the original document can still be saved and selected. Saved, draft, future-pin and current-admission warnings are distinct. Validation errors carry a stable reason, schema-safe field and, when available, JSONC offset/length and line/column. Unknown key names aren't echoed as trusted diagnostic fields. Duplicate keys, unsafe keys, malformed routes, unsupported values and retired fields block validation.
 
-Saves and selections require expected revisions. Cooperative writers share a lock, recheck the revision before commit, and use same-directory atomic replacement. A conflict retains the draft and prior selection: refresh and reconcile explicitly. A non-cooperating editor can still race between the final recheck and rename; this isn't a universal external-editor transaction. Failed pointer commits retain the prior selection, though an unused immutable revision may remain.
+Saves and selections require expected versions. File `revision` values use `stat-v1-<mtimeNs>-<ctimeNs>` from safe file observations; they distinguish ordinary versions, not content integrity. Cooperative writers share a lock, recheck before commit, and use same-directory atomic replacement. Precommit failures retain the prior selection, though an unused snapshot may remain. Same-stat content changes and non-cooperating final-rename races are not detected or prevented by a version marker.
+
+Successful rename is the commit point. Admission preparation finishes before rename and publication happens synchronously once. Failure to observe the final target, including replacement by another file, still returns committed success with `selectionRevision` or `revision` set to `unavailable` and `refreshRequired:true`. Refresh before another mutation; `unavailable` is not a valid expected revision. A normal save returns the version a subsequent read observes, not staging-file timestamps.
 
 ## Storage and lifetime
 
 The central store is `<resolvedDshHome>/plugins/dsmm/profiles/`, a DSMM convention. Trusted home resolution uses explicit `profileContext.home`, then `DSH_HOME`, then the official `~/.dsh` default. Shared named drafts and immutable revisions are separate from selection/session state scoped to canonical native profile identity and the actual DSMM entry ID. Reads don't create files or locks. Clients and models can't choose arbitrary roots or entry identities.
 
-An old `<profileContext.dir>/dsmm-profiles` library is unsupported by 0.3.0. It remains untouched and is not replaced by a same-name central document. Invalid, missing, old-format, linked, unstable, or digest-mismatched references refuse. There is no automatic copy, import, migration, rewrite, or source deletion.
+Future-default selection pins an exclusive `snapshot-v1-<UUID>` file in `.revisions`; it never overwrites an older snapshot. Selection pointers keep the ID and immutable snapshot reference. Optional `sourceRevision` relates that snapshot to the saved document; missing values mean unknown, not equal. Disk selection revisions are CAS observations, not proof that an externally edited pointer has been admitted. No reference authorizes fallback to the latest draft.
 
-Startup freezes deployment and mounted capabilities before consumers install. New ordinary roots capture current valid desired deployment plus the selected immutable overlay. Existing roots, including blank ones, keep their full captures; idle profile Apply replaces only the allowed overlay on that root's old deployment baseline. `getSettings(agent)` is authoritative for an existing Agent. Cold resume creates a new live admission from current valid deployment and its committed sidecar, or the scoped future default when no sidecar exists; it doesn't restore an exited process's memory snapshot.
+An old `<profileContext.dir>/dsmm-profiles` library is unsupported. It remains untouched and is not replaced by a same-name central document. Invalid, missing, linked or unstable references refuse. File/path, size, schema and session identity checks remain mandatory. There is no automatic copy, import, migration, rewrite or source deletion.
 
-Profile Apply never changes the native root model, remounts startup services or upgrades role permissions. Deepwork mode intent is separately saved and survives profile changes. Children retain their original route/locale/authority evidence, intersected with current exact-parent authority for delivery; see [Agent presets and child control](agent-presets.md).
+Startup freezes mounted capabilities before consumers install. New ordinary roots capture current valid desired deployment plus the selected immutable overlay within that ceiling. Existing roots, including blank ones, and their future children keep their admitted baseline. `getSettings(agent)` is authoritative for an existing Agent. Cold DSMM resume without a trusted live admission is unavailable; a saved sidecar, same-name document or display record can't restore execution authority. History remains preserved. Read-only observation doesn't resume a session.
+
+Saving or selecting a future default never changes the native root model, remounts startup services or upgrades role permissions. Deepwork mode intent is separate: explicit off wins over DW preset defaults and doesn't remove persona/read-only policy. Live children retain their original route, locale and authority, with exact-parent checks for control; see [Agent presets and child control](agent-presets.md).
 
 *Author's note: For a DSH operator editing named policy; save first, then choose the intended future or current-session scope explicitly.*

@@ -2,7 +2,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import { PiAiAdapter, Config } from "@deepseek-ai/dsh-llm-pi-ai";
 import type { Options, PiAiAdapterOptions } from "@deepseek-ai/dsh-llm-pi-ai";
 import type { LlmAdapter } from "@deepseek-ai/dsh-llm";
-import type { DsmmLlmGeneration } from "./host-llm.js";
+import type { DsmmLlmCallConfig, DsmmLlmGeneration } from "./host-llm.js";
 import type { DsmmLlmRouteResolver } from "./role-llm.js";
 export interface DsmmPiAiOwnerOptions {
     readonly config: Options;
@@ -14,6 +14,8 @@ export interface DsmmPiAiOwnerOptions {
 export interface DsmmPiAiProviderOwner extends DsmmLlmRouteResolver {
     readonly stockAdapter: PiAiAdapter;
     readonly providers: readonly string[];
+    requiresRaw(config: DsmmLlmCallConfig): boolean;
+    supportsNativeStop(provider: string): boolean;
     generation(provider: string): DsmmLlmGeneration;
 }
 declare module "@deepseek-ai/cordis" {

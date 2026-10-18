@@ -22,16 +22,16 @@ export interface ResolvedRoleInvocation {
 }
 export declare function duringRoleInvocation<T>(parent: DshAgent, invocation: ResolvedRoleInvocation, operation: () => T): T;
 export declare function currentRoleInvocation(parent: DshAgent, target: DsmmRoleId): ResolvedRoleInvocation | undefined;
-export declare function bindRoleInvocation(agent: DshAgent, invocation: ResolvedRoleInvocation, original: ChildAdmissionCapture | undefined): void;
+export declare function bindRoleInvocation(agent: DshAgent, invocation: ResolvedRoleInvocation, original?: ChildAdmissionCapture): void;
 export declare function capturedRoleInvocation(agent: DshAgent): ResolvedRoleInvocation | undefined;
 export declare function capturedOriginalRoleInvocation(agent: DshAgent): ChildAdmissionCapture["invocation"] | undefined;
 /** Complete selections replace model and effort together; effort-only selections narrow candidates. */
 export declare function resolveRoleInvocation(parent: Agent, target: DsmmRoleId, settings: DsmmSettings, signal: AbortSignal, options?: DsmmInvocationOptions, nativeOptions?: AgentOptions): Promise<ResolvedRoleInvocation>;
 export declare function invocationAgentOptions(invocation: ResolvedRoleInvocation, options?: AgentOptions): AgentOptions;
 export declare function invocationView(invocation: ResolvedRoleInvocation, label: string, mode: DsmmInvocationView["mode"], ids?: Pick<DsmmInvocationView, "runId" | "childId" | "jobId">): {
+    runId?: string | undefined;
     childId?: string | undefined;
     jobId?: string | undefined;
-    runId?: string | undefined;
     role: "dsmm-orchestrator" | "dsmm-planner" | "dsmm-plan-critic" | "dsmm-builder" | "dsmm-reviewer" | "dsmm-oracle" | "dsmm-oracle-2nd" | "dsmm-creative" | "dsmm-code-search" | "dsmm-doc-search" | "dsmm-clarifier" | "dsmm-media-reader" | "dsmm-frontend" | "dsmm-hard-reasoning" | "dsmm-research" | "dsmm-quick" | "dsmm-coding" | "dsmm-normal-task" | "dsmm-complex" | "dsmm-deep" | "dsmm-documenting" | "dsmm-cross-cutting";
     label: string;
     level: DsmmInvocationLevel;

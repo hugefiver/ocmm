@@ -1,15 +1,6 @@
-import Schema from "@deepseek-ai/schemastery";
-import type { DshContext } from "./dsh-types.js";
-import type { DsmmSkillName } from "./skills.js";
+import type { DshAgent, DshContext } from "./dsh-types.js";
 import type { DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
-export declare const name = "dsmm/preset-skills";
-export declare const inject: readonly [];
-export interface PresetSkillsConfig {
-    skills?: DsmmSkillName[];
-}
-export declare const Config: Schema<PresetSkillsConfig>;
-export declare function apply(ctx: DshContext, config?: PresetSkillsConfig): void;
-export declare function registerAgentSkills(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter): void;
-export default apply;
+/** Admission owns installation; mode changes only invalidate this Agent's lazy provider. */
+export declare function registerAgentSkills(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, agent: DshAgent, lifetime: AbortSignal): void;
 //# sourceMappingURL=preset-skills.d.ts.map

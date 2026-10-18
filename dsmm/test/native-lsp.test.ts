@@ -9,9 +9,10 @@ import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import type { DshAgent } from "../lib/dsh-types.js";
 import type { DshContext } from "../lib/dsh-types.js";
 import { DsmmDeploymentConfig } from "../lib/deployment-config.js";
+import { parseLspSmokeCommand } from "../lib/lsp.js";
 
 for (const enabled of [false, true]) {
-  test(`DSMM keeps its external LSP closed with retained enabled=${enabled} configuration`, async () => {
+  test(`default-disabled native LSP retains future enabled=${enabled} configuration without changing its running admission`, async () => {
     const command = "dsmm-retained-lsp-executable";
     let lspSpawns = 0;
     const spawn = childProcess.spawn;
@@ -27,21 +28,20 @@ for (const enabled of [false, true]) {
         fixtureTools: [{ name: "mcp__host_lsp__status", description: "Host-owned LSP status", parameters: {},
           output: { schema: { type: "string" }, render: () => [{ type: "text", text: "host LSP" }] },
           async execute() { hostCalls++; return "host LSP"; } }],
-        async beforeDsmm(ctx) {
-          const deployment = new DsmmDeploymentConfig(ctx as unknown as DshContext, {});
-          await deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["lsp"],
-            value: { enabled, command, args: ["mcp"], failOnStartupError: true } }] }, () => {});
-        }
       });
       const agent = await f.create();
+      const desired = new DsmmDeploymentConfig(f.ctx as unknown as DshContext, {});
+      await desired.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["lsp"],
+        value: { enabled, command, args: ["mcp"], failOnStartupError: true } }] }, () => {});
       const state = f.ctx.get("dsmmLspState")!();
       assert.deepEqual(state, { state: "disabled", tools: [] });
       assert.equal(lspSpawns, 0);
       assert.equal(agent.ctx.get("tools")!.get("mcp__dsmm_lsp__status", agent), undefined);
       const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
       const settings = runtime.getSettings(agent as unknown as DshAgent);
-      assert.equal(settings.lsp.enabled, enabled);
-      const deployment = f.ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig;
+      assert.equal(settings.lsp.enabled, false);
+      const deployment = f.ctx.get("dsmmDeploymentConfig");
+      assert.ok(deployment);
       assert.equal((await deployment.readGlobal()).config.lsp?.enabled, enabled);
       const status = createDsmmStatusSnapshot({ agent: agent as unknown as DshAgent, settings, modeActive: true,
         admission: runtime.admission(agent as unknown as DshAgent) });
@@ -57,3 +57,20 @@ for (const enabled of [false, true]) {
     }
   });
 }
+
+test("explicitly enabled LSP uses the real host MCP bridge and exposes its status tool", {
+  skip: process.env.DSMM_TEST_DSH_ENTRY === undefined ? "not covered: explicit enabled LSP requires real host anchor DSMM_TEST_DSH_ENTRY" : false,
+  timeout: 30_000,
+}, async () => {
+  const [command, ...args] = parseLspSmokeCommand(process.env.DSMM_LSP_SMOKE_COMMAND, ["ocmm-lsp", "mcp"]);
+  const f = await nativeRoutingFixture({ defaultActive: true, lsp: { enabled: true, command, args, failOnStartupError: true } });
+  try {
+    const agent = await f.create();
+    const state = f.ctx.get("dsmmLspState")!();
+    assert.equal(state.state, "ready", JSON.stringify(state));
+    assert.ok(state.tools.includes("mcp__dsmm_lsp__status"));
+    const result = await agent.ctx.get("tools")!.execute({ agent, name: "mcp__dsmm_lsp__status", arguments: {},
+      callId: ToolCallId("enabled-lsp-status"), signal: new AbortController().signal });
+    assert.equal(result.isError, false, JSON.stringify(result));
+  } finally { await f.dispose(); }
+});

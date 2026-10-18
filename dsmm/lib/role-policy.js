@@ -1,584 +1,212 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { currentManagedCreation } from "./agent-registry.js";
-import { delegationDepthOf, foldSubagentDescriptor, SubagentError } from "@deepseek-ai/dsh-subagent";
+import { SubagentError, delegationDepthOf } from "@deepseek-ai/dsh-subagent";
 import { symbols } from "@deepseek-ai/cordis";
-import { DSMM_ROLE_IDS, DSMM_ROLES, allowedRoleChildren, isDsmmRoleId } from "./roles.js";
+import { DSMM_ROLES, allowedRoleChildren, isDsmmRoleId } from "./roles.js";
 export { allowedRoleChildren } from "./roles.js";
-import { copyJson, freezeSettings, isRootRoleEnabled } from "./settings.js";
-import { admissionFromChildCapture, parseChildAdmissionCapture } from "./child-capture.js";
-import { bindRoleInvocation, currentRoleInvocation, resolveRoleInvocation } from "./role-invocation.js";
-import { captureRoleRuntimePolicy, resolveRoleRuntimePolicy } from "./routing-policy.js";
-import { childOwnedSessionEvents, resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
-import { resolvedModelParameterPolicy } from "./model-parameter-policy.js";
-import { modelRouteFromCall, projectModelRouteParameters } from "./role-llm.js";
-import { DsmmProfileError } from "./profiles.js";
+import { isRootRoleEnabled } from "./settings.js";
+import { bindRoleInvocation } from "./role-invocation.js";
+import { captureRoleRuntimePolicy } from "./routing-policy.js";
+import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
 import { scopeParentOf } from "./native-scope.js";
 const liveIdentities = new WeakMap();
 const toolIdentities = new WeakMap();
 const controlledDefinitions = new WeakSet();
 export const READONLY_ROLE_DENIED_TOOLS = ["write", "edit", "bash", "pwsh"];
-export function inheritToolFilter(parent, requested) {
-    if (parent === undefined && requested === undefined)
-        return undefined;
-    const allow = parent?.allow === undefined ? requested?.allow : requested?.allow === undefined ? parent.allow
-        : parent.allow.filter((name) => requested.allow.includes(name));
-    const deny = [...new Set([...parent?.deny ?? [], ...requested?.deny ?? []])];
-    return Object.freeze({ ...(allow === undefined ? {} : { allow: Object.freeze([...allow]) }),
-        ...(parent?.deny === undefined && requested?.deny === undefined ? {} : { deny: Object.freeze(deny) }) });
-}
-export function resolveAdmittedDsmmRole(agent, settings, active) {
-    if (!settings.modules.deepwork.enabled)
-        return undefined;
-    const identity = liveIdentities.get(agent)?.identity;
-    return identity?.role === undefined ? resolveEffectiveDsmmRole(agent, settings, active)
-        : identity.role !== undefined && settings.roles[identity.role] ? identity.role : undefined;
-}
 const readTools = new Set(["read", "glob", "grep", "read_image", "web_search", "web_fetch", "skill", "load_skill", "structured_output", "send_message", "interrupt_agent", "exit_plan_mode", "ask_user_question", "todo_write", "job_output", "job_list", "job_kill"]);
 const readLsp = new Set(["status", "diagnostics", "goto_definition", "find_references", "find_symbol_related", "symbols", "prepare_rename"]);
 export function roleToolName(role) { return role.replace(/-/gu, "_"); }
-export function roleFromToolName(name) {
-    return name === "explore" ? "dsmm-code-search" : DSMM_ROLES.find((row) => roleToolName(row.id) === name)?.id;
+export function roleFromToolName(name) { return name === "explore" ? "dsmm-code-search" : DSMM_ROLES.find(row => roleToolName(row.id) === name)?.id; }
+export function readonlyRoleTool(name, settings) { return readTools.has(name) || name === `mcp__${settings.lsp.serverName}__${name.split("__").at(-1)}` && readLsp.has(name.split("__").at(-1)); }
+export function inheritToolFilter(parent, requested) {
+    if (parent === undefined && requested === undefined)
+        return undefined;
+    const allow = parent?.allow === undefined ? requested?.allow : requested?.allow === undefined ? parent.allow : parent.allow.filter(name => requested.allow.includes(name));
+    return Object.freeze({ ...(allow === undefined ? {} : { allow: Object.freeze([...allow]) }), deny: Object.freeze([...new Set([...parent?.deny ?? [], ...requested?.deny ?? []])]) });
 }
-export function readonlyRoleTool(name, settings) {
-    return readTools.has(name) || name === `mcp__${settings.lsp.serverName}__${name.split("__").at(-1)}`
-        && readLsp.has(name.split("__").at(-1));
+export function resolveAdmittedDsmmRole(agent, settings, active) {
+    return liveIdentities.get(agent)?.role ?? resolveEffectiveDsmmRole(agent, settings, active);
 }
-/** Identity admission only: native services retain every run, inbox and retry lifecycle. */
+/** Role and exact-call restrictions; no child creation or execution owner. */
 export class DsmmRolePolicy {
     ctx;
     getSettings;
     mode;
-    calls = new AsyncLocalStorage();
     executions = new AsyncLocalStorage();
     toolCalls = new WeakMap();
-    providers = new WeakSet();
-    continuableCreations = new Map();
-    preparedInvocations = new WeakMap();
-    preparedCaptures = new WeakMap();
-    collaborators;
     constructor(ctx, getSettings, mode) {
         this.ctx = ctx;
         this.getSettings = getSettings;
         this.mode = mode;
-        ctx.effect?.(() => () => { for (const pending of this.continuableCreations.values())
-            pending.detach(); this.continuableCreations.clear(); });
     }
-    captureProvider(provider) { this.providers.add(provider); }
-    ownsProvider(provider) { return this.providers.has(provider); }
-    revokeResidency(agent) { this.collaborators?.revokeParent(agent, "native-run-disposed"); }
-    configureAdmission(collaborators) {
-        this.collaborators = collaborators;
-        return { prepare: (agent, parent, ticket, signal) => this.prepareChildAdmission(agent, parent, ticket, signal),
-            validateRole: (agent, parent, candidate) => this.validatePreparedRole(agent, parent, candidate) };
-    }
+    agents() { const agents = this.ctx.get?.("agents"); if (!agents)
+        throw new SubagentError("Native registry unavailable", "UNAUTHORIZED"); return agents; }
+    assertLive(agent) { if (!agent.id || this.agents().get(agent.id) !== agent)
+        throw new SubagentError("Exact live Agent required", "UNAUTHORIZED"); }
+    selected(agent) { return agent.ctx.get("agentPresets")?.composedPreset(agent.ctx) ?? resolveSelectedAgentPreset(agent.session); }
     validateRootRole(agent, admission) {
         this.assertLive(agent);
-        this.assertPlannerRootAdmission(agent, admission.settings);
-        const selected = agent.ctx?.get?.("agentPresets")?.composedPreset(agent.ctx)
-            ?? resolveSelectedAgentPreset(agent.session);
-        const implicit = !selected?.startsWith("dsmm-") && admission.settings.modules.deepwork.enabled && this.mode.active(agent, admission.settings.defaultActive) ? "dsmm-orchestrator" : undefined;
-        const role = selected?.startsWith("dsmm-") ? selected : implicit;
-        if (role !== undefined && (!isDsmmRoleId(role) || !admission.settings.modules.deepwork.enabled || !admission.settings.roles[role]
-            || role === "dsmm-planner" && !isRootRoleEnabled(admission.settings, role))) {
-            throw new SubagentError("Standing DSMM root role is not admitted", "UNAUTHORIZED");
-        }
+        const selected = this.selected(agent);
+        if (selected?.startsWith("dsmm-") && (!isDsmmRoleId(selected) || !isRootRoleEnabled(admission.settings, selected)))
+            throw new SubagentError("Preset is not eligible as a root", "UNAUTHORIZED");
     }
-    recordContinuableCreation(childId, parent, role, invocation, expectedEpoch, signal) {
-        signal.throwIfAborted();
-        const admitted = this.assertDelegation(parent, role);
-        if (admitted.epoch !== expectedEpoch)
-            throw new SubagentError("Parent admission changed during continuable preflight", "UNAUTHORIZED");
-        const abort = () => { this.continuableCreations.delete(childId); };
-        signal.addEventListener("abort", abort, { once: true });
-        this.continuableCreations.set(childId, { parent, role, epoch: admitted.epoch, invocation, detach: () => signal.removeEventListener("abort", abort) });
-    }
-    async prepareChildAdmission(agent, parent, ticket, signal) {
-        signal.throwIfAborted();
-        ticket.signal.throwIfAborted();
+    bindChild(agent, parent, admission, invocation, maximum, toolFilter) {
         this.assertLive(agent);
         this.assertLive(parent);
-        if (ticket.parent !== parent || this.getSettings.admission?.(parent) !== ticket.admission || ticket.parentEpoch !== ticket.admission.epoch)
-            throw new SubagentError("Child preparation requires the exact parent admission ticket", "UNAUTHORIZED");
-        const call = this.calls.getStore(), pending = this.continuableCreations.get(agent.id);
-        this.continuableCreations.delete(agent.id);
-        pending?.detach();
-        const descriptor = foldSubagentDescriptor(childOwnedSessionEvents(agent.session));
-        let invocation = call?.parent === parent ? currentRoleInvocation(parent, call.role) : pending?.parent === parent ? pending.invocation : undefined;
-        if (invocation === undefined && pending?.parent === parent) {
-            if (pending.epoch !== ticket.parentEpoch || descriptor?.mode !== "continuable")
-                throw new SubagentError("Fresh continuable identity or parent epoch changed", "UNAUTHORIZED");
-            const explicit = descriptor.agentProvider === undefined && descriptor.agentModel === undefined && descriptor.agentReasoningEffort === undefined ? undefined
-                : { provider: descriptor.agentProvider, model: descriptor.agentModel, reasoningEffort: descriptor.agentReasoningEffort };
-            invocation = await resolveRoleInvocation(parent, pending.role, ticket.admission.settings, signal, {}, explicit);
-            signal.throwIfAborted();
-            ticket.signal.throwIfAborted();
-        }
-        if (invocation === undefined) {
-            if (this.collaborators === undefined)
-                throw new SubagentError("Original child evidence resolver is unavailable", "UNAUTHORIZED");
-            const evidence = await this.collaborators.resolveOriginalEvidence(ticket, agent.id, signal);
-            signal.throwIfAborted();
-            ticket.signal.throwIfAborted();
-            if ("mode" in evidence || evidence.version !== 3)
-                throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
-            return { evidence, admission: admissionFromChildCapture(evidence, this.collaborators.nativeSubstrate), creation: false };
-        }
-        if ((call?.parent === parent ? call.epoch : pending.epoch) !== ticket.parentEpoch)
-            throw new SubagentError("Child invocation parent epoch changed", "UNAUTHORIZED");
-        const settings = ticket.admission.settings, parentIdentity = this.identity(parent);
-        const filter = inheritToolFilter(parentIdentity.toolFilter, call?.toolFilter ?? (descriptor?.mode === "continuable" ? descriptor.toolFilter : undefined));
-        const runtimePolicyCapture = copyJson({ modules: { deepwork: settings.modules.deepwork }, roleRouting: settings.roleRouting,
-            runtimePolicy: settings.runtimePolicy, workflow: settings.workflow, guards: settings.guards, runtimeRecovery: settings.runtimeRecovery,
-            defaultActive: settings.defaultActive, deepseekV4ProCalibration: settings.deepseekV4ProCalibration,
-            deepseekV4ProDefaultReasoningEffort: settings.deepseekV4ProDefaultReasoningEffort, deepseekFlashCalibration: settings.deepseekFlashCalibration,
-            deepseekFlashDefaultReasoningEffort: settings.deepseekFlashDefaultReasoningEffort, skills: settings.skills,
-            subagents: { enableRunInBackground: settings.subagents.enableRunInBackground, backgroundMode: settings.subagents.backgroundMode } });
-        if (invocation.routeSource === "level" || invocation.routeSource === "invocation-route") {
-            const { reasoningEffort, ...route } = invocation.requestedPolicy?.primary ?? invocation.requestedRoute ?? invocation.initialRoute;
-            runtimePolicyCapture.roleRouting[invocation.target] = { ...runtimePolicyCapture.roleRouting[invocation.target],
-                primary: { ...route, ...(invocation.exactEffort && reasoningEffort !== undefined ? { reasoningEffort } : {}) },
-                fallbackRoutes: (invocation.requestedPolicy ?? invocation.policy).fallbackRoutes.map(route => ({ ...route })) };
-        }
-        const capture = parseChildAdmissionCapture({ version: 3, childSessionId: agent.id, parentSessionId: parent.id, role: invocation.target,
-            delegationMode: currentManagedCreation()?.delegationMode,
-            modelParameterPolicy: invocation.modelParameterPolicy ?? resolvedModelParameterPolicy(ticket.admission),
-            profilePin: ticket.admission.profile, originalAdmissionEpoch: ticket.parentEpoch,
-            invocation: { level: invocation.effectiveLevel, initialRoute: invocation.initialRoute, requestedRoute: invocation.requestedRoute ?? invocation.initialRoute,
-                effortSource: invocation.effortSource ?? (invocation.routeSource === "inherited" ? "native" : "dsmm-config"), routeSource: invocation.routeSource }, runtimePolicyCapture,
-            authorityCeiling: { roles: DSMM_ROLE_IDS.filter(id => settings.roles[id]), readOnly: this.readOnly(parentIdentity) || DSMM_ROLES.find(row => row.id === invocation.target).access === "read-only",
-                ...(filter === undefined ? {} : { toolFilter: filter }), allowRouteOverride: settings.subagents.allowRouteOverride,
-                maxDepth: settings.subagents.maxDepth ?? call?.maxDepth ?? parent.ctx.get("subagents").resolveMaxDepth() },
-            ...(settings.locale === undefined ? {} : { locale: settings.locale }), toolTopology: settings.subagents.toolTopology });
-        this.preparedInvocations.set(agent, invocation);
-        this.preparedCaptures.set(agent, capture);
-        return { evidence: capture, admission: admissionFromChildCapture(capture, this.collaborators?.nativeSubstrate ?? settings), creation: true };
+        this.assertDelegation(parent, invocation.target);
+        if (!this.agents().isOwnedBy(agent.id, parent) || agent.session.header?.parentSession !== parent.id || this.selected(agent) !== invocation.target)
+            throw new SubagentError("Child lineage or composition mismatch", "UNAUTHORIZED");
+        if (maximum !== undefined && delegationDepthOf(agent) > maximum)
+            throw new SubagentError("Delegation depth exceeded", "UNAUTHORIZED");
+        const upstream = this.identity(parent);
+        liveIdentities.set(agent, Object.freeze({ role: invocation.target, child: true, parent, epoch: admission.epoch,
+            readOnly: this.readOnly(upstream) || DSMM_ROLES.find(row => row.id === invocation.target).access === "read-only",
+            toolFilter: inheritToolFilter(inheritToolFilter(upstream.toolFilter, toolFilter), this.visibleToolCeiling(parent)) }));
+        bindRoleInvocation(agent, invocation);
+        captureRoleRuntimePolicy(admission.settings, invocation.target, invocation.policy);
     }
-    /** Used at A's single awaited completion point; old original epochs remain valid facts. */
-    validatePreparedRole(agent, parent, candidate) {
-        this.assertLive(agent);
-        this.assertLive(parent);
-        if ("mode" in candidate.evidence || candidate.evidence.version !== 3)
-            throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
-        const evidence = parseChildAdmissionCapture(candidate.evidence);
-        if (!candidate.creation && !candidate.retained && !("mode" in evidence) && evidence.version === 3 && evidence.delegationMode === "one-shot")
-            throw new SubagentError("One-shot child cannot acquire a new residency", "UNAUTHORIZED");
-        if (evidence.childSessionId !== agent.id || evidence.parentSessionId !== parent.id || agent.session.header.parentSession !== parent.id || !this.agents().isOwnedBy(agent.id, parent))
-            throw new SubagentError("Child evidence does not match exact native lineage", "UNAUTHORIZED");
-        this.assertDelegation(parent, evidence.role);
-        const descriptor = foldSubagentDescriptor(childOwnedSessionEvents(agent.session));
-        if (descriptor === undefined ? !candidate.creation || this.preparedInvocations.get(agent)?.target !== evidence.role
-            : descriptor.provider !== `dsmm-role-${evidence.role.slice(5)}` || !candidate.creation && descriptor.mode !== "continuable") {
-            throw new SubagentError("Native descriptor or trusted fresh invocation does not match the original role", "UNAUTHORIZED");
-        }
-        const original = candidate.admission;
-        if (!original.settings.modules.deepwork.enabled || !original.settings.roles[evidence.role])
-            throw new SubagentError("Original child role/module is disabled", "UNAUTHORIZED");
-        if (descriptor?.mode === "continuable") {
-            const route = evidence.invocation.initialRoute;
-            if (descriptor.agentProvider !== undefined && descriptor.agentProvider !== route.provider || descriptor.agentModel !== undefined && descriptor.agentModel !== route.model
-                || descriptor.agentReasoningEffort !== undefined && descriptor.agentReasoningEffort !== route.reasoningEffort)
-                throw new SubagentError("Original route does not match native descriptor provenance", "UNAUTHORIZED");
-        }
-        const prior = liveIdentities.get(agent);
-        if (candidate.retained && prior !== undefined) {
-            if (prior.identity.parent !== parent || prior.identity.role !== evidence.role || prior.identity.epoch !== original.epoch || prior.admission !== original)
-                throw new SubagentError("Retained role identity or original admission reference cannot be replaced", "UNAUTHORIZED");
-            return;
-        }
-        let invocation;
-        let filter;
-        let readOnly;
-        {
-            if (candidate.creation && JSON.stringify(this.preparedCaptures.get(agent)) !== JSON.stringify(evidence))
-                throw new SubagentError("Fresh capture does not match its trusted prepared invocation and ceiling", "UNAUTHORIZED");
-            if (original.epoch !== evidence.originalAdmissionEpoch || candidate.creation && this.getSettings.admission?.(parent).epoch !== evidence.originalAdmissionEpoch)
-                throw new SubagentError("Original capture or creation epoch does not match", "UNAUTHORIZED");
-            const depth = delegationDepthOf(agent);
-            if (depth > evidence.authorityCeiling.maxDepth)
-                throw new SubagentError("Original child depth ceiling is exceeded", "UNAUTHORIZED");
-            readOnly = evidence.authorityCeiling.readOnly;
-            if (!readOnly && DSMM_ROLES.find(row => row.id === evidence.role).access === "read-only")
-                throw new SubagentError("Original capture cannot weaken read-only role identity", "UNAUTHORIZED");
-            filter = evidence.authorityCeiling.toolFilter;
-            const nativeFilter = descriptor?.mode === "continuable" ? descriptor.toolFilter : undefined;
-            if (nativeFilter !== undefined && JSON.stringify(inheritToolFilter(filter, nativeFilter)) !== JSON.stringify(filter))
-                throw new SubagentError("Original capture exceeds native descriptor tool restriction", "UNAUTHORIZED");
-            const policy = resolveRoleRuntimePolicy(original.settings, evidence.role);
-            const level = evidence.invocation.level === "normal" ? undefined : original.settings.roleRouting[evidence.role]?.levels?.[evidence.invocation.level];
-            const modelParameterPolicy = resolvedModelParameterPolicy(original);
-            const fallbacks = policy.fallbackRoutes.map(route => modelRouteFromCall(projectModelRouteParameters(route, "dsmm-config", modelParameterPolicy.mode !== "native-defaults")));
-            invocation = freezeSettings({ target: evidence.role, effectiveLevel: evidence.invocation.level, routeSource: evidence.invocation.routeSource,
-                initialRoute: evidence.invocation.initialRoute, candidates: [evidence.invocation.initialRoute, ...fallbacks], modelParameterPolicy,
-                ...(evidence.version === 1 ? {} : { requestedRoute: evidence.invocation.requestedRoute, effortSource: evidence.invocation.effortSource, requestedPolicy: policy }),
-                exactEffort: evidence.invocation.routeSource === "invocation-route" ? policy.primary?.reasoningEffort !== undefined
-                    : evidence.invocation.routeSource === "level" && level?.reasoningEffort !== undefined,
-                policy: { ...policy, primary: evidence.invocation.initialRoute, fallbackRoutes: fallbacks } });
-            const fresh = this.preparedInvocations.get(agent);
-            if (candidate.creation && fresh !== undefined)
-                invocation = fresh;
-        }
-        const identity = Object.freeze({ role: evidence.role, child: true, parent, epoch: original.epoch, readOnly,
-            ...(filter === undefined ? {} : { toolFilter: inheritToolFilter(undefined, filter) }) });
-        this.captureIdentity(agent, identity, original);
-        bindRoleInvocation(agent, invocation, evidence);
-        captureRoleRuntimePolicy(original.settings, evidence.role, invocation.policy);
-        const call = this.calls.getStore();
-        if (candidate.creation && call?.parent === parent && call.role === evidence.role)
-            call.admittedChild?.(agent);
-        this.preparedInvocations.delete(agent);
-        this.preparedCaptures.delete(agent);
-    }
-    assertChildDelivery(ticket, childId, raw) {
-        if (!("mode" in raw) && raw.version === 3 && raw.delegationMode === "one-shot")
-            throw new SubagentError("One-shot children cannot resume", "UNAUTHORIZED");
-        this.assertChildExecution(ticket, childId, raw);
-    }
-    assertChildExecution(ticket, childId, raw) {
-        ticket.signal.throwIfAborted();
-        this.assertLive(ticket.parent);
-        if (this.getSettings.admission?.(ticket.parent) !== ticket.admission || ticket.admission.epoch !== ticket.parentEpoch)
-            throw new SubagentError("Delivery parent admission changed", "UNAUTHORIZED");
-        if ("mode" in raw || raw.version !== 3)
-            throw new SubagentError("Only current child capture V3 is supported", "UNSUPPORTED_CAPABILITY");
-        const evidence = parseChildAdmissionCapture(raw);
-        if (evidence.childSessionId !== childId || evidence.parentSessionId !== ticket.parent.id)
-            throw new SubagentError("Delivery evidence is not this direct child", "UNAUTHORIZED");
-        this.assertDelegation(ticket.parent, evidence.role);
-        const depth = delegationDepthOf(ticket.parent) + 1;
-        const maximum = ticket.admission.settings.subagents.maxDepth ?? ticket.parent.ctx.get("subagents")?.resolveMaxDepth();
-        if (maximum !== undefined && depth > maximum || !("mode" in evidence) && depth > evidence.authorityCeiling.maxDepth)
-            throw new SubagentError("Delivery exceeds the original or current delegation depth ceiling", "UNAUTHORIZED");
-        if (!("mode" in evidence) && (!evidence.runtimePolicyCapture.modules.deepwork.enabled || !evidence.authorityCeiling.roles.includes(evidence.role)))
-            throw new SubagentError("Original child role is not permitted", "UNAUTHORIZED");
-    }
-    readOnly(identity) { return identity.readOnly === true || DSMM_ROLES.find(row => row.id === identity.role)?.access === "read-only"; }
-    agents() {
-        const registry = this.ctx.get?.("agents");
-        if (registry === undefined)
-            throw new SubagentError("DSMM delegation requires native live Agent ownership", "UNAUTHORIZED");
-        return registry;
-    }
-    assertLive(agent) {
-        if (agent.id === undefined || this.agents().get(agent.id) !== agent)
-            throw new SubagentError("DSMM delegation requires the exact live Agent", "UNAUTHORIZED");
-    }
-    isAdmittedChild(agent) {
-        const admitted = liveIdentities.get(agent), identity = admitted?.identity;
-        return admitted?.admission !== undefined && identity?.child === true && identity.parent !== undefined
-            && this.agents().get(identity.parent.id) === identity.parent && this.agents().isOwnedBy(agent.id, identity.parent);
-    }
-    assertPlannerRootAdmission(agent, settings) {
-        if (settings.presets.plannerRootEnabled)
-            return;
-        const selected = resolveSelectedAgentPreset(agent.session);
-        const composed = agent.ctx?.get?.("agentPresets")?.composedPreset(agent.ctx);
-        if (selected !== "dsmm-planner" && composed !== "dsmm-planner")
-            return;
-        // Origin metadata alone cannot exempt a Root from this admission boundary.
-        if (this.isAdmittedChild(agent))
-            return;
-        throw new SubagentError("Standing DSMM root role is not admitted", "UNAUTHORIZED");
-    }
-    /** Core fence runs before native prompt/body assembly or provider execution. */
+    release(agent) { liveIdentities.delete(agent); toolIdentities.delete(agent); }
     assertModuleAdmission(agent) {
         this.assertLive(agent);
-        const settings = this.getSettings(agent);
-        this.assertPlannerRootAdmission(agent, settings);
-        const selected = agent.ctx?.get?.("agentPresets")?.composedPreset(agent.ctx)
-            ?? resolveSelectedAgentPreset(agent.session);
-        const descriptor = foldSubagentDescriptor(childOwnedSessionEvents(agent.session));
-        const provider = descriptor === undefined ? undefined : this.ctx.get?.("subagents")?.getProvider(descriptor.provider);
-        const providerRole = descriptor?.provider.startsWith("dsmm-role-") && (provider === undefined || this.providers.has(provider))
-            ? `dsmm-${descriptor.provider.slice("dsmm-role-".length)}` : undefined;
-        if (agent.session.header?.origin !== "subagent" && selected?.startsWith("dsmm-")
-            && !isDsmmRoleId(selected))
-            throw new SubagentError("DSMM unknown standing root is not admitted", "UNAUTHORIZED");
-        const implicit = agent.session.header?.origin !== "subagent" && settings.modules.deepwork.enabled && this.mode.active(agent, settings.defaultActive) ? "dsmm-orchestrator" : undefined;
-        const role = providerRole ?? (isDsmmRoleId(selected) ? selected : implicit);
-        if (role !== undefined && (!settings.modules.deepwork.enabled || !isDsmmRoleId(role) || !settings.roles[role])) {
-            throw new SubagentError("Deepwork module or role is not admitted in this Agent; standing presets and child resume cannot enable it", "UNAUTHORIZED");
+        const settings = this.getSettings(agent), identity = liveIdentities.get(agent), selected = this.selected(agent);
+        if (identity?.child) {
+            this.assertLive(identity.parent);
+            if (!this.agents().isOwnedBy(agent.id, identity.parent) || selected !== identity.role)
+                throw new SubagentError("Child admission no longer matches composition", "UNAUTHORIZED");
         }
-        if (role === "dsmm-planner" && !isRootRoleEnabled(settings, role) && !this.isAdmittedChild(agent)) {
-            throw new SubagentError("Standing DSMM root role is not admitted", "UNAUTHORIZED");
-        }
+        else if (agent.session.header?.origin !== "subagent")
+            this.validateRootRole(agent, this.getSettings.admission(agent));
+        const role = identity?.role ?? (isDsmmRoleId(selected) ? selected : undefined);
+        if (role && (!settings.modules.deepwork.enabled || !settings.roles[role]))
+            throw new SubagentError("Role is disabled in the immutable admission", "UNAUTHORIZED");
     }
     identity(agent) {
         this.assertLive(agent);
-        const execution = this.executions.getStore(), call = execution === undefined ? undefined : this.toolCalls.get(execution);
-        if (call?.active && call.agent === agent && call.identity !== undefined)
-            return call.identity;
-        const existing = liveIdentities.get(agent)?.identity;
-        if (existing?.child)
+        const existing = liveIdentities.get(agent);
+        if (existing)
             return existing;
-        const parent = this.agents().list().find((row) => row !== agent && this.agents().isOwnedBy(agent.id, row));
-        if (parent !== undefined) {
-            if (existing === undefined)
-                throw new SubagentError("DSMM child role identity was not admitted", "UNAUTHORIZED");
-            return existing;
-        }
-        const settings = this.getSettings(agent);
-        this.assertPlannerRootAdmission(agent, settings);
-        const selected = agent.ctx?.get?.("agentPresets")?.composedPreset(agent.ctx);
-        const role = isDsmmRoleId(selected) ? selected : settings.modules.deepwork.enabled && agent.session.header?.origin !== "subagent" && this.mode.active(agent, settings.defaultActive) ? "dsmm-orchestrator" : undefined;
-        if (role === "dsmm-planner" && !isRootRoleEnabled(settings, role)) {
-            throw new SubagentError("Standing DSMM root role is not admitted", "UNAUTHORIZED");
-        }
-        return Object.freeze({ role, child: agent.session.header?.origin === "subagent", epoch: this.getSettings.admission?.(agent).epoch ?? "trusted-direct" });
+        const settings = this.getSettings(agent), selected = this.selected(agent);
+        const parent = this.agents().list().find(row => row !== agent && this.agents().isOwnedBy(agent.id, row));
+        if (!parent)
+            this.validateRootRole(agent, this.getSettings.admission(agent));
+        const role = parent ? undefined : isDsmmRoleId(selected) ? selected : settings.modules.deepwork.enabled && this.mode.active(agent, settings.defaultActive) ? "dsmm-orchestrator" : undefined;
+        return Object.freeze({ role, child: parent !== undefined, parent, epoch: this.getSettings.admission(agent).epoch });
     }
+    admit(agent) { return this.identity(agent); }
+    readOnly(identity) { return identity.readOnly === true || DSMM_ROLES.find(row => row.id === identity.role)?.access === "read-only"; }
     targets(agent) {
-        const execution = this.executions.getStore(), call = execution === undefined ? undefined : this.toolCalls.get(execution);
-        if (call?.active && call.agent === agent && call.targets !== undefined)
-            return call.targets;
-        const identity = this.identity(agent);
-        const settings = this.getSettings(agent);
-        if (!settings.modules.deepwork.enabled || identity.role === undefined || !settings.roles[identity.role])
+        const identity = this.identity(agent), settings = this.getSettings(agent);
+        if (!settings.modules.deepwork.enabled || !identity.role || !settings.roles[identity.role])
             return [];
-        return allowedRoleChildren(identity.role, identity.child).filter((role) => settings.roles[role]
-            && (!this.readOnly(identity) || DSMM_ROLES.find(row => row.id === role).access === "read-only")
-            && (identity.toolFilter?.allow === undefined || identity.toolFilter.allow.includes(roleToolName(role)))
+        return allowedRoleChildren(identity.role, identity.child).filter(role => settings.roles[role] && (!this.readOnly(identity) || DSMM_ROLES.find(row => row.id === role).access === "read-only")
+            && (identity.toolFilter?.allow === undefined || [roleToolName(role), DSMM_ROLES.find(row => row.id === role)?.kind === "category" ? "dsmm_category" : "dsmm_role"].some(name => identity.toolFilter.allow.includes(name)))
             && !identity.toolFilter?.deny?.includes(roleToolName(role)));
     }
     assertDelegation(parent, role) {
-        const execution = this.executions.getStore(), call = execution === undefined ? undefined : this.toolCalls.get(execution);
-        if (call?.active && call.agent === parent && call.target === role && call.identity !== undefined)
-            return { parent, role, epoch: call.identity.epoch };
-        const identity = this.identity(parent);
+        this.assertModuleAdmission(parent);
         if (!this.targets(parent).includes(role))
-            throw new SubagentError(`DSMM ${identity.role ?? "unadmitted Agent"} cannot delegate ${role}`, "UNAUTHORIZED");
-        return { parent, role, epoch: identity.epoch };
+            throw new SubagentError("Role delegation is not admitted", "UNAUTHORIZED");
+        return { parent, role, epoch: this.identity(parent).epoch };
     }
-    duringDelegation(parent, role, operation, toolFilter, maxDepth, admittedChild) {
-        const identity = this.assertDelegation(parent, role), outer = this.calls.getStore();
-        const upstream = outer?.parent === parent && outer.role === role && outer.epoch === identity.epoch ? outer.admittedChild : undefined;
-        const notify = admittedChild === undefined ? upstream : upstream === undefined ? admittedChild : (agent) => { upstream(agent); admittedChild(agent); };
-        return this.calls.run({ ...identity, toolFilter, maxDepth, admittedChild: notify }, operation);
-    }
-    prepareContinuable(parent, role, signal) {
-        signal.throwIfAborted();
-        return this.assertDelegation(parent, role);
-    }
-    admit(agent) {
-        this.assertLive(agent);
-        const agents = this.agents();
-        const parent = agents.list().find((row) => row !== agent && agents.isOwnedBy(agent.id, row));
-        const existing = liveIdentities.get(agent);
-        if (existing !== undefined) {
-            // A retained child owns its original capture, not its parent's newer
-            // mode/profile or a reinstall's replacement settings getter.
-            if (parent === undefined || existing.identity.parent !== parent || existing.readEpoch() !== existing.identity.epoch) {
-                throw new SubagentError("DSMM retained child admission no longer matches its exact owner or captured epoch", "UNAUTHORIZED");
-            }
-            this.assertLive(parent);
-            return existing.identity;
-        }
-        if (parent === undefined)
-            return this.identity(agent);
-        const original = this.getSettings.admission?.(agent);
-        if (original?.childCapture !== undefined) {
-            this.validatePreparedRole(agent, parent, { evidence: original.childCapture, admission: original, creation: false, retained: false });
-            return liveIdentities.get(agent).identity;
-        }
-        throw new SubagentError("DSMM child requires the completed original role/capture admission; generic spawn cannot bypass delegation policy", "UNAUTHORIZED");
-    }
-    captureIdentity(agent, identity, admission) {
-        liveIdentities.set(agent, { identity, admission, readEpoch: () => this.getSettings.admission?.(agent).epoch ?? "trusted-direct" });
-        return identity;
-    }
-    captureTools(agent, tools, controlledNames = [], reset = false) {
-        const realm = Reflect.get(tools, symbols.original) ?? tools;
-        const previous = toolIdentities.get(agent);
+    captureTools(agent, tools, names = [], reset = false) {
+        const realm = Reflect.get(tools, symbols.original) ?? tools, previous = toolIdentities.get(agent);
         const definitions = previous === undefined || reset || previous.realm !== realm ? new Map() : previous.definitions;
-        for (const schema of tools.schemas(agent)) {
-            if (previous === undefined || reset || previous.realm !== realm || controlledNames.includes(schema.name)) {
+        for (const schema of tools.schemas(agent))
+            if (!previous || reset || previous.realm !== realm || names.includes(schema.name)) {
                 const definition = tools.get(schema.name, agent);
                 definitions.set(schema.name, definition);
-                if (controlledNames.includes(schema.name))
+                if (names.includes(schema.name))
                     controlledDefinitions.add(definition);
             }
-        }
         toolIdentities.set(agent, { realm, definitions });
     }
-    /** Existing exact role denials only; missing admission or capability proof is not a blacklist. */
-    toolBlacklistDenial(agent, name, execution) {
-        return this.executions.exit(() => this.blacklistDenial(agent, name, execution));
-    }
-    blacklistDenial(agent, name, execution) {
-        this.assertLive(agent);
-        const captured = liveIdentities.get(agent)?.identity;
-        if (captured?.toolFilter?.deny?.includes(name))
-            return "DSMM child native toolFilter does not permit this tool";
-        if (captured?.readOnly === true && READONLY_ROLE_DENIED_TOOLS.includes(name)
-            && this.isAdmittedChild(agent))
-            return "DSMM read-only role does not permit this tool";
-        const definition = toolIdentities.get(agent)?.definitions.get(name);
-        const native = agent.ctx, tools = native.get("agentPresets")?.serviceFor(agent, "tools") ?? native.get("tools");
-        if (definition === undefined || tools?.get(name, agent) !== definition)
-            return undefined;
-        let identity, settings;
-        try {
-            identity = this.identity(agent);
-            settings = this.getSettings(agent);
-        }
-        catch (error) {
-            if (error instanceof DsmmProfileError && !["disposed", "not-owned", "cancelled"].includes(error.code)
-                || error instanceof SubagentError && error.code === "UNAUTHORIZED")
-                return undefined;
-            throw error;
-        }
-        if (identity.role === undefined)
-            return undefined;
-        if (!settings.modules.deepwork.enabled || !settings.roles[identity.role])
-            return "DSMM role is disabled in this Agent admission";
-        const args = execution?.arguments;
-        const target = roleFromToolName(name) ?? (name === "dsmm_role" ? args?.role : name === "dsmm_category" ? args?.category : undefined);
-        if (isDsmmRoleId(target) && controlledDefinitions.has(definition)
-            && (!settings.roles[target] || !allowedRoleChildren(identity.role, identity.child).includes(target)))
-            return `DSMM delegation to ${target} is not permitted`;
-        if (this.readOnly(identity) && READONLY_ROLE_DENIED_TOOLS.includes(name))
-            return "DSMM read-only role does not permit this tool";
-        return undefined;
-    }
-    captureToolExecution(execution, full) {
+    toolBlacklistDenial(agent, name, execution) { return this.preToolDenial(agent, name, undefined, execution); }
+    captureToolExecution(execution, _full) {
         const agent = execution.agent;
-        if (agent === undefined)
+        if (!agent)
+            return;
+        if (this.toolCalls.has(execution))
             return;
         this.assertLive(agent);
-        const native = agent.ctx, agents = native.get("agents");
-        const tools = native.get("agentPresets")?.serviceFor(agent, "tools") ?? native.get("tools");
-        const definition = tools?.get(execution.name, agent);
-        const owned = definition !== undefined && controlledDefinitions.has(definition);
-        const call = { active: false, agent, context: native, registry: Reflect.get(agents, symbols.original) ?? agents,
+        const agents = agent.ctx.get("agents"), tools = agent.ctx.get("agentPresets")?.serviceFor(agent, "tools") ?? agent.ctx.get("tools"), definition = tools?.get(execution.name, agent);
+        this.toolCalls.set(execution, { agent, context: agent.ctx, registry: Reflect.get(agents, symbols.original) ?? agents,
             realm: tools === undefined ? undefined : Reflect.get(tools, symbols.original) ?? tools, scopeParent: scopeParentOf(agent),
             parents: agents.list().filter(parent => parent !== agent && agents.isOwnedBy(agent.id, parent)), parentSession: agent.session.header.parentSession,
             name: execution.name, args: execution.arguments, callId: execution.callId, signal: execution.signal,
-            ...!owned ? {} : { definition, body: definition.execute, argumentsJson: JSON.stringify(execution.arguments) } };
-        this.toolCalls.set(execution, call);
-        if (!owned)
-            return;
-        this.executions.exit(() => {
-            try {
-                call.identity = this.identity(agent);
-                call.targets = this.targets(agent);
-                const args = execution.arguments;
-                const target = roleFromToolName(execution.name) ?? (execution.name === "dsmm_role" ? args?.role : execution.name === "dsmm_category" ? args?.category : undefined);
-                if (isDsmmRoleId(target))
-                    call.target = target;
-            }
-            catch (error) {
-                if (!full || !(error instanceof DsmmProfileError || error instanceof SubagentError))
-                    throw error;
-            }
-        });
+            toolFilter: this.visibleToolCeiling(agent),
+            ...(definition === undefined || !controlledDefinitions.has(definition) ? {} : { definition, body: definition.execute, argumentsJson: JSON.stringify(execution.arguments) }) });
+    }
+    /** Visible native names are a narrowing ceiling, never permission to execute a definition. */
+    visibleToolCeiling(agent) {
+        const native = agent.ctx, tools = native.get("agentPresets")?.serviceFor(agent, "tools") ?? native.get("tools");
+        if (!tools)
+            throw new SubagentError("Native tools unavailable", "UNAUTHORIZED");
+        return Object.freeze({ allow: Object.freeze(tools.schemas(agent).map(tool => tool.name)) });
+    }
+    delegationToolFilter(execution) {
+        this.assertToolExecution(execution);
+        const call = this.toolCalls.get(execution);
+        if (!call)
+            throw new SubagentError("Native tool execution capture required", "UNAUTHORIZED");
+        return call.toolFilter;
     }
     assertToolExecution(execution) {
         execution.signal.throwIfAborted();
-        if (execution.agent === undefined)
+        const agent = execution.agent;
+        if (!agent)
             return;
-        this.assertLive(execution.agent);
+        this.assertModuleAdmission(agent);
         const call = this.toolCalls.get(execution);
-        if (call === undefined)
+        if (!call)
             return;
         call.signal.throwIfAborted();
-        const agent = execution.agent, agents = agent.ctx.get("agents");
-        const tools = agent.ctx.get("agentPresets")?.serviceFor(agent, "tools") ?? agent.ctx.get("tools");
+        const agents = agent.ctx.get("agents"), tools = agent.ctx.get("agentPresets")?.serviceFor(agent, "tools") ?? agent.ctx.get("tools");
         const parents = agents.list().filter(parent => parent !== agent && agents.isOwnedBy(agent.id, parent));
         if (agent !== call.agent || agent.ctx !== call.context || (Reflect.get(agents, symbols.original) ?? agents) !== call.registry
             || (tools === undefined ? undefined : Reflect.get(tools, symbols.original) ?? tools) !== call.realm || scopeParentOf(agent) !== call.scopeParent
             || agent.session.header.parentSession !== call.parentSession || parents.length !== call.parents.length || parents.some(parent => !call.parents.includes(parent)))
-            throw new SubagentError("Native tool caller ownership changed", "UNAUTHORIZED");
-        if (call.definition === undefined)
-            return;
-        const current = tools?.get(call.name, agent);
-        if (execution.name !== call.name || execution.arguments !== call.args || execution.callId !== call.callId || JSON.stringify(execution.arguments) !== call.argumentsJson
-            || call.definition.execute !== call.body || current !== undefined && current !== call.definition)
-            throw new SubagentError("Owned tool registration or invocation changed", "UNAUTHORIZED");
+            throw new SubagentError("Tool caller ownership changed", "UNAUTHORIZED");
+        if (call.definition && (execution.name !== call.name || execution.arguments !== call.args || execution.callId !== call.callId || JSON.stringify(execution.arguments) !== call.argumentsJson
+            || call.definition.execute !== call.body || tools?.get(call.name, agent) !== call.definition))
+            throw new SubagentError("Tool invocation changed", "UNAUTHORIZED");
     }
     beforeToolDecision(operation) { return this.executions.exit(operation); }
-    async duringToolExecution(execution, operation) {
-        this.assertToolExecution(execution);
-        const call = this.toolCalls.get(execution);
-        if (call !== undefined)
-            call.active = true;
-        try {
-            return await this.executions.run(execution, operation);
-        }
-        finally {
-            if (call !== undefined)
-                call.active = false;
-        }
-    }
-    toolDenial(agent, name, tools, execution) {
-        const scoped = this.executions.getStore();
-        const active = execution ?? (scoped !== undefined && this.toolCalls.get(scoped)?.active ? scoped : undefined);
-        if (active !== undefined && active.agent === agent && active.name === name) {
-            this.assertToolExecution(active);
-            return undefined;
-        }
-        if (tools === undefined)
-            return this.toolBlacklistDenial(agent, name);
-        return this.preToolDenial(agent, name, tools);
-    }
+    duringToolExecution(execution, operation) { this.assertToolExecution(execution); return this.executions.run(execution, operation); }
+    toolDenial(agent, name, tools, execution) { return this.preToolDenial(agent, name, tools, execution); }
     preToolDenial(agent, name, tools, execution) {
-        return this.executions.exit(() => this.permissionDenial(agent, name, tools, execution));
-    }
-    permissionDenial(agent, name, tools, execution) {
-        const identity = this.identity(agent);
-        const settings = this.getSettings(agent);
+        const identity = this.identity(agent), settings = this.getSettings(agent);
         const native = agent.ctx, realm = tools ?? native.get("agentPresets")?.serviceFor(agent, "tools") ?? native.get("tools");
-        const definition = realm?.get(name, agent);
-        const owned = definition !== undefined && controlledDefinitions.has(definition);
-        const controlled = owned && (name === "dsmm_role" || name === "dsmm_category");
-        const target = owned ? roleFromToolName(name) : undefined;
-        const readonly = identity.readOnly || DSMM_ROLES.find((row) => row.id === identity.role)?.access === "read-only";
-        const checkedRealm = tools ?? (execution === undefined ? undefined : realm);
-        if (checkedRealm !== undefined && (readonly || target !== undefined || controlled)) {
+        const definition = realm?.get(name, agent), owned = definition !== undefined && controlledDefinitions.has(definition);
+        const target = owned ? roleFromToolName(name) : undefined, merged = owned && ["dsmm_role", "dsmm_category"].includes(name);
+        if (tools && (this.readOnly(identity) || target || merged)) {
             const admitted = toolIdentities.get(agent);
-            if (admitted === undefined || admitted.realm !== (Reflect.get(checkedRealm, symbols.original) ?? checkedRealm)
-                || admitted.definitions.get(name) !== checkedRealm.get(name, agent))
-                return "DSMM tool definition was not admitted in this exact Agent realm";
+            if (!admitted || admitted.realm !== (Reflect.get(tools, symbols.original) ?? tools) || admitted.definitions.get(name) !== definition)
+                return "Tool definition was not admitted in this Agent realm";
         }
-        if (target !== undefined)
-            return DSMM_ROLES.find(row => row.id === target).kind !== "role" || settings.subagents.toolTopology !== "per-role" ? "DSMM obsolete per-target entry is not callable in this topology"
-                : this.targets(agent).includes(target) ? undefined : `DSMM delegation to ${target} is not permitted`;
-        if (controlled) {
-            const kind = name === "dsmm_role" ? "role" : "category";
-            if (name === "dsmm_role" && settings.subagents.toolTopology !== "parameterized" || !this.targets(agent).some(role => DSMM_ROLES.find(row => row.id === role).kind === kind))
-                return "DSMM merged delegation entry is not admitted";
-            // Native merged-entry restrictions and the per-target ceiling both apply.
-            if (identity.toolFilter?.allow !== undefined && !identity.toolFilter.allow.includes(name) || identity.toolFilter?.deny?.includes(name))
-                return "DSMM native filter does not permit this merged entry";
-            const args = execution?.arguments;
-            const target = kind === "role" ? args?.role : args?.category;
-            if (isDsmmRoleId(target) && !this.targets(agent).includes(target))
-                return `DSMM delegation to ${target} is not permitted`;
-            return undefined;
+        const nativeOutput = name === "structured_output" && definition !== undefined && toolIdentities.get(agent)?.definitions.get(name) === definition;
+        if (identity.toolFilter?.allow !== undefined && !identity.toolFilter.allow.includes(name) && !nativeOutput || identity.toolFilter?.deny?.includes(name))
+            return "Tool exceeds inherited filter";
+        if (identity.toolFilter && identity.parent && name !== "structured_output") {
+            const parent = identity.parent, parentTools = parent.ctx.get("agentPresets")?.serviceFor(parent, "tools") ?? parent.ctx.get("tools");
+            if (!parentTools?.get(name, parent))
+                return "Parent no longer exposes this capability";
+            const denied = this.preToolDenial(identity.parent, name, undefined, execution);
+            if (denied)
+                return denied;
         }
-        if (identity.toolFilter?.allow !== undefined && !identity.toolFilter.allow.includes(name) && name !== "structured_output"
-            || identity.toolFilter?.deny?.includes(name))
-            return "DSMM child native toolFilter does not permit this tool";
-        if (readonly && !readonlyRoleTool(name, settings))
-            return "DSMM read-only role does not permit this tool";
-        if (identity.role === undefined)
-            return identity.child && settings.modules.deepwork.enabled && ["subagent", "spawn", "fork"].includes(name) ? "DSMM unadmitted children cannot delegate" : undefined;
-        if (!settings.modules.deepwork.enabled || !settings.roles[identity.role])
-            return "DSMM role is disabled in this Agent admission";
-        if (["subagent", "spawn", "fork"].includes(name))
-            return "Use the admitted DSMM role tools; generic delegation is not a role-policy bypass";
+        if (target)
+            return this.targets(agent).includes(target) ? undefined : "Role delegation is not permitted";
+        if (merged) {
+            const kind = name === "dsmm_role" ? "role" : "category", args = execution?.arguments;
+            if (!this.targets(agent).some(id => DSMM_ROLES.find(row => row.id === id)?.kind === kind))
+                return "Delegation entry is not admitted";
+            const requested = args?.[kind];
+            return isDsmmRoleId(requested) && !this.targets(agent).includes(requested) ? "Requested role is not admitted" : undefined;
+        }
+        if (this.readOnly(identity) && !readonlyRoleTool(name, settings))
+            return "Read-only role does not permit this tool";
+        if (identity.role && ["subagent", "spawn", "fork"].includes(name))
+            return "Use admitted DSMM role tools";
         return undefined;
-    }
-    installDrain(agent) {
-        const native = agent.ctx;
-        if (native === undefined)
-            throw new Error("DSMM native role lifecycle requires an Agent context");
-        native.effect(() => async () => {
-            this.collaborators?.revokeParent?.(agent, "role-residency-disposed");
-            const agents = this.agents();
-            if (agents.get(agent.id) !== agent)
-                throw new Error("DSMM Agent was detached before continuable descendants drained");
-            await native.get("subagents")?.drainDescendants([agent]);
-            liveIdentities.delete(agent);
-            toolIdentities.delete(agent);
-        });
     }
 }
 //# sourceMappingURL=role-policy.js.map

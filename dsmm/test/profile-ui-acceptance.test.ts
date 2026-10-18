@@ -7,25 +7,23 @@ import { tmpdir } from "node:os";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import { foldSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
-import type { SubagentActivation } from "@deepseek-ai/dsh-subagent";
 import type { DshAgent } from "../lib/dsh-types.js";
 import { createProfileRuntime, DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import { ProfileStore } from "../lib/profile-store.js";
 import { resolveConfig } from "../lib/settings.js";
-import { headerRoutes, nativeRoutingFixture } from "./native-routing-fixture.ts";
+import { headerRoutes, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 // JS harnesses are test-only entrypoints, outside the emitted library program.
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
 import { bootstrapFacade, carrierBootstrap, compositionBundle, createBootGraph, nativeClientPreflight } from "../scripts/profile-ui-harness-browser.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
 import { extractNativeThemeStyles, NATIVE_IDS, resolveNativeClientBundle } from "../scripts/profile-ui-harness-server.mjs";
 // @ts-expect-error JavaScript acceptance hooks deliberately have no declarations.
-import { nativeUiStartupPatch, readColdProfileSettings, startSuccessorReviewer, validatedNativeStorage, validatedProfileStorage, NATIVE_STREAM_ENDPOINTS } from "../scripts/profile-ui-acceptance.mjs";
+import { nativeUiStartupPatch, readColdProfileSettings, validatedNativeStorage, validatedProfileStorage, NATIVE_STREAM_ENDPOINTS } from "../scripts/profile-ui-acceptance.mjs";
 
 const structural = (agent: Agent) => agent as unknown as DshAgent;
 
-test("cold UI reads release native listeners before old-child/apply/new-reviewer admission", async () => {
+test("cold UI reads release native listeners and fresh reviewers capture selected future defaults", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true, workflow: { reviewCap: 2 } });
-  const runs: SubagentActivation[] = [];
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime;
     const saved = await runtime.save({ id: "cold-ui", expectedRevision: null, content: JSON.stringify({ version: 1, id: "cold-ui", settings: { workflow: { reviewCap: 7 } } }) });
@@ -39,57 +37,56 @@ test("cold UI reads release native listeners before old-child/apply/new-reviewer
       assert.notEqual(settings, runtime.getSettings());
       assert.ok(Object.isFrozen(settings) && Object.isFrozen(settings.workflow));
     }
-    const oldChild = await startSuccessorReviewer(f.ctx, parent, runs);
+    const oldChild = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", parent);
     const oldAdmission = runtime.admission(structural(oldChild));
     assert.equal(f.agents.isOwnedBy(oldChild.id, parent), true);
     assert.equal(oldAdmission.epoch, before.epoch);
-    assert.equal(oldAdmission.childCapture!.parentSessionId, parent.id);
-    assert.equal(oldAdmission.childCapture!.originalAdmissionEpoch, before.epoch);
-    assert.equal((await runs[0]!.result).stopReason, "completed");
+    assert.equal(oldChild.session.header.parentSession, parent.id);
+    assert.equal(f.ctx.get("dsmmNativeAdmission")!.invocation(oldChild)?.target, "dsmm-reviewer");
+    await runFixtureTurn(oldChild);
+    assert.ok(oldChild.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
+    await f.releaseAuxiliary(oldChild);
     assert.equal(f.agents.get(oldChild.id), undefined);
     assert.equal(f.agents.isOwnedBy(oldChild.id, parent), false);
     const reviewerRoute = { provider: "fixture", model: "ui-admitted-reviewer", reasoningEffort: "max" };
     const sessionProfile = await runtime.save({ id: "ui-session", expectedRevision: null, content: JSON.stringify({ version: 1, id: "ui-session", settings: {
       defaultActive: true, workflow: { reviewCap: 6 }, roleRouting: { "dsmm-reviewer": { primary: reviewerRoute } },
     } }) });
-    const snapshot = await runtime.getSession(structural(parent));
-    const applied = await runtime.selectSession({ sessionId: parent.id, id: sessionProfile.id, expectedRevision: sessionProfile.revision,
-      expectedSelectionRevision: snapshot.selection.selectionRevision, expectedAdmissionEpoch: snapshot.admissionEpoch }, structural(parent));
-    const newChild: Agent = await startSuccessorReviewer(f.ctx, parent, runs);
-    const after = runtime.admission(structural(parent));
-    assert.equal(after.epoch, applied.admissionEpoch);
+    await runtime.select({ id: sessionProfile.id, expectedRevision: sessionProfile.revision,
+      expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+    const freshParent = await f.create();
+    const newChild = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", freshParent);
+    const after = runtime.admission(structural(freshParent));
     assert.notEqual(after.epoch, before.epoch);
-    assert.equal(runtime.admission(structural(oldChild)), oldAdmission);
+    assert.equal(runtime.admission(structural(parent)), before);
+    assert.equal(oldAdmission.settings.workflow.reviewCap, 7);
     const newAdmission = runtime.admission(structural(newChild));
     assert.equal(newAdmission.epoch, after.epoch);
-    assert.equal(newAdmission.childCapture!.parentSessionId, parent.id);
-    assert.equal(newAdmission.childCapture!.originalAdmissionEpoch, after.epoch);
+    assert.equal(newChild.session.header.parentSession, freshParent.id);
+    assert.equal(f.ctx.get("dsmmNativeAdmission")!.invocation(newChild)?.target, "dsmm-reviewer");
     assert.equal(f.agents.get(newChild.id), newChild);
-    assert.equal(f.agents.isOwnedBy(newChild.id, parent), true);
+    assert.equal(f.agents.isOwnedBy(newChild.id, freshParent), true);
     assert.equal(foldSubagentDescriptor(newChild.session.snapshotEvents().slice(newChild.session.inheritedEventCount))!.provider, "dsmm-role-reviewer");
     const tools = newChild.ctx.get("tools")!;
-    assert.equal(newAdmission.childCapture!.authorityCeiling.readOnly, true);
     for (const name of ["write", "edit", "bash", "pwsh"]) {
       assert.equal((await tools.execute({ callId: ToolCallId(`ui-read-only-${name}`), name, arguments: {}, agent: newChild, signal: new AbortController().signal })).isError, true);
     }
     assert.equal(f.agents.get(newChild.id), newChild);
-    assert.equal(f.agents.isOwnedBy(newChild.id, parent), true);
-    assert.equal((await runs[1]!.result).stopReason, "completed");
+    assert.equal(f.agents.isOwnedBy(newChild.id, freshParent), true);
+    await runFixtureTurn(newChild);
+    assert.ok(newChild.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
     assert.deepEqual(headerRoutes(newChild), [reviewerRoute]);
     assert.deepEqual(f.adapter.calls.map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), [
       { provider: "fixture", model: "native-default", reasoningEffort: "low" }, reviewerRoute,
     ]);
+    await f.releaseAuxiliary(newChild);
     assert.equal(f.agents.get(newChild.id), undefined);
     assert.equal(f.agents.isOwnedBy(newChild.id, parent), false);
-    await runs[1]!.dispose();
-    assert.equal(f.agents.get(newChild.id), undefined);
-    assert.equal(f.agents.isOwnedBy(newChild.id, parent), false);
-  } finally { for (const run of runs.reverse()) await run.dispose(); await f.dispose(); }
+  } finally { await f.dispose(); }
 });
 
 test("failed cold UI plugin startup releases native listeners before subsequent child creation", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true });
-  const runs: SubagentActivation[] = [];
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as unknown as DsmmProfileRuntime;
     const parent = await f.create();
@@ -102,35 +99,34 @@ test("failed cold UI plugin startup releases native listeners before subsequent 
     };
     await assert.rejects(readColdProfileSettings(f.ctx, failingReader, resolveConfig(), runtime.admission().deployment), (error: unknown) => error === failure);
     assert.equal(released, true, "failed reader cleanup must be awaited before returning");
-    const child = await startSuccessorReviewer(f.ctx, parent, runs);
+    const child = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", parent);
     assert.equal(f.agents.isOwnedBy(child.id, parent), true);
     const admission = runtime.admission(structural(child));
     assert.equal(admission.epoch, runtime.admission(structural(parent)).epoch);
-    assert.equal(admission.childCapture!.parentSessionId, parent.id);
-    assert.equal(admission.childCapture!.originalAdmissionEpoch, runtime.admission(structural(parent)).epoch);
-    assert.equal((await runs[0]!.result).stopReason, "completed");
+    assert.equal(child.session.header.parentSession, parent.id);
+    assert.equal(f.ctx.get("dsmmNativeAdmission")!.invocation(child)?.target, "dsmm-reviewer");
+    await runFixtureTurn(child);
+    assert.ok(child.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "completed"));
+    await f.releaseAuxiliary(child);
     assert.equal(f.agents.get(child.id), undefined);
     assert.equal(f.agents.isOwnedBy(child.id, parent), false);
-  } finally { for (const run of runs.reverse()) await run.dispose(); await f.dispose(); }
+  } finally { await f.dispose(); }
 });
 
-test("a refused native reviewer result retains its real run disposer for acceptance cleanup", async () => {
+test("a failed native reviewer turn retains exact owned-child cleanup", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true });
-  const runs: SubagentActivation[] = [];
   try {
     const parent = await f.create();
     f.adapter.failModels.add("native-default");
-    const child = await startSuccessorReviewer(f.ctx, parent, runs);
-    assert.equal(runs.length, 1);
-    assert.equal(f.agents.get(runs[0]!.childId), child);
+    const child = await f.createAuxiliary("dsmm-reviewer", undefined, "continuable", parent);
+    assert.equal(f.agents.get(child.id), child);
     assert.equal(f.agents.isOwnedBy(child.id, parent), true);
-    assert.notEqual((await runs[0]!.result).stopReason, "completed");
+    await runFixtureTurn(child);
+    assert.ok(child.session.snapshotEvents().some(event => event.type === "turn/end" && event.data.reason.kind === "error"));
+    await f.releaseAuxiliary(child);
     assert.equal(f.agents.get(child.id), undefined);
     assert.equal(f.agents.isOwnedBy(child.id, parent), false);
-    await runs[0]!.dispose();
-    assert.equal(f.agents.get(child.id), undefined);
-    assert.equal(f.agents.isOwnedBy(child.id, parent), false);
-  } finally { for (const run of runs.reverse()) await run.dispose(); await f.dispose(); }
+  } finally { await f.dispose(); }
 });
 
 test("UI storage uses shared native documents and entry-scoped selection and session files", async () => {
@@ -143,7 +139,9 @@ test("UI storage uses shared native documents and entry-scoped selection and ses
     const other = ProfileStore.fromCentral(home, hostProfileDir, "other-entry");
     const content = '{"version":1,"id":"owned","settings":{"defaultActive":true}}\n';
     const saved = await store.save({ id: "owned", content, expectedRevision: null });
-    await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
+    const selected = await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
+    assert.equal(selected.selection.sourceRevision, saved.revision);
+    assert.match(selected.selection.appliedRevision!, /^snapshot-v1-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
     await other.select({ id: null, expectedSelectionRevision: "absent" });
     const storage = await validatedProfileStorage(store, options);
     const otherStorage = await validatedProfileStorage(other, { ...options, entryId: "other-entry" });
@@ -165,7 +163,11 @@ test("UI storage uses shared native documents and entry-scoped selection and ses
     await writeFile(storage.lockPath, lockOwner, { flag: "wx" });
     try {
       assert.equal((await store.read(saved.id)).content, content);
-      assert.equal((await store.loadSelection()).appliedRevision, saved.revision);
+      const loaded = await store.loadSelection();
+      assert.equal(loaded.selectedId, saved.id);
+      assert.equal(loaded.appliedRevision, selected.selection.appliedRevision);
+      assert.equal(loaded.sourceRevision, saved.revision);
+      assert.equal(loaded.content, content);
       await assert.rejects(store.save({ id: saved.id, content, expectedRevision: saved.revision }), { code: "lock-timeout" });
       assert.equal(await readFile(storage.lockPath, "utf8"), lockOwner);
       assert.deepEqual(await readFile(storage.pointerPath), pointerBefore);
@@ -216,7 +218,8 @@ test("historical explicit UI storage keeps its read-lock contract while current 
     const store = new ProfileStore(profileDir, { lockTimeoutMs: 0 });
     const content = '{"version":1,"id":"historical","settings":{}}\n';
     const saved = await store.save({ id: "historical", content, expectedRevision: null });
-    await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
+    const selected = await store.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
+    assert.equal(selected.selection.sourceRevision, saved.revision);
     const options = { env: { DSH_HOME: home }, hostProfileDir, version: "0.1.8" };
     const historical = await validatedProfileStorage({ profileDir: store.profileDir }, options);
     assert.equal(historical.pointerPath, join(profileDir, ".selection.json"));
@@ -227,7 +230,11 @@ test("historical explicit UI storage keeps its read-lock contract while current 
       const legacy = ProfileStore.fromLegacy(profileDir);
       const storage = await validatedProfileStorage(legacy, { ...options, version: "0.2.0" });
       assert.equal(storage.origin, "legacy");
-      assert.equal((await legacy.loadSelection()).appliedRevision, saved.revision);
+      const loaded = await legacy.loadSelection();
+      assert.equal(loaded.selectedId, saved.id);
+      assert.equal(loaded.appliedRevision, selected.selection.appliedRevision);
+      assert.equal(loaded.sourceRevision, saved.revision);
+      assert.equal(loaded.content, content);
       await assert.rejects(legacy.save({ id: saved.id, content, expectedRevision: saved.revision }), { code: "unavailable" });
     } finally { await unlink(historical.lockPath); }
   } finally { await rm(home, { recursive: true, force: false }); }

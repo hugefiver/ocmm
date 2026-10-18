@@ -11,7 +11,6 @@ import { dshTarballUrlForVersion, prepareDshRuntimeInput, verifySha512Integrity 
 test("versioned DSH runtime input selects the trusted historical and 030 tarball identities", () => {
   assert.equal(dshTarballUrlForVersion("0.2.2"), "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.2.0-rc.2.tgz");
   assert.equal(dshTarballUrlForVersion("0.3.0"), "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.2.1-rc.1.tgz");
-  assert.throws(() => dshTarballUrlForVersion("0.3.1"));
 });
 
 test("SHA512 verification binds exact bytes and failed preparation removes only its fresh destination", async () => {
@@ -27,8 +26,16 @@ test("SHA512 verification binds exact bytes and failed preparation removes only 
   const parent = await mkdtemp(join(tmpdir(), "dsmm-runtime-input-test-"));
   const destination = join(parent, "input");
   try {
-    await assert.rejects(prepareDshRuntimeInput({ packageVersion: "0.3.0", destination }, async () => new Response(bytes, { status: 200 })));
-    assert.equal(existsSync(destination), false);
+    for (const packageVersion of ["0.3.0", "0.3.1"]) {
+      let requested = false;
+      await assert.rejects(prepareDshRuntimeInput({ packageVersion, destination }, async (url: string) => {
+        requested = true;
+        assert.equal(url, dshTarballUrlForVersion(packageVersion));
+        return new Response(bytes, { status: 200 });
+      }), /integrity mismatch/u);
+      assert.equal(requested, true);
+      assert.equal(existsSync(destination), false);
+    }
     assert.equal(existsSync(parent), true);
   } finally {
     await rm(parent, { recursive: true, force: false });

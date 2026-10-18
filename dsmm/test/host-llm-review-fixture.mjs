@@ -8,6 +8,7 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createDsmmLlmColdStartup } from "../src/host-llm-startup.ts";
+import { inspectSourceCandidateRuntime } from "./host-llm-candidate-support.mjs";
 
 const native = createRequire(process.env.DSMM_TEST_DSH_ENTRY);
 export const load = name => import(pathToFileURL(native.resolve(name)).href);
@@ -130,6 +131,7 @@ export async function fixture(t, controls = {}) {
     await startup.prepare(host);
   });
   ready = startup.assertReady(); agent = await created.promise;
+  inspectSourceCandidateRuntime(ctx, { mode: "manual" });
   }
   await bootHost();
   return { get ctx() { return ctx; }, get ready() { return ready; }, get agent() { return agent; }, bodies, errors, failures, requests, admissionLife, LlmError, activations,

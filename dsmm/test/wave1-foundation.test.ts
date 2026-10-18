@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,14 +9,10 @@ import { DsmmConfigValidationError, diagnostic, diagnosticSourcePath, fieldLocat
 import { parseGlobalConfig } from "../src/deployment-config.js";
 import { parseProfileDocument, profileErrorInfo, requiredDeepworkRoles, resolveProfileSettings, validateProfileDocument } from "../src/profiles.js";
 import { ProfileStore } from "../src/profile-store.js";
-import { DsmmProfileRuntime } from "../src/profile-runtime.js";
 import { admissionFromChildCapture, parseChildAdmissionCapture, parseLegacyChildEvidence } from "../src/child-capture.js";
 import type { ChildAdmissionCaptureV3 } from "../src/child-capture.js";
 import { parseChildAdmissionEvidenceView } from "../src/child-evidence.js";
 import { parseDsmmInvocationView, parseProfileDiagnostic, parseRoleAvailability, parseSubagentRuntimeAdmissionView, TYPERT_REMOTE } from "../src/profile-remote.js";
-import type { DshAgent, DshContext } from "../src/dsh-types.js";
-import type { DsmmProfileAdmission } from "../src/settings.js";
-import type { DsmmChildAdmissionAuthority, ParentAdmissionTicket } from "../src/child-admission-contract.js";
 
 const raw = (settings: unknown, label?: string) => JSON.stringify({ version: 1, id: "focus", ...(label === undefined ? {} : { label }), settings });
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -27,8 +23,6 @@ function capture(child = "child/opaque", parent = "parent/opaque", epoch = "a".r
       requestedRoute: { provider: "fixture", model: "old-model", reasoningEffort: "low" }, effortSource: "dsmm-config", routeSource: "level" },
     runtimePolicyCapture: { modules: settings.modules, roleRouting: settings.roleRouting, runtimePolicy: settings.runtimePolicy, workflow: settings.workflow,
       guards: settings.guards, runtimeRecovery: settings.runtimeRecovery, defaultActive: settings.defaultActive, skills: settings.skills,
-      deepseekV4ProCalibration: settings.deepseekV4ProCalibration, deepseekV4ProDefaultReasoningEffort: settings.deepseekV4ProDefaultReasoningEffort,
-      deepseekFlashCalibration: settings.deepseekFlashCalibration, deepseekFlashDefaultReasoningEffort: settings.deepseekFlashDefaultReasoningEffort,
       subagents: { enableRunInBackground: false, backgroundMode: "one-shot" } },
     authorityCeiling: { roles: ["dsmm-reviewer"], readOnly: true, toolFilter: { allow: ["read"] }, allowRouteOverride: false, maxDepth: 1 }, locale: "ja", toolTopology: "per-role" };
 }
@@ -67,8 +61,8 @@ test("locale allowlist has no default, alias or implicit normalization; override
   for (const key of ["allowRouteOverride", "maxDepth", "enableRunInBackground", "backgroundMode"]) assert.throws(() => parseProfileDocument(raw({ subagents: { [key]: true } })));
 });
 
-test("both deprecated fields are refused with the exact safe field through every config parser", () => {
-  for (const field of ["deepseekV4ProMaxReasoningPresets", "deepseekFlashMaxReasoningPresets"]) {
+test("retired fields are refused with the exact safe field through every config parser", () => {
+  for (const field of ["deepseekV4ProMaxReasoningPresets", "deepseekFlashMaxReasoningPresets", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"]) {
     for (const parse of [resolveConfig, validateSparseConfig, DSMM_CONFIG_SCHEMA, DSMM_NATIVE_CONFIG_SCHEMA, DSMM_SETTINGS_SCHEMA]) {
       assert.throws(() => parse({ [field]: [] } as never), (error: unknown) => error instanceof DsmmConfigValidationError && error.diagnostic.code === "deprecated-field" && error.diagnostic.field === field);
     }
@@ -116,6 +110,8 @@ test("blank label is the only warning and persists across raw save/list/pinned d
     assert.equal((await f.store.read("focus")).warnings?.[0]?.location?.line, 2);
     const selected = await f.store.select({ id: "focus", expectedRevision: saved.revision, expectedSelectionRevision: "absent" });
     assert.equal(selected.selection.warnings?.[0]?.code, "blank-label");
+    assert.equal(selected.selection.sourceRevision, saved.revision);
+    assert.match(selected.selection.appliedRevision!, /^snapshot-v1-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
     const session = await f.store.selectSession({ sessionId: "root", id: "focus", expectedRevision: saved.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: "a".repeat(64) }, "b".repeat(64), () => true, { assertCurrent() {}, committed() {} });
     assert.equal(session.selection.warnings?.[0]?.code, "blank-label");
     const reopened = new ProfileStore(f.store.profileDir);
@@ -126,7 +122,9 @@ test("blank label is the only warning and persists across raw save/list/pinned d
     assert.equal((await reopened.loadSessionSelection("root")).warnings?.[0]?.code, "blank-label");
     await f.store.save({ id: "focus", content: raw({}, "Nonblank"), expectedRevision: saved.revision });
     assert.equal((await reopened.loadSelection()).warnings?.[0]?.code, "blank-label", "warnings come from admitted immutable revision, not current draft");
-    assert.equal(readFileSync(join(f.store.profileDir, ".revisions", `${saved.revision}.jsonc`), "utf8"), content);
+    assert.equal((await reopened.loadSelection()).appliedRevision, selected.selection.appliedRevision);
+    assert.equal((await reopened.loadSelection()).sourceRevision, saved.revision);
+    assert.equal(readFileSync(join(f.store.profileDir, ".revisions", `${selected.selection.appliedRevision}.jsonc`), "utf8"), content);
     for (const label of [42, "\n", "x".repeat(121), "\uD800"]) assert.throws(() => parseProfileDocument(JSON.stringify({ version: 1, id: "focus", label, settings: {} })));
   } finally { f.cleanup(); }
 });
@@ -192,235 +190,11 @@ test("legacy evidence does not fabricate pin/epoch/level and permits only finite
   assert.throws(() => parseChildAdmissionEvidenceView({ ...view, provenFields: new Array(1) }));
 });
 
-function runtimeFixture() {
-  const f = fixture(), roots: DshAgent[] = [], owners = new Map<DshAgent, DshAgent>();
-  const created: { listener?: (event: { agent: DshAgent; signal?: AbortSignal }) => Promise<void> } = {};
-  const disposed: { listener?: (event: { agent: DshAgent }) => void } = {};
-  const ctx: DshContext = { get(name) { return (name === "agents" ? { list: () => roots, get: (id: string) => roots.find(agent => agent.id === id), isOwnedBy: (id: string, parent: DshAgent) => owners.get(roots.find(agent => agent.id === id)!) === parent } : undefined) as never; }, on(event, listener) { if (event === "agent/created") created.listener = listener as typeof created.listener; if (event === "agent/disposed") disposed.listener = listener as typeof disposed.listener; } };
-  const agent = (id: string, origin?: "subagent"): DshAgent => ({ id, status: "idle", session: { id, header: { origin }, events: [], append() {} }, async runMaintenance(callback) { return callback(new AbortController().signal); } });
-  return { ...f, roots, owners, created, disposed, ctx, agent };
-}
-
 test("invocation projections are strict observed metadata, not permission-bearing wire arguments", () => {
   const invocation = { role: "dsmm-reviewer", label: "DW Reviewer · High", level: "high", routeSource: "level", route: { provider: "fixture", model: "review-high", reasoningEffort: "high" }, mode: "continuable", childId: "opaque/native/child" };
   assert.deepEqual(parseDsmmInvocationView(invocation), invocation);
   for (const invalid of [{ ...invocation, role: "dsmm-orchestrator" }, { ...invocation, level: "default" }, { ...invocation, allowRouteOverride: true }, { ...invocation, route: { provider: "fixture" } }, { ...invocation, routeSource: "PRIVATE_PATH" }, { ...invocation, childId: "\u0000PRIVATE" }]) assert.throws(() => parseDsmmInvocationView(invalid));
   const copied = parseDsmmInvocationView(invocation); copied.route!.model = "changed"; assert.equal(invocation.route.model, "review-high");
-});
-
-test("missing Host authority refuses role-policy Apply and cold child admission without committing or borrowing parent settings", async () => {
-  const f = runtimeFixture();
-  try {
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig({ defaultActive: true }), f.store, { validateCandidate() {} }); await runtime.initialize();
-    const root = f.agent("root"); f.roots.push(root); await f.created.listener!({ agent: root });
-    const old = runtime.admission(root);
-    const saved = await runtime.save({ id: "focus", content: raw({ roles: { "dsmm-builder": false } }), expectedRevision: null });
-    await assert.rejects(runtime.selectSession({ sessionId: "root", id: "focus", expectedRevision: saved.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: old.epoch }, root), { code: "unavailable" });
-    assert.equal((await f.store.loadSessionSelection("root")).selectionRevision, "absent"); assert.equal(runtime.admission(root), old);
-    const child = f.agent("cold", "subagent"); f.roots.push(child); f.owners.set(child, root);
-    await assert.rejects(f.created.listener!({ agent: child }), { code: "unavailable" });
-    assert.throws(() => runtime.getSettings(child), { code: "activation" });
-  } finally { f.cleanup(); }
-});
-
-test("Apply prepares authority before durable commit and publishes/rotates synchronously; a failed CAS never rotates", async () => {
-  const f = runtimeFixture(), states = new Map<DshAgent, { admission: DsmmProfileAdmission; controller: AbortController; owner: object }>();
-  const events: string[] = [], owner = {};
-  let deliveryReady = true;
-  const authority: DsmmChildAdmissionAuthority = {
-    view: () => ({ binding: "dsmm", deliveryFenceReady: deliveryReady, restartRequired: false, ...(deliveryReady ? {} : { reason: "authority-not-ready" as const }) }),
-    registerParent(parent, admission, actualOwner) { states.set(parent, { admission, controller: new AbortController(), owner: actualOwner }); },
-    acquireParentTicket(parent): ParentAdmissionTicket { const state = states.get(parent)!; return { parent, admission: state.admission, owner: state.owner, parentEpoch: state.admission.epoch, signal: state.controller.signal }; },
-    async resolveChildEvidence() { throw new Error("not used"); },
-    prepareParentAdmission(parent, expectedEpoch, next) { assert.equal(states.get(parent)!.admission.epoch, expectedEpoch); assert.notEqual(expectedEpoch, next.epoch); assert.equal(existsSync(join(f.store.stateDir, ".sessions", `${hash(parent.id!)}.json`)), false); events.push("prepared"); },
-    publishParentAdmission(parent, expectedEpoch, next, install) { const state = states.get(parent)!; assert.equal(state.admission.epoch, expectedEpoch); assert.equal(existsSync(join(f.store.stateDir, ".sessions", `${hash(parent.id!)}.json`)), true); events.push("publish"); const old = state.controller; install(); state.admission = next; state.controller = new AbortController(); old.abort(); events.push("rotated"); },
-    revokeParent(parent) { states.get(parent)?.controller.abort(); states.delete(parent); }
-  };
-  try {
-    const partial = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {}, validateRootRole() {}, childAuthority: authority, childAuthorityOwner: owner });
-    assert.equal(partial.admission().subagentRuntime?.deliveryFenceReady, false, "authority alone cannot advertise the missing completion consumers as ready");
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {}, validateRootRole() {}, childAuthority: authority, childAuthorityOwner: owner,
-      childAdmission: { async prepare() { throw new Error("not used by this Apply test"); }, validateRole() {} } }); await runtime.initialize();
-    const root = f.agent("root"); f.roots.push(root); await f.created.listener!({ agent: root });
-    const old = runtime.admission(root), ticket = authority.acquireParentTicket(root);
-    deliveryReady = false;
-    assert.equal(runtime.getSettings.subagentRuntime!().deliveryFenceReady, false, "safe status consumers observe current service availability, not the immutable admission-time view");
-    assert.equal(old.subagentRuntime?.deliveryFenceReady, true);
-    deliveryReady = true;
-    const saved = await runtime.save({ id: "focus", content: raw({ roles: { "dsmm-builder": false }, locale: "de" }, " "), expectedRevision: null });
-    const request = { sessionId: "root", id: "focus", expectedRevision: saved.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: old.epoch };
-    const result = await runtime.selectSession(request, root);
-    assert.deepEqual(events, ["prepared", "publish", "rotated"]); assert.equal(ticket.signal.aborted, true); assert.equal(runtime.admission(root), states.get(root)!.admission);
-    assert.equal(result.warnings?.[0]?.code, "blank-label"); assert.equal(result.roles?.find(role => role.id === "dsmm-builder")?.reason, "profile-disabled");
-    assert.equal((await runtime.getSession(root)).warnings?.[0]?.code, "blank-label");
-    await assert.rejects(async () => runtime.selectSession(request, root), { code: "conflict" }); assert.equal(events.length, 3);
-  } finally { f.cleanup(); }
-});
-
-test("a delegating child's original capture, role validation and authority registration finish before publication", async () => {
-  const f = runtimeFixture(), owner = {}, states = new Map<DshAgent, DsmmProfileAdmission>(), events: string[] = [];
-  const signal = new AbortController().signal;
-  const authority: DsmmChildAdmissionAuthority = { view: () => ({ binding: "dsmm", deliveryFenceReady: true, restartRequired: false }),
-    registerParent(parent, admission) { events.push(`register:${parent.id}`); states.set(parent, admission); },
-    acquireParentTicket(parent) { const admission = states.get(parent)!; return { parent, owner, admission, parentEpoch: admission.epoch, signal }; },
-    async resolveChildEvidence() { throw new Error("not used"); }, prepareParentAdmission() {}, publishParentAdmission(_parent, _epoch, _next, install) { install(); }, revokeParent(parent) { states.delete(parent); } };
-  try {
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {}, validateRootRole(agent) { assert.equal(states.has(agent), false); events.push("root-role"); }, childAuthority: authority, childAuthorityOwner: owner,
-      childAdmission: { async prepare(agent, parent, ticket) { events.push("prepare"); const original = capture(agent.id!, parent.id!, ticket.parentEpoch); return { creation: true, evidence: original, admission: admissionFromChildCapture(original, resolveConfig()) }; }, validateRole(agent, _parent, prepared) { events.push("role"); assert.equal(states.has(agent), false); assert.equal(prepared.admission.settings.guards.gitWriteGuard, "deny"); assert.throws(() => runtime.getSettings(agent)); } } });
-    await runtime.initialize(); const root = f.agent("root"); f.roots.push(root); await f.created.listener!({ agent: root });
-    const child = f.agent("child", "subagent"); f.roots.push(child); f.owners.set(child, root); await f.created.listener!({ agent: child });
-    assert.deepEqual(events, ["root-role", "root-role", "register:root", "prepare", "role", "register:child"]);
-    assert.ok(await f.store.readChildAdmission("child", "root")); assert.equal(runtime.admission(child), states.get(child));
-    assert.equal(authority.acquireParentTicket(child).admission.settings.guards.gitWriteGuard, "deny");
-  } finally { f.cleanup(); }
-});
-
-test("cold child admission retains its original policy/epoch rather than a newly permissive parent's settings", async () => {
-  const f = runtimeFixture(), owner = {}, states = new Map<DshAgent, DsmmProfileAdmission>();
-  const signal = new AbortController().signal;
-  const authority: DsmmChildAdmissionAuthority = { view: () => ({ binding: "dsmm", deliveryFenceReady: true, restartRequired: false }),
-    registerParent(parent, admission) { states.set(parent, admission); },
-    acquireParentTicket(parent) { const admission = states.get(parent)!; return { parent, owner, admission, parentEpoch: admission.epoch, signal }; },
-    async resolveChildEvidence() { throw new Error("not used"); }, prepareParentAdmission() {}, publishParentAdmission(_parent, _epoch, _next, install) { install(); }, revokeParent(parent) { states.delete(parent); } };
-  try {
-    const original = capture("cold", "root"); await f.store.createChildAdmission(original);
-    let validated = false;
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig({ locale: "ru", guards: { gitWriteGuard: "off" }, subagents: { allowRouteOverride: true } }), f.store, {
-      validateCandidate() {}, validateRootRole() {}, childAuthority: authority, childAuthorityOwner: owner,
-      childAdmission: { async prepare() { return { creation: false, evidence: original, admission: admissionFromChildCapture(original, resolveConfig()) }; }, validateRole(_agent, _parent, prepared) { assert.equal(prepared.admission.epoch, original.originalAdmissionEpoch); validated = true; } }
-    });
-    await runtime.initialize(); const root = f.agent("root"); f.roots.push(root); await f.created.listener!({ agent: root });
-    assert.notEqual(runtime.admission(root).epoch, original.originalAdmissionEpoch);
-    const child = f.agent("cold", "subagent"); f.roots.push(child); f.owners.set(child, root); await f.created.listener!({ agent: child });
-    assert.equal(validated, true); assert.equal(runtime.admission(child).epoch, original.originalAdmissionEpoch);
-    assert.equal(runtime.getSettings(child).guards.gitWriteGuard, "deny"); assert.equal(runtime.getSettings(child).locale, "ja"); assert.equal(runtime.getSettings(child).subagents.allowRouteOverride, false);
-    assert.equal(authority.acquireParentTicket(child).admission, runtime.admission(child));
-    assert.equal(runtime.getSettings(root).guards.gitWriteGuard, "off");
-    assert.deepEqual(await f.store.readChildAdmission("cold", "root"), original);
-    assert.deepEqual(await runtime.resolveOriginalChildEvidence(authority.acquireParentTicket(root), "cold", signal), original);
-  } finally { f.cleanup(); }
-});
-
-test("installed guards admit an existing hierarchy parent-first and retained direct parents keep original evidence", async () => {
-  const f = runtimeFixture(), owner = {}, states = new Map<DshAgent, DsmmProfileAdmission>(), events: string[] = [];
-  const signal = new AbortController().signal;
-  let ready = false;
-  const authority: DsmmChildAdmissionAuthority = { view: () => ({ binding: "dsmm", deliveryFenceReady: ready, restartRequired: false }),
-    registerParent(parent, admission) { states.set(parent, admission); events.push(`register:${parent.id}`); },
-    acquireParentTicket(parent) { assert.equal(ready, true); const admission = states.get(parent)!; assert.ok(admission); return { parent, owner, admission, parentEpoch: admission.epoch, signal }; },
-    async resolveChildEvidence() { throw new Error("not used"); }, prepareParentAdmission() {}, publishParentAdmission(_parent, _epoch, _next, install) { install(); }, revokeParent(parent) { states.delete(parent); } };
-  try {
-    const childCapture = capture("child", "root"); childCapture.role = "dsmm-builder"; childCapture.invocation.level = "normal"; childCapture.invocation.routeSource = "inherited"; childCapture.authorityCeiling = { roles: ["dsmm-builder", "dsmm-reviewer"], readOnly: false, toolFilter: { allow: ["read", "dsmm_reviewer"] }, allowRouteOverride: false, maxDepth: 3 };
-    const grandCapture = capture("grand", "child"); grandCapture.authorityCeiling.maxDepth = 3;
-    await f.store.createChildAdmission(childCapture); await f.store.createChildAdmission(grandCapture);
-    const root = f.agent("root"), child = f.agent("child", "subagent"), grand = f.agent("grand", "subagent");
-    f.roots.push(grand, child, root); f.owners.set(child, root); f.owners.set(grand, child);
-    const makeRuntime = (): DsmmProfileRuntime => new DsmmProfileRuntime(f.ctx, resolveConfig({ locale: "ru", guards: { gitWriteGuard: "off" } }), f.store, {
-      validateCandidate() {}, validateRootRole() { events.push("root-role"); }, childAuthority: authority, childAuthorityOwner: owner,
-      onAdmissionGuardsInstalled(runtime) { assert.ok(f.created.listener); assert.equal(runtime.getSettings.subagentRuntime!().deliveryFenceReady, false); ready = true; events.push("guards-ready"); },
-      childAdmission: { async prepare(agent, parent, ticket, merged) {
-        assert.equal(ticket.parent, parent); events.push(`prepare:${agent.id}:via:${parent.id}`);
-        const evidence = await runtime.resolveOriginalChildEvidence(ticket, agent.id!, merged);
-        if ("mode" in evidence) assert.fail("a captured hierarchy cannot become legacy");
-        return { evidence, creation: false, admission: admissionFromChildCapture(evidence, runtime.getStartupSettings()) };
-      }, validateRole(agent, parent, candidate) {
-        assert.throws(() => runtime.getSettings(agent), { code: "activation" });
-        assert.equal(candidate.admission.settings.guards.gitWriteGuard, "deny");
-        assert.equal(candidate.admission.epoch, "a".repeat(64));
-        if (parent === child) assert.equal(authority.acquireParentTicket(parent).admission, runtime.admission(child));
-        events.push(`role:${agent.id}:retained:${candidate.retained}`);
-      } }
-    });
-    let runtime = makeRuntime(); await runtime.initialize();
-    assert.deepEqual(events, ["guards-ready", "root-role", "root-role", "register:root", "prepare:child:via:root", "role:child:retained:false", "register:child", "prepare:grand:via:child", "role:grand:retained:false", "register:grand"]);
-    const originalChild = runtime.admission(child), originalGrand = runtime.admission(grand);
-    assert.notEqual(runtime.admission(root).epoch, originalChild.epoch);
-    await assert.rejects(runtime.resolveOriginalChildEvidence(authority.acquireParentTicket(root), "grand", signal), { code: "not-owned" });
-    assert.deepEqual(await runtime.resolveOriginalChildEvidence(authority.acquireParentTicket(child), "grand", signal), grandCapture);
-    states.clear(); events.length = 0; ready = false; runtime = makeRuntime(); await runtime.initialize();
-    assert.equal(runtime.admission(child), originalChild); assert.equal(runtime.admission(grand), originalGrand);
-    assert.ok(events.includes("role:child:retained:true")); assert.ok(events.includes("role:grand:retained:true"));
-    assert.equal(authority.acquireParentTicket(child).admission, originalChild);
-    assert.equal(await runtime.completeAdmission(child), originalChild);
-  } finally { f.cleanup(); }
-});
-
-test("original evidence reader fences epoch revocation and never downgrades corrupt captures to legacy", async () => {
-  const f = runtimeFixture(), owner = {}, states = new Map<DshAgent, { admission: DsmmProfileAdmission; controller: AbortController }>();
-  const authority: DsmmChildAdmissionAuthority = { view: () => ({ binding: "dsmm", deliveryFenceReady: true, restartRequired: false }),
-    registerParent(parent, admission) { states.set(parent, { admission, controller: new AbortController() }); },
-    acquireParentTicket(parent) { const state = states.get(parent)!; return { parent, owner, admission: state.admission, parentEpoch: state.admission.epoch, signal: state.controller.signal }; },
-    async resolveChildEvidence() { throw new Error("not used"); }, prepareParentAdmission() {},
-    publishParentAdmission(parent, _epoch, next, install) { const state = states.get(parent)!; install(); state.admission = next; state.controller.abort(); state.controller = new AbortController(); },
-    revokeParent(parent) { states.get(parent)?.controller.abort(); states.delete(parent); } };
-  try {
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {}, validateRootRole() {}, childAuthority: authority, childAuthorityOwner: owner,
-      childAdmission: { async prepare() { throw new Error("not used"); }, validateRole() {} } });
-    await runtime.initialize(); const root = f.agent("root"); f.roots.push(root); await runtime.completeAdmission(root);
-    const original = capture("cold", "root"); await f.store.createChildAdmission(original);
-    let legacyCalls = 0;
-    const legacy = async (_ticket: ParentAdmissionTicket, childId: string) => { legacyCalls++; return parseLegacyChildEvidence({ version: 1, mode: "legacy-conservative", childSessionId: childId, parentSessionId: "root", role: "dsmm-reviewer", route: { provider: "fixture", model: "legacy-model" }, depth: 1, provenFields: ["lineage", "role", "route"], limitations: [{ field: "git-write", code: "missing-evidence", effect: "capability-denied" }] }); };
-    const ticket = authority.acquireParentTicket(root), signal = new AbortController().signal;
-    assert.deepEqual(await runtime.resolveOriginalChildEvidence(ticket, "cold", signal, legacy), original); assert.equal(legacyCalls, 0);
-    assert.equal((await runtime.resolveOriginalChildEvidence(ticket, "legacy", signal, legacy) as { mode: string }).mode, "legacy-conservative"); assert.equal(legacyCalls, 1);
-    const path = join(f.store.stateDir, ".children", "v1", `${hash("cold")}.json`); const bytes = readFileSync(path, "utf8");
-    writeFileSync(path, bytes.replace("old-model", "changed-model"));
-    await assert.rejects(runtime.resolveOriginalChildEvidence(ticket, "cold", signal, legacy), { code: "corrupt-selection" }); assert.equal(legacyCalls, 1);
-    writeFileSync(path, bytes);
-    const read = f.store.readChildAdmission.bind(f.store);
-    let started!: () => void, release!: () => void;
-    const began = new Promise<void>(resolve => { started = resolve; }), held = new Promise<void>(resolve => { release = resolve; });
-    f.store.readChildAdmission = async (childId, parentId) => { started(); await held; return read(childId, parentId); };
-    const pending = runtime.resolveOriginalChildEvidence(ticket, "cold", signal, legacy); await began;
-    const saved = await runtime.save({ id: "focus", content: raw({ locale: "de" }), expectedRevision: null });
-    await runtime.selectSession({ sessionId: "root", id: "focus", expectedRevision: saved.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: ticket.parentEpoch }, root);
-    release(); await assert.rejects(pending, { name: "AbortError" }); assert.equal(legacyCalls, 1);
-    assert.deepEqual(await read("cold", "root"), original);
-  } finally { f.cleanup(); }
-});
-
-test("capture persistence failure publishes no child admission or delegating authority", async () => {
-  const f = runtimeFixture(), owner = {}, states = new Map<DshAgent, DsmmProfileAdmission>();
-  const signal = new AbortController().signal;
-  const authority: DsmmChildAdmissionAuthority = { view: () => ({ binding: "dsmm", deliveryFenceReady: true, restartRequired: false }),
-    registerParent(parent, admission) { states.set(parent, admission); },
-    acquireParentTicket(parent) { const admission = states.get(parent)!; return { parent, owner, admission, parentEpoch: admission.epoch, signal }; },
-    async resolveChildEvidence() { throw new Error("not used"); }, prepareParentAdmission() {}, publishParentAdmission(_parent, _epoch, _next, install) { install(); }, revokeParent(parent) { states.delete(parent); } };
-  try {
-    f.store.createChildAdmission = async () => { throw new Error("PRIVATE_IO_FAILURE"); };
-    let roleValidated = false;
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {}, validateRootRole() {}, childAuthority: authority, childAuthorityOwner: owner,
-      childAdmission: { async prepare(agent, parent, ticket) { const evidence = capture(agent.id!, parent.id!, ticket.parentEpoch); return { creation: true, evidence, admission: admissionFromChildCapture(evidence, resolveConfig()) }; }, validateRole() { roleValidated = true; } } });
-    await runtime.initialize(); const root = f.agent("root"); f.roots.push(root); await f.created.listener!({ agent: root });
-    const child = f.agent("failed", "subagent"); f.roots.push(child); f.owners.set(child, root);
-    await assert.rejects(f.created.listener!({ agent: child }));
-    assert.equal(states.has(child), false); assert.equal(roleValidated, false); assert.throws(() => runtime.admission(child), { code: "activation" });
-  } finally { f.cleanup(); }
-});
-
-test("child preparation refuses a foreign owner or reconstructed parent admission before reading or persisting evidence", async () => {
-  const f = runtimeFixture(), owner = {}, foreign = {}, states = new Map<DshAgent, DsmmProfileAdmission>();
-  const signal = new AbortController().signal;
-  let ticketOwner = owner, reconstruct = false, prepared = 0;
-  const authority: DsmmChildAdmissionAuthority = { view: () => ({ binding: "dsmm", deliveryFenceReady: true, restartRequired: false }),
-    registerParent(parent, admission) { states.set(parent, admission); },
-    acquireParentTicket(parent) { const original = states.get(parent)!; const admission = reconstruct ? { ...original } : original; return { parent, owner: ticketOwner, admission, parentEpoch: admission.epoch, signal }; },
-    async resolveChildEvidence() { throw new Error("not used"); }, prepareParentAdmission() {}, publishParentAdmission(_parent, _epoch, _next, install) { install(); }, revokeParent(parent) { states.delete(parent); } };
-  try {
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {}, validateRootRole() {}, childAuthority: authority, childAuthorityOwner: owner,
-      childAdmission: { async prepare(agent, parent, ticket) { prepared++; const evidence = capture(agent.id!, parent.id!, ticket.parentEpoch); return { creation: true, evidence, admission: admissionFromChildCapture(evidence, resolveConfig()) }; }, validateRole() {} } });
-    await runtime.initialize(); const root = f.agent("root"); f.roots.push(root); await runtime.completeAdmission(root);
-    for (const mode of ["foreign", "reconstructed"] as const) {
-      ticketOwner = mode === "foreign" ? foreign : owner; reconstruct = mode === "reconstructed";
-      const child = f.agent(mode, "subagent"); f.roots.push(child); f.owners.set(child, root);
-      await assert.rejects(runtime.completeAdmission(child), { code: "not-owned" });
-      const evidence = capture(child.id!, root.id!, runtime.admission(root).epoch);
-      await assert.rejects(runtime.completeChildAdmission(child, root, { creation: true, evidence, admission: admissionFromChildCapture(evidence, resolveConfig()) }), { code: "not-owned" });
-      assert.equal(prepared, 0); assert.equal(states.has(child), false);
-      assert.equal(await f.store.readChildAdmission(child.id!, root.id!), null);
-      assert.throws(() => runtime.admission(child), { code: "activation" });
-    }
-  } finally { f.cleanup(); }
 });
 
 test("schema diagnostics redact identifier-shaped secrets while locating each actual unknown key", () => {
@@ -477,52 +251,4 @@ test("capture and wire enum parsers reject string-coercible arrays and objects, 
     writeFileSync(path, JSON.stringify({ version: 1, revision: hash(JSON.stringify(malformed)), capture: malformed }));
     await assert.rejects(f.store.readChildAdmission("reload", "parent"), { code: "corrupt-selection" });
   } finally { f.cleanup(); }
-});
-
-test("a disappeared pinned child namespace is unsafe and cannot trigger legacy recovery", async () => {
-  for (const namespace of [".children", ".children/v1"]) {
-    const f = runtimeFixture(), owner = {}, states = new Map<DshAgent, DsmmProfileAdmission>(), signal = new AbortController().signal;
-    const authority: DsmmChildAdmissionAuthority = { view: () => ({ binding: "dsmm", deliveryFenceReady: true, restartRequired: false }), registerParent(parent, admission) { states.set(parent, admission); }, acquireParentTicket(parent) { const admission = states.get(parent)!; return { parent, owner, admission, parentEpoch: admission.epoch, signal }; }, async resolveChildEvidence() { throw new Error("not used"); }, prepareParentAdmission() {}, publishParentAdmission(_parent, _epoch, _next, install) { install(); }, revokeParent(parent) { states.delete(parent); } };
-    try {
-      const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {}, validateRootRole() {}, childAuthority: authority, childAuthorityOwner: owner, childAdmission: { async prepare() { throw new Error("not used"); }, validateRole() {} } });
-      await runtime.initialize(); const root = f.agent("parent"); f.roots.push(root); await runtime.completeAdmission(root);
-      const original = capture("child", "parent"); await f.store.createChildAdmission(original);
-      const path = join(f.store.stateDir, ".children", "v1", `${hash("child")}.json`), bytes = readFileSync(path);
-      const moved = join(f.directory, "retained-namespace"); renameSync(join(f.store.stateDir, namespace), moved);
-      let legacyCalls = 0;
-      await assert.rejects(runtime.resolveOriginalChildEvidence(authority.acquireParentTicket(root), "child", signal, async () => { legacyCalls++; throw new Error("legacy must not run"); }), { code: "unsafe-path" });
-      assert.equal(legacyCalls, 0);
-      const movedRecord = namespace === ".children" ? join(moved, "v1", `${hash("child")}.json`) : join(moved, `${hash("child")}.json`);
-      assert.deepEqual(readFileSync(movedRecord), bytes);
-      assert.equal(existsSync(join(f.store.stateDir, namespace)), false);
-    } finally { f.cleanup(); }
-  }
-});
-
-for (const invalidation of ["cancel", "revoke", "child-dispose", "publish"] as const) test(`waiting child capture writes nothing after ${invalidation} invalidates authority`, async () => {
-  const f = runtimeFixture(), c = fixture(), owner = {}, states = new Map<DshAgent, { admission: DsmmProfileAdmission; controller: AbortController }>();
-  const caller = new AbortController();
-  const authority: DsmmChildAdmissionAuthority = { view: () => ({ binding: "dsmm", deliveryFenceReady: true, restartRequired: false }), registerParent(parent, admission) { states.set(parent, { admission, controller: new AbortController() }); }, acquireParentTicket(parent) { const state = states.get(parent)!; return { parent, owner, admission: state.admission, parentEpoch: state.admission.epoch, signal: state.controller.signal }; }, async resolveChildEvidence() { throw new Error("not used"); }, prepareParentAdmission() {}, publishParentAdmission(parent, _epoch, next, install) { const previous = states.get(parent)!; install(); states.set(parent, { admission: next, controller: new AbortController() }); previous.controller.abort(); }, revokeParent(parent) { states.get(parent)?.controller.abort(); states.delete(parent); } };
-  const lock = join(c.store.profileDir, ".lock");
-  try {
-    const runtime = new DsmmProfileRuntime(f.ctx, resolveConfig(), f.store, { validateCandidate() {}, validateRootRole() {}, childAuthority: authority, childAuthorityOwner: owner, childCaptureStore: c.store, childAdmission: { async prepare(agent, parent, ticket) { const evidence = capture(agent.id!, parent.id!, ticket.parentEpoch); return { creation: true, evidence, admission: admissionFromChildCapture(evidence, resolveConfig()) }; }, validateRole() {} } });
-    await runtime.initialize(); const root = f.agent("root"); f.roots.push(root); await runtime.completeAdmission(root);
-    const accepted = f.agent("accepted", "subagent"); f.roots.push(accepted); f.owners.set(accepted, root); await runtime.completeAdmission(accepted);
-    const prior = runtime.admission(accepted), acceptedTicket = authority.acquireParentTicket(accepted);
-    const acceptedPath = join(c.store.stateDir, ".children", "v1", `${hash("accepted")}.json`), bytes = readFileSync(acceptedPath);
-    writeFileSync(lock, "held by test owner\n", { flag: "wx" });
-    let started!: () => void; const waiting = new Promise<void>(resolve => { started = resolve; });
-    const create = c.store.createChildAdmission.bind(c.store);
-    c.store.createChildAdmission = (...args) => { started(); return create(...args); };
-    const child = f.agent("pending", "subagent"); f.roots.push(child); f.owners.set(child, root);
-    const pending = runtime.completeAdmission(child, caller.signal); const rejected = assert.rejects(pending); await waiting;
-    if (invalidation === "cancel") caller.abort();
-    if (invalidation === "revoke") authority.revokeParent(root, "test-revocation");
-    if (invalidation === "child-dispose") f.disposed.listener!({ agent: child });
-    if (invalidation === "publish") { const saved = await runtime.save({ id: "focus", content: raw({ locale: "de" }), expectedRevision: null }); await runtime.selectSession({ sessionId: "root", id: "focus", expectedRevision: saved.revision, expectedSelectionRevision: "absent", expectedAdmissionEpoch: runtime.admission(root).epoch }, root); }
-    unlinkSync(lock); await rejected;
-    assert.equal(existsSync(join(c.store.stateDir, ".children", "v1", `${hash("pending")}.json`)), false);
-    assert.equal(states.has(child), false); assert.equal(runtime.admission(accepted), prior); assert.equal(acceptedTicket.signal.aborted, false);
-    assert.deepEqual(readFileSync(acceptedPath), bytes);
-  } finally { if (existsSync(lock)) unlinkSync(lock); c.cleanup(); f.cleanup(); }
 });

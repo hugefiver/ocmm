@@ -4,16 +4,16 @@ import type { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { DshAgent, DshContext } from "./dsh-types.js";
 import type { DsmmRoleId } from "./roles.js";
 import { DsmmRolePolicy } from "./role-policy.js";
-import type { DsmmSettings, DsmmSettingsGetter, DsmmProfileAdmission, DsmmModelRoute } from "./settings.js";
+import type { DsmmSettings, DsmmSettingsGetter, DsmmModelRoute } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 import type { DsmmInvocationView } from "./profile-types.js";
 import type { ResolvedRoleInvocation } from "./role-invocation.js";
-import type { RoleRunRegistry } from "./role-runs.js";
+import type { NativeAdmission } from "./native-admission.js";
 /** Keep native controls on the frozen startup substrate, not desired-save reconciliation. */
 export declare function registerNativeSubagentControls(ctx: Context): Promise<void>;
-/** C's same-run holder/live projection can read the actual lock without reapplying defaults. */
+/** Project the captured invocation without reapplying deployment defaults. */
 export declare function roleInvocationView(invocation: ResolvedRoleInvocation, label: string, mode: DsmmInvocationView["mode"], getSettings: DsmmSettingsGetter, child?: DshAgent, ids?: Pick<DsmmInvocationView, "runId" | "childId" | "jobId">): DsmmInvocationView;
-/** Initial preflight/lock is not an observed SDK request; keep E's distinction truthful. */
+/** Distinguish the captured route from an observed native request. */
 export declare function roleInvocationObservation(invocation: ResolvedRoleInvocation, label: string, mode: DsmmInvocationView["mode"], getSettings: DsmmSettingsGetter, child?: DshAgent, ids?: Pick<DsmmInvocationView, "runId" | "childId" | "jobId">): {
     view: DsmmInvocationView;
     routeKind: "initial" | "actual";
@@ -41,15 +41,6 @@ export interface DsmmRoleRouteComparison {
 }
 /** Both observations belong to this exact native Agent; no parent/settings/route-lock fallback. */
 export declare function roleRouteComparison(child: Agent): DsmmRoleRouteComparison;
-export interface DsmmRoleRunCapture {
-    readonly invocation: ResolvedRoleInvocation;
-    readonly admission: DsmmProfileAdmission;
-}
-/** Created on the parent's stable Host scope, never per profile entry or tool call. */
-export interface DsmmRoleRunsBinding {
-    readonly registry: RoleRunRegistry<DsmmRoleRunCapture, DsmmInvocationView>;
-    readonly owner: object;
-}
 export interface DsmmCallableEntry {
     name: string;
     kind: "role" | "category";
@@ -61,5 +52,5 @@ export declare function callableRoleInventory(settings: DsmmSettings, targets: r
 /** Exact currently exposed definitions, suitable for E's runtime guidance and safe capability views. */
 export declare function admittedCallableRoleInventory(agent: DshAgent, settings: DsmmSettings, policy: DsmmRolePolicy, tools: ToolRuntime): readonly DsmmCallableEntry[];
 /** Published name retained; all native/headless Agents consume one admitted policy. */
-export declare function registerHeadlessRoleTools(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, policy?: DsmmRolePolicy, roleRuns?: DsmmRoleRunsBinding): Promise<void>;
+export declare function registerHeadlessRoleTools(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, policy: DsmmRolePolicy, admission: NativeAdmission, onlyAgent: DshAgent): Promise<void>;
 //# sourceMappingURL=role-subagents.d.ts.map

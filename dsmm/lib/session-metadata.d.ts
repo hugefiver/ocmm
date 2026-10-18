@@ -1,13 +1,14 @@
-import type { DshContext } from "./dsh-types.js";
-export declare const DSMM_PERSISTENCE_COMPATIBILITY: unique symbol;
-/** An ephemeral Host without persistence is safe; a durable Host must use the compatible provider. */
-export declare function assertDsmmMetadataPersistence(ctx: DshContext | undefined): void;
-/** Only these audited, model-hidden records are safe for a stock reader to skip. */
-export declare function annotateDsmmEvent<T extends {
-    type: string;
-    data?: unknown;
-    ignorable?: unknown;
-}>(event: T): T & {
-    ignorable?: true;
-};
+import type { DshSession } from "./dsh-types.js";
+import type { DsmmRolePolicyEventData } from "./dsh-events.js";
+declare module "@deepseek-ai/dsh-session/types" {
+    interface PluginRecordMap {
+        "plugin:dsmm/mode": {
+            active: boolean;
+        };
+        "plugin:dsmm/role-policy": DsmmRolePolicyEventData;
+    }
+}
+/** Model-hidden observations use the official ignorable record boundary, never authorization. */
+export declare function appendModeRecord(session: DshSession, active: boolean): void;
+export declare function appendRolePolicyRecord(session: DshSession, data: DsmmRolePolicyEventData): void;
 //# sourceMappingURL=session-metadata.d.ts.map

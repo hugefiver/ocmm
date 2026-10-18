@@ -1,53 +1,36 @@
 # DSMM roadmap
 
-Current follow-up: 2026-10-16. The supported DSH integration target remains `0.2.0-rc.2`. The manifest remains at published DSMM `0.2.2`; the current source changes aren't a new release or evidence of acceptance in an installed Desktop.
+## Version policy
 
-## Delivery boundary
+**DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`.** Each DSMM version targets the published DSH RC or stable release selected for that version. Older SDKs, old configuration schemas and historical session formats aren't compatibility targets; existing data remains untouched. A newer upstream release requires deliberate reassessment, not an automatic dependency or runtime switch.
 
-Implement features supported by rc.2 without requiring a Host upgrade. A demonstrated interface or implementation blocker may be deferred with its acceptance criteria. Deferred work isn't delivered functionality, and an upstream release note isn't runtime verification. Installing a prerelease, changing Host code or widening permissions requires separate authorization.
+Published `0.3.0` retains its original rc.1 package, tag, assets and version-bound release identity.
 
-The source includes native-only cold runtime selection, Plugins bundle configuration drawers, managed identity and delegation call presentation, generic model routing, named Profiles and captured-child controls. The [README](../README.md) describes those contracts; this roadmap tracks remaining acceptance and blocked work rather than treating implemented basics as future milestones.
+## Current capabilities
 
-## Prerelease reference
+Official AgentRegistry, SubagentRuntime and JSONL namespace plugins own execution and storage. DSMM supplies immutable admission, roles, routing and scoped policy without a custom execution owner, persistence companion or manual-runtime selector. Coding delegation consumes native activation results and cancellation; live direct-child controls use native ownership and capabilities, while descendant inspection remains read-only.
 
-As of 2026-10-16, the npm `@deepseek-ai/dsh` `alpha` tag selects **`0.2.1-alpha.4`**, published on 2026-10-15 at 13:08 UTC. The `latest` and `next` tags still select `0.2.0-rc.2`. The GitHub prerelease [`dsh-v0.2.1-alpha.4`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-alpha.4), published at 13:40 UTC, points to commit [`86a402200d95fecef4529d969836f1fe13c6cb0d`](https://github.com/deepseek-ai/deepseek-harness/commit/86a402200d95fecef4529d969836f1fe13c6cb0d).
+Deployment configuration uses native Plugins forms and separate sparse Global/native-profile layers. Named Profiles preserve draft, saved revision, future default and current admission as distinct states. Global/store CAS, native form revisions, filesystem protection, operator authority and RPC lifetime checks retain their own boundaries. Desired values don't update mounted services or running task policy. Save/future-default selection, model selection, mode changes and overlay Apply have independent capabilities.
 
-The same source declares Desktop version `0.2.1-alpha.4`, but that GitHub release has no attached assets; the manifest alone doesn't establish an available Desktop installer. The SDK client and JSON-RPC server packages also publish an `alpha` version of `0.2.1-alpha.4`. These are investigation candidates, not DSMM's supported runtime baseline.
+Agent-scoped skills expose metadata and load bodies lazily, preserving non-DSMM ancestor winners. Standard model calls use native prepared calls. The minimal public Pi-AI completions seam supports raw/custom and stop-only parameters for self-contained literal or explicit model-mapping configurations. Catalog-backed raw combinations that can't be reliably reproduced are rejected for both native and DSMM parameter sources; standard calls and native effort encoding remain unchanged.
 
-Sources: [CLI registry metadata](https://registry.npmjs.org/@deepseek-ai%2fdsh), [Desktop manifest](https://github.com/deepseek-ai/deepseek-harness/blob/86a402200d95fecef4529d969836f1fe13c6cb0d/apps/desktop/package.json), [SDK client metadata](https://registry.npmjs.org/@deepseek-ai%2fdsh-sdk-client), [SDK server metadata](https://registry.npmjs.org/@deepseek-ai%2fdsh-sdk-jsonrpc-server).
+Native call views show the target in collapsed rows, distinguish requested from actual identity, and retain that distinction for partial output, failure, interruption and current-format replay/PTC. Child labels use `Coding: task description`.
 
-## Remaining work and resumption criteria
+## Remaining capability boundaries
 
-| Direction | Current disposition | Acceptance or evidence needed |
+| Capability | Current behavior | Requirement for broader support |
 | --- | --- | --- |
-| Default optional managed runtime | Native Main `runtime.enabled` is strict boolean, default true; cold startup selects the automatic managed owner or official stock owner. A save records desired state without replacing or cancelling the running owner. | Complete integrated packed-artifact and installed-UI acceptance. Runtime binding and delivery-fence readiness don't establish persistence compatibility. Real permission changes still revoke stale authority. |
-| Zero-configuration delegation with stock JSONL | Deferred. A root response isn't proof of child execution; the first DSMM child delegation remains blocked with stock persistence. Explicit compatible Main `sessionPersistence` remains required. | Evaluate the official PluginRecord route below without replacing the storage owner or bypassing metadata admission. A Host upgrade alone isn't a fix. |
-| Broader plugin hot-change/restart integration | Deferred enhancement, not a prerequisite for cold selection. | [alpha.3 notes](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-alpha.3) describe immediate hot-reloadable changes and restart prompts for other changes. No reusable pre-dispose or cold-composition SDK hook is verified. Identify a supported interface, then compare rc.2/alpha.4 owner disposal, pending work and restart behavior in isolated profiles. |
-| Unified configuration drawers | Source registers only `plugins.bundle.config`; named Profiles keeps its Settings/header entries. | Verify actual native Plugins navigation, scope/form authority, drafts and save outcomes in the packed candidate. alpha.4's custom plugin index isn't evidence of a new Drawer or configuration-lifecycle API. |
-| Managed identity and invocation presentation | Source uses Agent-scoped `harness:identity` and native call-view slots. Ordinary native identity remains unchanged. | Verify assembled requests and pending/completed/replayed views, requested versus validated actual metadata, inspectable nontext JSON and windowless native fallback. rc.2 already provides the relevant identity/presentation interfaces; these aren't prerelease additions. |
-| Repeated approval for read-only Git | Awaiting an exact triggering call; cause unknown. | Obtain the tool, full command, working directory, escalation parameters and approval reason, then reproduce with isolated native registrations. No alpha.4 evidence establishes a trusted shell-read fix. Don't widen Allow rules to suppress the symptom. |
-| Pending one-shot approval across parent profile epoch changes | Deferred under the [accepted P1 native-approval risk](deferred-native-approval-risk.md); still not fixed. | No verified alpha.4 fix. Its [SDK protocol documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.4/packages/sdk/protocol/README.md) describes server-to-client requests as transport groundwork for future approval flows. A supported solution must pass pending Allow, epoch-change, cancellation, cleanup and authority-boundary checks without real credentials. |
-| Release and installed-carrier acceptance | Current source changes are unpublished; no version bump or Desktop acceptance is implied. | Apply the [release contract](releasing.md) to a separately authorized identity and report npm publication and GitHub Release status independently. Historical `0.2.2` runs can't receive a new completion interpretation. |
+| Live overlay Apply | Unavailable. Save/select a future default for a new session; ordinary model and mode actions retain independent capabilities. | Exact configuration/call/approval binding without cross-call authority reuse. See [approval boundaries](deferred-native-approval-risk.md). |
+| Running-call background handoff | Unavailable. Select waiting or native parent delivery before starting; don't restart a task to simulate transfer. | A supported same-activation ownership/delivery handoff. |
+| DSMM cold resume | Refuses execution without trusted live admission and preserves history. Display metadata can't restore authority. | Native identity and trustworthy configuration/permission binding across close/reopen and record loss. |
+| Non-disruptive hot update | No uninterrupted live-session guarantee. Retire admissions and let native owners cancel/dispose owned work; guards remain fail-closed. | Native lifecycle support that preserves active task/approval boundaries. |
+| Catalog-backed raw combinations | Rejected where the complete composition can't be reliably reproduced, regardless of native or DSMM parameter source. Standard calls aren't affected. | A public seam that can reproduce the full catalog composition and preserve native capability/effort semantics. |
+| Repeated read-only Git approval | Keep native approval; don't expand Allow rules based on an unexplained prompt. | Exact triggering command, working directory and approval reason. |
+| Shell Fake-IP access | Rejection source remains unknown; don't guess a sandbox or permission change. | Concrete command/error/runner evidence identifying the actual rejection layer. See [network boundaries](web-fetch-fakeip.md). |
+| External LSP | DSMM automatic mounting isn't delivered. DSH native definition/references/implementation/hover and independently configured MCP remain separate. | Supported APIs and explicit permissions for additional operations; no automatic external remount or scope expansion. |
 
-Prerelease evaluation must use disposable profiles and existing authorized tooling. Preserve the current installation, credentials, history and immutable release identities. Package availability, source-level interface discovery and successful isolated behavior are separate evidence levels.
+Search/Fetch retain the explicitly configured native provider. DSMM doesn't automatically enable a direct API, change credentials or forward the recent human question. HTTP Fake-IP behavior and network limits are maintained in [Fake-IP fetch](web-fetch-fakeip.md).
 
-## Stock JSONL delegation: alpha.4 migration candidate
+## Publication and Desktop installation
 
-The blocker isn't a blanket inability of native JSONL to retain extension records. Both rc.2 and alpha.4 preserve unknown records marked `ignorable: true`. DSMM's current `assertDsmmMetadataPersistence` additionally requires its `DSMM_PERSISTENCE_COMPATIBILITY` marker; the companion owns the event/handle adaptation for `deepwork/mode` and `dsmm/role-policy`. Stock persistence doesn't satisfy that DSMM contract. Upgrading DSH doesn't change the guard or DSMM's readers and writers.
-
-alpha.4 adds the experimental public `appendPluginRecord(session, type, data)`, `pluginRecordOf(event)` and `PluginRecordMap` APIs. They provide namespaced `plugin:` records that are ignorable and excluded from the model-visible surface; the plugin remains responsible for validating its JSON payload. This is a candidate way to store DSMM metadata through the official persistence owner, not a verified DSMM implementation, a general storage hook or permission to mark arbitrary required events compatible.
-
-Resume only after an isolated implementation demonstrates all of the following:
-
-- Normal `runProfile` with stock JSONL completes real DSMM child delegation without additional persistence configuration.
-- Plugin metadata survives append, close/reopen, fork and restore while remaining outside model-visible messages.
-- Missing, malformed and older payloads retain conservative admission; parent/child identity, permission and lifecycle boundaries remain intact.
-- The explicit companion and retained-history paths remain covered, without automatic migration, storage-root/compression changes or rewriting user history.
-
-Official evidence: [alpha.4 session API](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.4/packages/core/session/src/index.ts), [record types](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.4/packages/core/session/src/types.ts), [plugin-record behavior tests](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.4/packages/core/session/tests/plugin-records.spec.ts), [JSONL admission tests](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.4/packages/session/session-persistence-jsonl/tests/current-event-admission.spec.ts), and [persistence contract](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.4/packages/session/session-persistence/README.md). Source/API inspection is available; a DSMM migration using these APIs hasn't been executed or validated.
-
-## Longer-term capability policy
-
-Reusable global/profile/role-scoped capability policies remain a future design, distinct from the implemented configuration drawers and role-sized native defaults. Any new policy must bind to inspected Host services, distinguish role-owned rows from inherited child composition, preserve caller/read-only/tool/delegation filters and avoid remounting admitted roots. rc.2 isn't claimed to support preset `extends` or automatic standard inheritance. New schema, authority or public APIs require their own approved scope.
-
-DSMM-managed external LSP remains off and has no scheduled delivery here. Its implementation and interfaces remain available for the required independent release checks, not as an automatic activation entry. DSH's own LSP and independently configured MCP are unaffected; see [LSP boundary](lsp.md).
+0.3.1 publication uses the version-bound [release controls](releasing.md). Desktop plugin installation follows publication, uses the Desktop-owned carrier and requires exact DSH `0.2.1-rc.2`. Installation doesn't authorize upgrading the Host, changing credentials or real sessions, altering unrelated configuration, or restarting active work. An incompatible Host or required data migration blocks installation rather than expanding its scope.

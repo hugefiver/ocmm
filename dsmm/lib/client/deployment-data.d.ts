@@ -1,6 +1,7 @@
 import type { DeploymentAdmissionView, DeploymentEditorSnapshot, DeploymentSchemaNode } from "../profile-types.js";
 import type { DeploymentPathEdit } from "../deployment-config.js";
 export declare function record(value: unknown): value is Record<string, unknown>;
+export declare function scopeSchema(snapshot: DeploymentEditorSnapshot, layer: "global" | "profile"): DeploymentSchemaNode;
 export declare function at(value: unknown, path: readonly string[]): unknown;
 export declare function equal(a: unknown, b: unknown): boolean;
 export declare function mergeLayer(base: unknown, override: unknown): unknown;

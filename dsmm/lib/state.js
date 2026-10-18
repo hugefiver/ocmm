@@ -1,6 +1,7 @@
 import { resolveSelectedAgentPreset, sessionEvents } from "./session-scope.js";
-import { assertDsmmMetadataPersistence } from "./session-metadata.js";
-import { createHash } from "node:crypto";
+import { appendModeRecord } from "./session-metadata.js";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { isDsmmRoleId } from "./roles.js";
 export const DEEPWORK_MODE_EVENT = "deepwork/mode";
 function activeFromEvent(event) {
@@ -24,12 +25,13 @@ export function hasOpenTurn(events = []) {
     return open;
 }
 export class DeepworkModeController {
-    ctx;
     moduleEnabled;
+    runtimeReady;
     listeners = new Set();
-    constructor(ctx, moduleEnabled = () => true) {
-        this.ctx = ctx;
+    versions = new WeakMap();
+    constructor(_ctx, moduleEnabled = () => true, runtimeReady = () => true) {
         this.moduleEnabled = moduleEnabled;
+        this.runtimeReady = runtimeReady;
     }
     watch(listener) {
         this.listeners.add(listener);
@@ -44,9 +46,20 @@ export class DeepworkModeController {
     describe(agent, defaultActive) {
         const events = sessionEvents(agent.session), preset = resolveSelectedAgentPreset(agent.session);
         const intents = events.map(activeFromEvent).filter((value) => value !== undefined);
+        const fields = { preset, defaultActive, intents, enabled: this.moduleEnabled(agent),
+            presetChanges: events.filter((event) => event.type === "agent-preset/selected").length };
+        let defaults = this.versions.get(agent);
+        if (defaults === undefined) {
+            defaults = new Map();
+            this.versions.set(agent, defaults);
+        }
+        let version = defaults.get(defaultActive);
+        if (version === undefined || !isDeepStrictEqual(version.fields, fields)) {
+            version = { fields, revision: `mode-v1-${randomUUID()}` };
+            defaults.set(defaultActive, version);
+        }
         return { active: this.active(agent, defaultActive), explicit: intents.length > 0, locked: false,
-            revision: createHash("sha256").update(JSON.stringify({ preset, defaultActive, intents,
-                presetChanges: events.filter((event) => event.type === "agent-preset/selected").length })).digest("hex") };
+            revision: version.revision };
     }
     intent(agent) {
         const events = sessionEvents(agent.session);
@@ -58,6 +71,8 @@ export class DeepworkModeController {
         return undefined;
     }
     async select(agent, active, defaultActive = false) {
+        if (active && !this.runtimeReady())
+            throw new Error("Deepwork runtime is not ready; enable it in native settings and restart the Host");
         if (active && !this.moduleEnabled(agent))
             throw new Error("Deepwork module is not admitted in this session; a mode intent cannot enable it");
         if (agent.status === "running" || hasOpenTurn(sessionEvents(agent.session)))
@@ -78,15 +93,16 @@ export class DeepworkModeController {
     }
     /** Called inside the existing native maintenance / admission CAS boundary. */
     async selectIdle(agent, active, _defaultActive) {
+        if (active && !this.runtimeReady())
+            throw new Error("Deepwork runtime is not ready; enable it in native settings and restart the Host");
         if (active && !this.moduleEnabled(agent))
             throw new Error("Deepwork module is not admitted in this session; a mode intent cannot enable it");
         if (hasOpenTurn(sessionEvents(agent.session)))
             throw new Error("Deepwork mode requires an idle session");
         if (this.intent(agent) === active)
             return;
-        assertDsmmMetadataPersistence(this.ctx);
-        await agent.session.append(DEEPWORK_MODE_EVENT, { active });
-        // Native session/event owns mode invalidation, including external appends.
+        appendModeRecord(agent.session, active);
+        this.changed(agent);
     }
 }
 //# sourceMappingURL=state.js.map

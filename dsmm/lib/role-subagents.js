@@ -3,21 +3,21 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { SubagentError } from "@deepseek-ai/dsh-subagent";
-import { PERSONA_PREFIX_SECTION } from "@deepseek-ai/dsh-persona";
 import { DSMM_ROLES } from "./roles.js";
+import { registerRoleHarnessIdentity } from "./role-identity.js";
 import { isDsmmRoleId } from "./roles.js";
 import { DsmmRolePolicy, roleToolName } from "./role-policy.js";
 import { roleProviderName } from "./role-providers.js";
-import { capturedOriginalRoleInvocation, duringRoleInvocation, invocationAgentOptions, invocationView, resolveRoleInvocation } from "./role-invocation.js";
+import { capturedRoleInvocation, invocationAgentOptions, invocationView, resolveRoleInvocation } from "./role-invocation.js";
 import { childOwnedSessionEvents } from "./session-scope.js";
 import { agentForScope, nativeAgentContext, scopeParentOf } from "./native-scope.js";
 import { roleRouteRuntimeState } from "./role-routing.js";
 import { modelRouteFromCall } from "./role-llm.js";
-import { duringActivationOwnership } from "./agent-registry.js";
+import { buildDsmmAgentGuidance, buildDsmmLocaleGuidance } from "./prompts.js";
 const hostControls = ["send_message", "interrupt_agent", "exit_plan_mode", "ask_user_question", "todo_write", "job_output", "job_list", "job_kill"];
 // Agent-owned policy realms survive a bundle reinstall; do not register another
 // identity prompt/tools layer on the same retained live Agent.
-const admittedRealms = new WeakSet();
+const admittedRealms = new WeakMap();
 const callableDefinitions = new WeakMap();
 /** Keep native controls on the frozen startup substrate, not desired-save reconciliation. */
 export async function registerNativeSubagentControls(ctx) {
@@ -37,11 +37,11 @@ export async function registerNativeSubagentControls(ctx) {
         ctx.logger.warn("DSMM native subagent controls unavailable; continuable control requires the installed host substrate");
     }
 }
-/** C's same-run holder/live projection can read the actual lock without reapplying defaults. */
+/** Project the captured invocation without reapplying deployment defaults. */
 export function roleInvocationView(invocation, label, mode, getSettings, child, ids = {}) {
     return roleInvocationObservation(invocation, label, mode, getSettings, child, ids).view;
 }
-/** Initial preflight/lock is not an observed SDK request; keep E's distinction truthful. */
+/** Distinguish the captured route from an observed native request. */
 export function roleInvocationObservation(invocation, label, mode, getSettings, child, ids = {}) {
     const view = invocationView(invocation, label, mode, ids);
     if (child === undefined)
@@ -75,9 +75,37 @@ function latestOwnRoleRoute(child) {
 /** Both observations belong to this exact native Agent; no parent/settings/route-lock fallback. */
 export function roleRouteComparison(child) {
     const agent = child;
-    const invocation = capturedOriginalRoleInvocation(agent);
+    const invocation = capturedRoleInvocation(agent);
     return { childId: child.id, initialRoute: invocation === undefined ? { status: "unknown", reason: "missing-invocation-capture" }
             : { status: "known", source: "invocation-capture", route: Object.freeze({ ...invocation.initialRoute }) }, liveRoute: latestOwnRoleRoute(agent) };
+}
+function presentationFields(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
+}
+function roleTitle(role) {
+    return `${role.kind === "category" ? "Category" : "Role"}: ${role.name} (${role.id})`;
+}
+/** Presenters accept streaming/replayed input independently of strict execution validation. */
+function installRolePresenters(definition, entry) {
+    const presentCall = args => {
+        const fields = presentationFields(args);
+        const target = entry.targetParameter === undefined ? entry.targets[0] : fields?.[entry.targetParameter];
+        const role = isDsmmRoleId(target) && entry.targets.includes(target) ? DSMM_ROLES.find(row => row.id === target && row.kind === entry.kind) : undefined;
+        return { card: "generic", title: role === undefined ? `Requested ${entry.kind}` : `Requested ${roleTitle(role)}`,
+            ...(typeof fields?.description === "string" ? { rawInput: fields.description } : {}) };
+    };
+    // defineTool soft-validates complete args before its own presenter wrappers;
+    // the native definition's presenters also serve partial streams and old logs.
+    definition.presentCall = presentCall;
+    definition.presentResult = (args, result) => {
+        const meta = result.isError ? undefined : presentationFields(result.meta);
+        const role = meta === undefined ? undefined : DSMM_ROLES.find(row => row.id === meta.role && row.kind === entry.kind);
+        if (role !== undefined && typeof meta?.label === "string" && ["normal", "low", "high", "max"].includes(meta.level)
+            && (meta.mode === "one-shot" || meta.mode === "continuable") && ["inherited", "primary", "level", "invocation-route"].includes(meta.routeSource)) {
+            return { card: "generic", title: `${roleTitle(role)} · ${meta.level}` };
+        }
+        return { card: "generic", title: presentCall(args).title };
+    };
 }
 /** Shared by runtime registration and the prompt assembler; empty groups have no callable entry. */
 export function callableRoleInventory(settings, targets) {
@@ -103,16 +131,16 @@ export function admittedCallableRoleInventory(agent, settings, policy, tools) {
         return targets.length === 0 ? [] : [{ ...registered.entry, targets }];
     });
 }
-function registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, roleRuns) {
+function registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, admission) {
     const settings = getSettings(agent);
     const subagents = agentCtx.get("subagents");
     if (subagents === undefined)
         throw new Error("DSMM role tools require native subagents");
     const background = settings.subagents.enableRunInBackground;
-    const continuable = settings.subagents.backgroundMode === "continuable";
     const admittedProviders = new Map(entry.targets.map(target => [target, subagents.getProvider(roleProviderName(target))]));
+    const incomplete = new Map();
     const definition = defineTool({
-        name: entry.name, description: `Delegate a bounded ${entry.kind} task through the native runtime. ${background ? continuable ? "Background continuable is opt-in here; returns a durable child id for native send_message/interrupt_agent. Set run_in_background false to wait." : "Waits by default; explicit background work is owned by native jobs." : "Waits for the child's useful result. Background execution is disabled."}`,
+        name: entry.name, description: `Delegate a bounded ${entry.kind} task through native activation. Waits for the useful result by default.${background ? " Set run_in_background to receive an accepted child/message receipt; native completion notifies the parent." : " Background execution is disabled."}`,
         parameters: { description: { type: "string", required: true }, prompt: { type: "string", required: true },
             ...(entry.targetParameter === undefined ? {} : { [entry.targetParameter]: { type: "string", enum: entry.targets, required: true } }),
             level: { type: "string", enum: ["normal", "low", "high", "max"] },
@@ -127,8 +155,16 @@ function registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, ro
                 const route = invocation?.route;
                 const metadata = invocation === undefined ? "" : `${invocation.role} level=${invocation.level}${route === undefined ? "" : ` route=${route.provider}/${route.model}${route.reasoningEffort === undefined ? "" : ` effort=${route.reasoningEffort}`}`}`;
                 return result.kind === "foreground" ? [{ type: "text", text: metadata }, ...result.output ?? []]
-                    : [{ type: "text", text: `${metadata}\n${result.kind === "continuable" ? `started subagent ${result.subagentId}` : `started background subagent job ${result.jobId}`}` }];
+                    : [{ type: "text", text: `${metadata}\naccepted subagent ${result.subagentId}` }];
             }, presentationMeta(_args, value) { return typeof value === "object" && value !== null && !Array.isArray(value) ? value.invocation ?? null : null; } },
+        finalizeContent(exec, result) {
+            const partial = incomplete.get(exec.token);
+            incomplete.delete(exec.token);
+            if (!partial || !result.isError || !["DSMM_INCOMPLETE", "ABORTED"].includes(result.error.info?.code ?? ""))
+                return;
+            return [...result.content, { type: "text", text: `Child outcome: ${partial.stopReason}. The following assistant output is partial, not a completed result.` }, ...partial.output,
+                ...partial.diagnostic === undefined ? [] : [{ type: "text", text: `Provider diagnostic: ${partial.diagnostic}` }]];
+        },
         async execute(args, exec) {
             const fields = ["description", "prompt", "level", ...entry.targetParameter === undefined ? [] : [entry.targetParameter],
                 ...settings.subagents.allowRouteOverride ? ["route"] : [], ...background ? ["run_in_background"] : []];
@@ -137,93 +173,91 @@ function registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, ro
             const parent = exec.agent;
             if (parent === undefined)
                 throw new SubagentError("DSMM delegation requires a calling Agent", "UNAUTHORIZED");
-            if (parent !== agent || tools.get(entry.name, parent) === undefined || policy.toolDenial(agent, entry.name, tools) !== undefined)
+            if (parent !== agent || tools.get(entry.name, parent) !== definition || policy.toolDenial(agent, entry.name, tools) !== undefined)
                 throw new SubagentError("DSMM tool is not the exact admitted caller definition", "UNAUTHORIZED");
             const target = entry.targetParameter === undefined ? entry.targets[0] : exec.arguments[entry.targetParameter];
             if (!isDsmmRoleId(target) || !entry.targets.includes(target) || DSMM_ROLES.find(row => row.id === target).kind !== entry.kind)
                 throw new SubagentError("DSMM target is unknown, cross-kind or not admitted", "UNAUTHORIZED");
             const role = DSMM_ROLES.find(row => row.id === target);
+            const label = `${role.id.slice("dsmm-".length).split("-").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ")}: ${args.description}`;
             const admitted = policy.assertDelegation(parent, role.id);
             const current = getSettings(parent);
             const provider = subagents.getProvider(roleProviderName(role.id));
             if (provider === undefined || provider !== admittedProviders.get(role.id))
                 throw new SubagentError("DSMM exact admitted role provider is unavailable", "NO_PROVIDER");
-            const invocation = await resolveRoleInvocation(parent, role.id, current, exec.signal, { ...(args.level === undefined ? {} : { level: args.level }), ...(args.route === undefined ? {} : { route: args.route }) });
-            const capturedProvider = provider;
-            const request = { parent, label: args.description, prompt: [{ type: "text", text: args.prompt }],
-                agentOptions: invocationAgentOptions(invocation), maxDepth: subagents.resolveMaxDepth(current.subagents.maxDepth) };
-            const assertCurrent = () => {
-                if (policy.assertDelegation(parent, role.id).epoch !== admitted.epoch)
-                    throw new SubagentError("DSMM parent admission changed before delegation", "UNAUTHORIZED");
-                if (subagents.getProvider(roleProviderName(role.id)) !== capturedProvider)
-                    throw new SubagentError("DSMM exact provider changed before delegation", "NO_PROVIDER");
-            };
-            exec.signal.throwIfAborted();
-            const requestedBackground = background && (args.run_in_background ?? continuable);
-            if (requestedBackground && continuable) {
-                if (provider.prepareContinuable === undefined)
-                    throw new SubagentError("DSMM provider has no prepareContinuable capability", "UNSUPPORTED_CAPABILITY");
+            return admission.duringCall(parent, exec.signal, async (signal) => {
+                const invocation = await resolveRoleInvocation(parent, role.id, current, signal, { ...(args.level === undefined ? {} : { level: args.level }), ...(args.route === undefined ? {} : { route: args.route }) });
+                const capturedProvider = provider;
+                const request = { parent, agentPreset: role.id, prompt: [{ type: "text", text: args.prompt }],
+                    agentOptions: invocationAgentOptions(invocation), maxDepth: subagents.resolveMaxDepth(current.subagents.maxDepth) };
+                const assertCurrent = () => {
+                    if (policy.assertDelegation(parent, role.id).epoch !== admitted.epoch)
+                        throw new SubagentError("DSMM parent admission changed before delegation", "UNAUTHORIZED");
+                    if (subagents.getProvider(roleProviderName(role.id)) !== capturedProvider)
+                        throw new SubagentError("DSMM exact provider changed before delegation", "NO_PROVIDER");
+                };
+                signal.throwIfAborted();
+                const requestedBackground = background && args.run_in_background === true;
                 assertCurrent();
-                const child = await duringRoleInvocation(agent, invocation, () => policy.duringDelegation(parent, role.id, () => subagents.startActivation({ provider: provider.name, label: args.description,
-                    request, signal: exec.signal, delivery: "parent" }), undefined, request.maxDepth));
-                return { kind: "continuable", subagentId: child.childId, invocation: { ...invocationView(invocation, args.description, "continuable", { childId: child.childId }) } };
-            }
-            assertCurrent();
-            if (roleRuns === undefined)
-                throw new SubagentError("DSMM one-shot delegation requires the stable Host role-run registry", "UNSUPPORTED_CAPABILITY");
-            const admission = getSettings.admission?.(agent);
-            if (admission === undefined || admission.epoch !== admitted.epoch)
-                throw new SubagentError("DSMM one-shot capture requires the exact original parent admission", "UNAUTHORIZED");
-            const jobs = agentCtx.get("jobs");
-            if (requestedBackground && jobs === undefined)
-                throw new SubagentError("DSMM background jobs require the native jobs registry/controller", "UNSUPPORTED_CAPABILITY");
-            let child;
-            const projection = { ...invocationView(invocation, args.description, "one-shot"), get route() {
-                    return roleInvocationView(invocation, args.description, "one-shot", getSettings, child).route;
+                const pending = await admission.reserve(exec, invocation, provider, request.maxDepth);
+                let activation;
+                let cancellation;
+                const cancel = () => { if (activation) {
+                    cancellation ??= activation.dispose();
+                    void cancellation.catch(() => { });
                 } };
-            const holder = roleRuns.registry.start({ parent, owner: roleRuns.owner, sessionId: parent.id, toolCallId: exec.callId,
-                admissionEpoch: admitted.epoch, capture: Object.freeze({ invocation, admission }), projection, label: args.description, callerAbort: exec.signal, jobs,
-                async start(signal) {
-                    assertCurrent();
-                    const run = await duringRoleInvocation(agent, invocation, () => policy.duringDelegation(agent, role.id, () => duringActivationOwnership(signal, () => subagents.startActivation({ provider: provider.name, label: args.description, request, signal, delivery: "caller" })), undefined, request.maxDepth, agent => { child = agent; }));
-                    projection.runId = run.childId;
-                    if (child?.id !== undefined)
-                        projection.childId = child.id;
-                    return run;
-                } });
-            if (requestedBackground) {
                 try {
-                    const identity = await holder.ready;
-                    const transition = holder.background({ parent, owner: roleRuns.owner, sessionId: parent.id, toolCallId: exec.callId,
-                        runId: identity.runId, expectedAdmissionEpoch: admitted.epoch });
-                    if (transition.status === "starting")
-                        throw new SubagentError("DSMM ready run is not transferable", "UNAUTHORIZED");
+                    activation = await subagents.startActivation({ childId: pending.childId, provider: provider.name, label, request, signal: pending.signal, delivery: requestedBackground ? "parent" : "caller" });
+                    admission.track(activation);
+                    pending.signal.addEventListener("abort", cancel, { once: true });
+                    if (pending.signal.aborted) {
+                        cancel();
+                        await cancellation;
+                        pending.signal.throwIfAborted();
+                    }
+                    const view = invocationView(invocation, args.description, "continuable", { childId: activation.childId });
+                    if (requestedBackground)
+                        return { kind: "continuable", subagentId: activation.childId, messageId: activation.messageId ?? null, invocation: { ...view } };
+                    const result = await activation.result;
+                    if (result.stopReason !== "completed")
+                        incomplete.set(exec.token, result);
+                    if (cancellation)
+                        await cancellation;
+                    pending.signal.throwIfAborted();
+                    if (result.stopReason !== "completed")
+                        throw new SubagentError(`Role activation ended: ${result.stopReason}`, "DSMM_INCOMPLETE");
+                    return { kind: "foreground", output: result.output,
+                        ...(result.structured === undefined ? {} : { structured: result.structured }), invocation: { ...view } };
                 }
-                catch (error) {
-                    holder.cancel(error);
-                    const [drain] = await Promise.allSettled([holder.drained]);
-                    if (drain.status === "rejected" && drain.reason !== error)
-                        throw new AggregateError([error, drain.reason], "DSMM background handoff was refused and its owned run drain rejected");
-                    throw error;
+                finally {
+                    pending.signal.removeEventListener("abort", cancel);
+                    await pending.release();
                 }
-            }
-            const held = await holder.foreground;
-            if (held.kind === "background")
-                projection.jobId = held.jobId;
-            const { route, ...metadata } = projection;
-            const view = { ...metadata, ...(route === undefined ? {} : { route: { ...route } }) };
-            return held.kind === "foreground" ? { kind: held.kind, runId: held.runId, output: held.output, invocation: view }
-                : { kind: held.kind, runId: held.invocation.runId, jobId: held.jobId, invocation: view };
+            });
         }
     });
+    installRolePresenters(definition, entry);
     callableDefinitions.set(definition, { entry: Object.freeze({ ...entry, targets: Object.freeze([...entry.targets]) }), providers: admittedProviders });
     const dispose = tools.register(definition);
     return () => { callableDefinitions.delete(definition); dispose(); };
 }
 /** Published name retained; all native/headless Agents consume one admitted policy. */
-export async function registerHeadlessRoleTools(ctx, controller, getSettings, policy = new DsmmRolePolicy(ctx, getSettings, controller), roleRuns) {
+export async function registerHeadlessRoleTools(ctx, controller, getSettings, policy, admission, onlyAgent) {
+    const refresh = admittedRealms.get(onlyAgent);
+    if (refresh) {
+        refresh();
+        return;
+    }
     const states = new WeakMap();
-    const reconcile = async (agent) => {
+    const reconcileIdentity = (agent, role = policy.identity(agent).role) => {
+        const state = states.get(agent);
+        if (state === undefined || state.identityRole === role)
+            return;
+        state.identityPrompt?.();
+        state.identityPrompt = role === undefined ? undefined : registerRoleHarnessIdentity(agent, role);
+        state.identityRole = role;
+    };
+    const reconcile = (agent) => {
         const state = states.get(agent);
         if (state === undefined)
             return;
@@ -233,14 +267,28 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
         if (tools === undefined)
             throw new Error("DSMM role tools require native guard/restrict services");
         const settings = getSettings(agent), identity = policy.identity(agent), targets = policy.targets(agent);
-        const personaRole = identity.child ? identity.role : undefined;
-        if (state.personaRole !== personaRole) {
-            state.persona?.();
-            const prompt = agentCtx.get("systemPrompt");
-            state.persona = personaRole === undefined ? undefined : prompt.section({ name: PERSONA_PREFIX_SECTION,
-                order: prompt.getSectionOrder("DEPLOYMENT_PERSONA_PREFIX"), text: DSMM_ROLES.find(role => role.id === personaRole).persona });
-            state.personaRole = personaRole;
+        const prompt = agentCtx.get("agentPresets")?.serviceFor(agent, "systemPrompt") ?? agentCtx.get("systemPrompt");
+        const promptRealm = Reflect.get(prompt, symbols.original) ?? prompt;
+        if (state.promptRealm !== promptRealm) {
+            state.guidance?.();
+            state.identityPrompt?.();
+            state.identityRole = undefined;
+            state.guidance = getTraceable(agentCtx, prompt).section({ name: "dsmm:delegation-identity", order: 49, text(context) {
+                    if (context.scope !== agent && agentForScope(ctx, context.scope) !== agent)
+                        return "";
+                    const identity = policy.identity(agent), tools = states.get(agent)?.tools, settings = getSettings(agent);
+                    if (identity.role === undefined)
+                        return settings.locale === undefined ? "" : buildDsmmLocaleGuidance(settings);
+                    const captured = capturedRoleInvocation(agent);
+                    return buildDsmmAgentGuidance(settings, { scope: identity.child ? "child" : "root", tools: tools?.schemas(agent) ?? [],
+                        delegation: tools === undefined ? [] : admittedCallableRoleInventory(agent, settings, policy, tools),
+                        ...(captured === undefined ? {} : { invocation: roleInvocationObservation(captured, DSMM_ROLES.find(role => role.id === captured.target).name, "continuable", getSettings, agent, { childId: agent.id }) }),
+                        runtimeAdmission: getSettings.subagentRuntime?.(), capabilities: { continuable: true, nativeChildDelivery: true,
+                            ...(agentCtx.get("dsmmChildren") === undefined ? {} : { nativeBrowserPrompt: { surface: "conversation.dsmm-children" } }) } });
+                } });
+            state.promptRealm = promptRealm;
         }
+        reconcileIdentity(agent, identity.role);
         const subagents = agentCtx.get("subagents");
         const host = ctx.get?.("tools");
         const names = [...hostControls, ...host?.schemas().map((row) => row.name).filter((name) => name.startsWith(`mcp__${settings.lsp.serverName}__`)) ?? []];
@@ -271,13 +319,13 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
         }
         const inventory = callableRoleInventory(settings, targets.filter(role => subagents?.getProvider(roleProviderName(role))?.capabilities.depthLimit === true));
         for (const entry of inventory)
-            state.owned.push(registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, roleRuns));
+            state.owned.push(registerRoleTool(agent, agentCtx, tools, entry, getSettings, policy, admission));
         policy.captureTools(agent, tools, [...inventory.map(entry => entry.name), ...names], !sameRealm || !sameParent);
         state.signature = signature;
         state.hostDefinitions = definitions;
         state.parentScope = parentScope;
     };
-    const onCreated = async ({ agent }) => {
+    const onCreated = ({ agent }) => {
         if (states.has(agent) || admittedRealms.has(agent))
             return;
         if (!getSettings(agent).modules.deepwork.enabled)
@@ -285,34 +333,28 @@ export async function registerHeadlessRoleTools(ctx, controller, getSettings, po
         const agentCtx = nativeAgentContext(agent);
         policy.admit(agent);
         states.set(agent, { owned: [], hostDefinitions: [] });
-        policy.installDrain(agent);
-        agentCtx.get("systemPrompt").section({ name: "dsmm:delegation-identity", order: 49, text() {
-                const identity = policy.identity(agent);
-                const tools = states.get(agent)?.tools;
-                const inventory = tools === undefined ? [] : admittedCallableRoleInventory(agent, getSettings(agent), policy, tools);
-                return identity.role === undefined ? "" : `Native admitted role: ${identity.role}; ${identity.child ? "bounded child, not stage-owner" : "root"}. Admitted callable delegation: ${inventory.map(entry => `${entry.name}${entry.targetParameter === undefined ? "" : ` (${entry.targetParameter}: ${entry.targets.join(", ")})`}`).join("; ") || "none"}. level defaults to normal; low/high/max require this target's configured level. route is only available with admitted deployment opt-in. Role/host permissions remain in force when common is off. Read-only plans are complete Markdown for native review and authorized coordinator persistence, never planner writes.`;
-            } });
-        agentCtx.effect(() => () => {
+        const retire = () => {
+            stopIdentity();
             const state = states.get(agent);
             state?.restriction?.();
             state?.guard?.();
-            state?.persona?.();
+            state?.identityPrompt?.();
+            state?.guidance?.();
             for (const dispose of state?.owned ?? [])
                 dispose();
             states.delete(agent);
-        });
-        await reconcile(agent);
-        admittedRealms.add(agent);
-        agentCtx.effect(() => () => admittedRealms.delete(agent));
+            admittedRealms.delete(agent);
+            admission.lifetime.signal.removeEventListener("abort", retire);
+        };
+        admission.lifetime.signal.addEventListener("abort", retire, { once: true });
+        agentCtx.effect(() => retire);
+        reconcile(agent);
+        admittedRealms.set(agent, () => reconcile(agent));
     };
-    ctx.on?.("agent/created", onCreated, { global: true });
-    ctx.on?.("system-prompt/assemble", async (_assembly, options, next) => {
-        const agent = agentForScope(ctx, options.scope);
-        if (agent !== undefined)
-            await reconcile(agent);
-        return next();
-    }, { prepend: true, global: true });
-    for (const agent of ctx.get?.("agents")?.list() ?? [])
-        await onCreated({ agent });
+    // Native assembly collects sections before its waterfall. Admission/mode/preset
+    // changes must update the Agent layer before that collection begins.
+    const stopIdentity = controller.watch(agent => { if (agent === onlyAgent)
+        reconcile(agent); });
+    onCreated({ agent: onlyAgent });
 }
 //# sourceMappingURL=role-subagents.js.map

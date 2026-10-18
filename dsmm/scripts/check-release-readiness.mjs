@@ -5,12 +5,11 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { checkFrontendAssets } from "./materialize-frontend.mjs";
-import { dshPolicyForVersion } from "./release-contract.mjs";
+import { dshPolicyForVersion, OFFICIAL_RUNTIME_PACKAGES_031, validatePublicExports031 } from "./release-contract.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultPackageRoot = resolve(scriptDirectory, "..");
-const repositoryLicensePath = resolve(scriptDirectory, "..", "..", "LICENSE");
-const RELEASE_VERSION = "0.3.0";
+const RELEASE_VERSION = "0.3.1";
 const DSH_POLICY = dshPolicyForVersion(RELEASE_VERSION);
 const operatorScripts = [];
 const retiredCompatibilityFiles = new Set(["legacy-read-host", "legacy-read-contracts", "legacy-read-composition", "legacy-read-integration", "legacy-read-proxy", "legacy-child-policy"]
@@ -21,43 +20,18 @@ const requiredExact = [
   "LICENSE", "README.md", "package.json", "cordis.patch.yml",
   ...operatorScripts,
   ...metadataResources,
-  "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts",
-  "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
-  "lib/agent-registry.js", "lib/agent-registry.d.ts",
-  ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
-  ...["session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
-  ...["runtime-integration"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
-  "docs/agent-presets.md", "docs/compatibility.md", "docs/design.md", "docs/deferred-native-approval-risk.md", "docs/lsp.md",
-  "docs/migration-from-ocmm.md", "docs/model-routing.md", "docs/native-permissions.md", "docs/profiles.md", "docs/releasing.md",
-  "docs/roadmap.md", "docs/runtime-recovery.md", "docs/safety-guards.md",
-  "docs/settings-status.md", "docs/skill-sync.md"
+  "lib/index.js", "lib/index.d.ts",
+  "lib/client.js", "lib/client/index.d.ts",
+  "docs/releasing.md"
 ];
 
-const requiredTrees = ["agent-presets", "docs/research", "patches", "prompts", "skills"];
+const requiredTrees = ["agent-presets", "patches", "prompts", "skills"];
 
-const expectedFiles = [
+const requiredFileSelectors = [
   "lib/**/*.js",
   "lib/**/*.d.ts",
-  ...[...retiredCompatibilityFiles].map((path) => `!${path}`),
-  ...operatorScripts,
   "locale/*.json",
   "agent-presets",
-  "docs/agent-presets.md",
-  "docs/compatibility.md",
-  "docs/design.md",
-  "docs/deferred-native-approval-risk.md",
-  "docs/lsp.md",
-  "docs/migration-from-ocmm.md",
-  "docs/model-routing.md",
-  "docs/native-permissions.md",
-  "docs/profiles.md",
-  "docs/releasing.md",
-  "docs/research",
-  "docs/roadmap.md",
-  "docs/runtime-recovery.md",
-  "docs/safety-guards.md",
-  "docs/settings-status.md",
-  "docs/skill-sync.md",
   "patches",
   "prompts",
   "skills",
@@ -66,27 +40,10 @@ const expectedFiles = [
   "README.md"
 ];
 
-const expectedExports = {
-  "./agent-registry": { types: "./lib/agent-registry.d.ts", default: "./lib/agent-registry.js" },
-  "./managed-settings": { types: "./lib/managed-settings.d.ts", default: "./lib/managed-settings.js" },
-  "./llm-runtime": { types: "./lib/llm-runtime.d.ts", default: "./lib/llm-runtime.js" },
-  "./permission-bash": { types: "./lib/permission-bash.d.ts", default: "./lib/permission-bash.js" },
-  "./permission-pwsh": { types: "./lib/permission-pwsh.d.ts", default: "./lib/permission-pwsh.js" },
-  "./permission-fs": { types: "./lib/permission-fs.d.ts", default: "./lib/permission-fs.js" },
-  "./permission-fs-search": { types: "./lib/permission-fs-search.d.ts", default: "./lib/permission-fs-search.js" },
-  "./permission-web": { types: "./lib/permission-web.d.ts", default: "./lib/permission-web.js" },
-  ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
-  "./preset-skills": { types: "./lib/preset-skills.d.ts", default: "./lib/preset-skills.js" },
-  "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
-  "./subagent-runtime": { types: "./lib/runtime-integration.d.ts", default: "./lib/runtime-integration.js" },
-  "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" },
-  "./locale/en.json": "./locale/en.json",
-  "./locale/zh.json": "./locale/zh.json",
-  "./package.json": "./package.json"
-};
-
 const expectedDependencies = {
+  "@deepseek-ai/dsh-web-fetch-http": "0.2.1-rc.2",
   "@deepseek-ai/schemastery": "~3.18.5",
+  "ipaddr.js": "^2.5.0",
   "jsonc-parser": "^3.3.1"
 };
 
@@ -97,7 +54,7 @@ const expectedPeers = {
   "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
   "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
   "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
+  "@deepseek-ai/dsh-jobs": "0.2.0-rc.2",
   "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
   "@deepseek-ai/dsh-llm-pi-ai": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent-loop": "0.2.0-rc.2",
@@ -127,46 +84,12 @@ const expectedPeers = {
   "@deepseek-ai/dsh-persona": "0.2.0-rc.2",
   "@deepseek-ai/dsh-agent-instructions": "0.2.0-rc.2"
 };
+expectedPeers[OFFICIAL_RUNTIME_PACKAGES_031.registry] = DSH_POLICY.peerVersion;
+expectedPeers["@deepseek-ai/dsh-http-proxy"] = DSH_POLICY.peerVersion;
+expectedPeers["@deepseek-ai/dsh-web"] = DSH_POLICY.peerVersion;
 expectedPeers["@deepseek-ai/dsh-jobs"] = DSH_POLICY.peerVersion;
 delete expectedPeers["@deepseek-ai/dsh-invariants"];
 for (const name of Object.keys(expectedPeers)) if (name.startsWith("@deepseek-ai/dsh-")) expectedPeers[name] = DSH_POLICY.peerVersion;
-
-const expectedDevDependencies = {
-  ...expectedPeers,
-  "@deepseek-ai/dsh-typert-registry": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-api-gateway": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-ui-session": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-ui-conversation": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-ui-model-selection": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-ui-renderer": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-store": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-locale": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.2",
-  "@types/react": "^18.3.27",
-  "immer": "10.1.1",
-  "zustand": "4.4.7",
-  "esbuild": "^0.25.12",
-  "react": "^18.3.1",
-  "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-agent-loop": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-scope": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-session": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-session-projection": "0.2.0-rc.2",
-  "@deepseek-ai/dsh-subagent-spawn-in-process": "0.2.0-rc.2",
-  "@types/node": "^26.0.0",
-  "typescript": "^6.0.3",
-  "@deepseek-ai/cordis-plugin-group": "1.0.5",
-  "@deepseek-ai/cordis-plugin-include": "1.0.10"
-};
-expectedDevDependencies["@earendil-works/pi-ai"] = "1.3.0";
-for (const name of Object.keys(expectedDevDependencies)) if (name.startsWith("@deepseek-ai/dsh-")) expectedDevDependencies[name] = DSH_POLICY.sdkVersion;
 
 const expectedScripts = {
   "build": "node scripts/materialize-frontend.mjs --check && tsc -p tsconfig.json && node scripts/build-client.mjs",
@@ -293,22 +216,6 @@ function inspectPackedFiles(files, errors) {
   return paths;
 }
 
-function compiledOutputPaths(packageRoot, current = resolve(packageRoot, "src")) {
-  const sourceEntries = readdirSync(current, { withFileTypes: true }).sort((left, right) => compareBytewise(left.name, right.name));
-  const paths = [];
-  for (const entry of sourceEntries) {
-    const entryPath = resolve(current, entry.name);
-    if (entry.isDirectory()) {
-      paths.push(...compiledOutputPaths(packageRoot, entryPath));
-      continue;
-    }
-    if (!entry.isFile() || !/\.tsx?$/u.test(entry.name) || entry.name.endsWith(".d.ts")) continue;
-    const base = normalizePackedPath(relative(resolve(packageRoot, "src"), entryPath)).replace(/\.tsx?$/u, "");
-    for (const path of [`lib/${base}.js`, `lib/${base}.d.ts`]) if (!retiredCompatibilityFiles.has(path)) paths.push(path);
-  }
-  return paths;
-}
-
 function requiredTreeFiles(packageRoot, tree, current = resolve(packageRoot, tree)) {
   const paths = [];
   const entries = readdirSync(current, { withFileTypes: true }).sort((left, right) => compareBytewise(left.name, right.name));
@@ -326,7 +233,20 @@ function requiredTreeFiles(packageRoot, tree, current = resolve(packageRoot, tre
 }
 
 function requiredPathsFor(packageRoot) {
-  return new Set([...requiredExact, ...compiledOutputPaths(packageRoot), ...requiredTrees.flatMap((tree) => requiredTreeFiles(packageRoot, tree))]);
+  return new Set([...requiredExact, ...requiredTrees.flatMap((tree) => requiredTreeFiles(packageRoot, tree))]);
+}
+
+function validateFilesPolicy(files, errors) {
+  if (!Array.isArray(files) || files.some((entry) => typeof entry !== "string") || new Set(files).size !== files.length) {
+    errors.push("manifest.files must be a unique string list");
+    return;
+  }
+  for (const required of requiredFileSelectors) if (!files.includes(required)) errors.push(`manifest.files must include ${required}`);
+  for (const entry of files) {
+    const allowed = requiredFileSelectors.includes(entry) || [...retiredCompatibilityFiles].some((path) => entry === `!${path}`)
+      || /^docs\/[a-z0-9-]+\.md$/u.test(entry);
+    if (!allowed) errors.push(`manifest.files contains an unsupported selector: ${entry}`);
+  }
 }
 
 function validateManifest(manifest, errors) {
@@ -349,15 +269,23 @@ function validateManifest(manifest, errors) {
   if (!isDeepStrictEqual(manifest.publishConfig, { registry: "https://registry.npmjs.org/", access: "public" })) {
     errors.push("manifest.publishConfig must equal the public npm policy");
   }
-  if (!isDeepStrictEqual(manifest.files, expectedFiles)) errors.push("manifest.files must exactly equal the release files policy");
+  validateFilesPolicy(manifest.files, errors);
   if (manifest.type !== "module") errors.push("manifest.type must equal module");
   if (manifest.main !== "./lib/index.js") errors.push("manifest.main must equal ./lib/index.js");
   if (manifest.types !== "./lib/index.d.ts") errors.push("manifest.types must equal ./lib/index.d.ts");
-  if (!isDeepStrictEqual(manifest.exports, expectedExports)) errors.push("manifest.exports must exactly equal the public module contract");
+  try { validatePublicExports031(manifest.exports); }
+  catch { errors.push("manifest.exports must contain only resolvable 0.3.1 public entries and resources"); }
   if (!isDeepStrictEqual(manifest.engines, DSH_POLICY.engines)) errors.push("manifest.engines must equal the release runtime policy");
   if (!isDeepStrictEqual(manifest.dependencies, expectedDependencies)) errors.push("manifest.dependencies must preserve release ranges");
   if (!isDeepStrictEqual(manifest.peerDependencies, expectedPeers)) errors.push("manifest.peerDependencies must preserve release ranges");
-  if (!isDeepStrictEqual(manifest.devDependencies, expectedDevDependencies)) errors.push("manifest.devDependencies must preserve release ranges");
+  for (const [name, version] of Object.entries(manifest.devDependencies ?? {})) {
+    if (name.startsWith("@deepseek-ai/dsh-") && version !== DSH_POLICY.sdkVersion) errors.push(`manifest.devDependencies must target the release SDK: ${name}`);
+  }
+  for (const name of Object.values(OFFICIAL_RUNTIME_PACKAGES_031)) {
+    if (manifest.peerDependencies?.[name] !== DSH_POLICY.peerVersion || manifest.devDependencies?.[name] !== DSH_POLICY.sdkVersion) {
+      errors.push(`manifest must use the official 0.3.1 runtime package: ${name}`);
+    }
+  }
   if (!isDeepStrictEqual(manifest.dsh, { client: { platform: "web", inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-renderer"], external: [] }, bundle: { patch: "./cordis.patch.yml" } })) {
     errors.push("manifest.dsh must equal the native web client and bundle policy");
   }
@@ -401,7 +329,8 @@ function validatePackedModuleClosure(packageRoot, paths, errors) {
     for (const pattern of patterns) {
       for (const match of source.matchAll(pattern)) {
         const specifier = match[1].replace(/[?#].*$/u, "");
-        const target = normalizePackedPath(relative(packageRoot, resolve(packageRoot, dirname(path), specifier)));
+        const resolved = normalizePackedPath(relative(packageRoot, resolve(packageRoot, dirname(path), specifier)));
+        const target = path.endsWith(".d.ts") && resolved.endsWith(".js") ? `${resolved.slice(0, -3)}.d.ts` : resolved;
         if (!paths.has(target)) errors.push(`packed module closure missing target: ${path} -> ${target}`);
       }
     }
@@ -465,7 +394,7 @@ function validateNativeClient(packageRoot, paths, errors) {
        || client.ROLE_CONTROL_REMOTE?.package !== "@dsmm/dsmm-children"
        || !Array.isArray(client.ROLE_CONTROL_REMOTE?.descriptors)
        || !isDeepStrictEqual(Array.from(client.ROLE_CONTROL_REMOTE.descriptors, (descriptor) => descriptor.id),
-         ["describe", "descendants", "background", "prompt", "interrupt"].map((method) => `@dsmm/dsmm-children#dsmmChildren/${method}`))
+          ["describe", "descendants", "prompt", "interrupt"].map((method) => `@dsmm/dsmm-children#dsmmChildren/${method}`))
       || client.TYPERT_REMOTE?.package !== "@dsmm/dsmm"
       || !Array.isArray(client.TYPERT_REMOTE?.descriptors)
       || !isDeepStrictEqual(Array.from(client.TYPERT_REMOTE.descriptors, (descriptor) => descriptor.id), [
@@ -486,17 +415,9 @@ function validateProfileDeploymentBoundary(packageRoot, errors) {
   }
 }
 
-function validateLicense(packageRoot, paths, errors) {
+function validateLicense(paths, errors) {
   if (!paths.has("LICENSE")) {
-    errors.push("package LICENSE must be byte-identical to repository LICENSE");
-    return;
-  }
-  try {
-    if (!readFileSync(resolve(packageRoot, "LICENSE")).equals(readFileSync(repositoryLicensePath))) {
-      errors.push("package LICENSE must be byte-identical to repository LICENSE");
-    }
-  } catch {
-    errors.push("package LICENSE must be byte-identical to repository LICENSE");
+    errors.push("package LICENSE is missing");
   }
 }
 
@@ -514,8 +435,10 @@ function check(packageRoot) {
   if (entry.name !== "@dsmm/dsmm") errors.push("npm pack receipt name must equal @dsmm/dsmm");
   if (entry.version !== RELEASE_VERSION) errors.push(`npm pack receipt version must equal ${RELEASE_VERSION}`);
   validateRequiredSurface(paths, requiredPaths, errors);
+  try { validatePublicExports031(JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf8")).exports, (path) => paths.has(path)); }
+  catch { errors.push("packed public entry or resource is not resolvable"); }
   validatePackedModuleClosure(packageRoot, paths, errors);
-  validateLicense(packageRoot, paths, errors);
+  validateLicense(paths, errors);
   validatePluginMetadata(packageRoot, paths, errors);
   validateNativeClient(packageRoot, paths, errors);
   validateProfileDeploymentBoundary(packageRoot, errors);

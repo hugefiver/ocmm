@@ -14,6 +14,9 @@ export function readPromptAsset(path) {
     return text;
 }
 export const SOURCE_ROLE_CATALOG = JSON.parse(readPromptAsset("catalog.json"));
+export function buildRoleIdentity(role) {
+    return `You are ${role.name} (role ID: ${role.id}).`;
+}
 export function splitCategory(text) {
     const calibrations = new Map();
     const base = text.replace(/\r?\n?<model-calibration model="([^"]+)">\r?\n([\s\S]*?)\r?\n<\/model-calibration>\r?\n?/gu, (_block, model, calibration) => { calibrations.set(model, calibration.trim()); return "\n"; }).trim();
@@ -22,6 +25,6 @@ export function splitCategory(text) {
 export function buildRolePersona(role) {
     const source = role.promptArtifact === null ? role.description : readPromptAsset(role.promptArtifact.replace("prompts/source/", ""));
     const body = role.kind === "category" ? splitCategory(source).base : source;
-    return [`You are ${role.name} (role ID: ${role.id}).`, readPromptAsset("shared/locale.md"), body, readPromptAsset("shared/dsh-host-contract.md"), readPromptAsset(role.terminalArtifact.replace("prompts/source/", ""))].filter(Boolean).join("\n\n---\n\n");
+    return [buildRoleIdentity(role), readPromptAsset("shared/locale.md"), body, readPromptAsset("shared/dsh-host-contract.md"), readPromptAsset(role.terminalArtifact.replace("prompts/source/", ""))].filter(Boolean).join("\n\n---\n\n");
 }
 //# sourceMappingURL=prompt-content.js.map

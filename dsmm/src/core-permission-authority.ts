@@ -2,16 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ToolExecution } from "@deepseek-ai/dsh-tools";
-import { scopeLifetime } from "./delivery-authority.js";
-import type { ParentAdmissionTicket } from "./delivery-authority.js";
+import { scopeLifetime } from "./lifetime.js";
 import type { DshAgent } from "./dsh-types.js";
 import { PermissionRefusal, permissionOriginal } from "./permission-control.js";
-import type { PermissionControlCollaborators, PermissionExecutionAuthority, PermissionRunHolder } from "./permission-control.js";
-import { capturedRoleInvocation } from "./role-invocation.js";
+import type { PermissionControlCollaborators, PermissionExecutionAuthority } from "./permission-control.js";
 import type { DsmmRolePolicy } from "./role-policy.js";
-import { RoleRunHolder } from "./role-runs.js";
 import { DSMM_ROLES } from "./roles.js";
-import type { DsmmHostRuntimeIntegration } from "./runtime-integration.js";
+import type { NativeAdmission } from "./native-admission.js";
 import { classifyDsmmAgent } from "./runtime-integration.js";
 import type { DsmmProfileAdmission, DsmmSettingsGetter } from "./settings.js";
 
@@ -40,7 +37,6 @@ interface Generation {
   readonly nativeChild: boolean;
   readonly controlled: boolean;
   readonly integration?: object;
-  readonly ticket?: ParentAdmissionTicket<DsmmProfileAdmission>;
   readonly admission: DsmmProfileAdmission;
   readonly facts: readonly unknown[];
   readonly authority: PermissionExecutionAuthority;
@@ -63,9 +59,9 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
   scopeLifetime(ctx, "dsmm.permissionAuthority: release live generations", () => { lifetime.abort(); revokeAll(); });
   ctx.on("agent/disposed", ({ agent }) => generations.get(agent)?.revoke(), { global: true, prepend: true });
 
-  const integration = (): DsmmHostRuntimeIntegration | undefined => {
+  const integration = (): NativeAdmission | undefined => {
     if (lifetimeSignal.aborted) throw new PermissionRefusal("cancelled");
-    return ctx.get("dsmmRuntimeIntegration");
+    return ctx.get("dsmmNativeAdmission");
   };
 
   /** Registry ownership is direct, so each physical edge must be walked independently. */
@@ -99,7 +95,7 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
     return admission;
   };
 
-  const local = (host: DsmmHostRuntimeIntegration | undefined, agent: Agent, root: Agent, parent?: Generation): Generation => {
+  const local = (host: NativeAdmission | undefined, agent: Agent, root: Agent, parent?: Generation): Generation => {
     const previous = generations.get(agent);
     try {
       const structural = agent as unknown as DshAgent;
@@ -117,7 +113,7 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
       const managed = parent !== undefined && !nativeChild;
       if (managed && host === undefined) throw new PermissionRefusal("unavailable");
       const entry = managed ? permissionOriginal(host!) : undefined;
-      const owner = managed ? host!.owner : coreOwner;
+      const owner = managed ? host! : coreOwner;
       const facts = [root, agent.ctx, parent?.authority.signal, permissionOriginal(ctx.get("dsmmCoreLlmOwner")!),
         permissionOriginal(ctx.get("dsmmProfileRuntime")!), permissionOriginal(tools),
         approval === undefined ? undefined : permissionOriginal(approval),
@@ -125,20 +121,16 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
         JSON.stringify(identity?.toolFilter)];
       if (previous !== undefined && !previous.authority.signal.aborted && previous.integration === entry
         && previous.authority.owner === owner && previous.admission === admission && sameFacts(previous.facts, facts)) {
-        if (previous.ticket !== undefined) host!.runtime.authority.assertTicket(previous.ticket);
+        if (managed) host!.assert(agent);
         return previous;
       }
       previous?.revoke();
-      const ticket = managed ? host!.runtime.authority.acquireParentTicket(agent) : undefined;
-      if (ticket !== undefined) {
-        host!.runtime.authority.assertTicket(ticket);
-        if (ticket.parent !== agent || ticket.owner !== host!.owner || ticket.admission !== admission || ticket.parentEpoch !== admission.epoch) throw new PermissionRefusal("not-owned");
-      }
+      if (managed && host!.assert(agent) !== admission) throw new PermissionRefusal("not-owned");
       const controller = new AbortController();
-      const signal = AbortSignal.any([controller.signal, lifetimeSignal, ...ticket === undefined ? [] : [ticket.signal], ...parent === undefined ? [] : [parent.authority.signal]]);
+      const signal = AbortSignal.any([controller.signal, lifetimeSignal, ...parent === undefined ? [] : [parent.authority.signal]]);
       const detach: Array<() => void> = [];
       let revoked = false;
-      const generation: Generation = { nativeChild, controlled: managed || identity?.role !== undefined, integration: entry, ticket, admission, facts,
+      const generation: Generation = { nativeChild, controlled: managed || identity?.role !== undefined, integration: entry, admission, facts,
         authority: Object.freeze({ agent, root, realm: agent.ctx, owner, ownerGeneration: admission.epoch,
           admissionRevision: admission.epoch, permissionRevision: randomUUID(), signal }),
         revoke() {
@@ -159,31 +151,11 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
     } catch (error) { previous?.revoke(); throw error; }
   };
 
-  const runFor = (host: DsmmHostRuntimeIntegration | undefined, agent: Agent, parent?: Generation): PermissionRunHolder | undefined => {
-    if (parent === undefined) return undefined;
-    const invocation = capturedRoleInvocation(agent as unknown as DshAgent);
-    if (invocation === undefined) return undefined;
-    if (host === undefined) throw new PermissionRefusal("unavailable");
-    const ticket = host.runtime.authority.acquireParentTicket(parent.authority.agent);
-    host.runtime.authority.assertTicket(ticket);
-    if (ticket.owner !== host.owner || ticket.admission !== parent.admission || ticket.parentEpoch !== parent.admission.epoch) throw new PermissionRefusal("not-owned");
-    const matching = host.registry.list(parent.authority.agent, host.owner).filter(holder => {
-      const held = holder.invocation;
-      return holder instanceof RoleRunHolder && !holder.holderSignal.aborted && (holder.state === "running" || holder.state === "background")
-        && held?.parent === parent.authority.agent && held.owner === host.owner && held.childId === agent.id
-        && held.admissionEpoch === ticket.parentEpoch && held.capture.admission === ticket.admission
-        && held.capture.invocation === invocation && host.registry.get(held.parent, held.owner, held) === holder;
-    });
-    if (matching.length > 1) throw new PermissionRefusal("not-owned");
-    return matching[0];
-  };
-
   const current: PermissionControlCollaborators["current"] = exec => {
     const host = integration(), chain = ancestry(exec), root = chain.at(-1)!;
     let parent: Generation | undefined, generation!: Generation;
     for (const agent of [...chain].reverse()) { generation = local(host, agent, root, parent); if (agent !== exec.agent) parent = generation; }
-    const run = runFor(host, exec.agent!, chain.length === 1 ? undefined : parent);
-    return run === undefined ? generation.authority : Object.freeze({ ...generation.authority, run });
+    return generation.authority;
   };
 
   const authority: PermissionControlCollaborators = {
@@ -219,7 +191,7 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
       const live = current(exec);
       if (authority.agent !== live.agent || authority.root !== live.root || authority.realm !== live.realm || authority.owner !== live.owner
         || authority.ownerGeneration !== live.ownerGeneration || authority.admissionRevision !== live.admissionRevision
-        || authority.permissionRevision !== live.permissionRevision || authority.signal !== live.signal || authority.run !== live.run) throw new PermissionRefusal("stale");
+        || authority.permissionRevision !== live.permissionRevision || authority.signal !== live.signal) throw new PermissionRefusal("stale");
       const tools = live.agent.ctx.get("tools");
       if (tools?.get(exec.name, live.agent) === undefined
         || !generations.get(live.agent)?.nativeChild && rolePolicy.toolDenial(live.agent as unknown as DshAgent, exec.name, tools, exec) !== undefined) throw new PermissionRefusal("denied");

@@ -6,17 +6,18 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { digest, removeStableUiRoot, stableMainStartupRow, stableNativeProofIdentity, stableNativeStorage, stableRuntimeStartupRows } from "./stable-native-acceptance.mjs";
+import { isSource030 } from "./release-contract.mjs";
 
 export function stableUiStartupPatch({ env, nativeStorage, auditConfig, version }) {
   return [
-    ...stableRuntimeStartupRows(version),
+    ...(isSource030(version) ? [] : stableRuntimeStartupRows()),
     { id: "session-persistence-jsonl", name: "@deepseek-ai/dsh-session-persistence-jsonl", disabled: true },
     stableMainStartupRow({ defaultActive: true, presets: { materialize: false }, runtimeRecovery: { enabled: false },
       sessionPersistence: stableNativeStorage(nativeStorage, env), roles: { "dsmm-builder": false },
       subagents: { enableRunInBackground: true, backgroundMode: "continuable", maxDepth: 3 },
        roleRouting: { "dsmm-reviewer": { primary: { provider: "dsmm-stable021-fixture", model: "reviewer-original", reasoningEffort: "high" } } } }, version),
     { id: "session-title-llm", disabled: true },
-    { insert: [{ id: "dsmm-stable021-browser-audit", name: new URL("./profile-ui-harness-stable021-native.mjs", import.meta.url).href, config: auditConfig }] },
+    { insert: [{ id: isSource030(version) ? "dsmm-stable030-browser-audit" : "dsmm-stable021-browser-audit", name: new URL("./profile-ui-harness-stable021-native.mjs", import.meta.url).href, config: auditConfig }] },
   ];
 }
 
@@ -36,7 +37,7 @@ export async function runStableNativeAcceptance({ artifact, sha256, sourceContra
   assert.ok(offset !== "" && !offset.startsWith("..") && !isAbsolute(offset), "installed package must be inside this run's owned root");
   assert.equal(digest(await readFile(artifact)), sha256);
   const clientBefore = digest(await readFile(join(packageRoot, "lib", "client.js")));
-  const runRoot = await mkdtemp(join(await realpath(tmpdir()), "dsmm-profile-ui-stable021-")), token = randomUUID();
+  const runRoot = await mkdtemp(join(await realpath(tmpdir()), isSource030(manifest.version) ? "dsmm-profile-ui-stable030-" : "dsmm-profile-ui-stable021-")), token = randomUUID();
   await writeFile(join(runRoot, ".dsmm-ui-owner"), token, { flag: "wx" });
   const evidenceRoot = env.DSMM_UI_EVIDENCE_DIR ?? join(ownedRoot, "ui-qa");
   await mkdir(evidenceRoot, { recursive: true });

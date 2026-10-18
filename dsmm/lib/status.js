@@ -1,7 +1,6 @@
 import { classifyModelFamily } from "./model-family.js";
-import { isDeepseekFlashRoute, isDeepseekV4ProRoute } from "./model-routing.js";
 import { DSMM_ROLES, isDsmmRoleId } from "./roles.js";
-import { persistedRoleRoute, liveRolePolicyIdentity, roleRouteRuntimeState } from "./role-routing.js";
+import { roleRouteRuntimeState } from "./role-routing.js";
 import { resolveSelectedAgentPreset } from "./session-scope.js";
 import { resolveAdmittedDsmmRole as resolveEffectiveDsmmRole } from "./role-policy.js";
 import { resolveRoleRuntimePolicy } from "./routing-policy.js";
@@ -31,18 +30,6 @@ export function createDsmmStatusSnapshot(input) {
         providerID: selectedRoute.provider,
         modelID: selectedRoute.model
     });
-    const deepseekV4Pro = selectedRoute.provider !== undefined
-        && selectedRoute.model !== undefined
-        && isDeepseekV4ProRoute({ provider: selectedRoute.provider, model: selectedRoute.model });
-    const deepseekFlash = selectedRoute.provider !== undefined && selectedRoute.model !== undefined
-        && isDeepseekFlashRoute({ provider: selectedRoute.provider, model: selectedRoute.model });
-    let acceptedRoleRoute;
-    if (!ordinaryRoot && !invalidDescriptor && role !== undefined) {
-        acceptedRoleRoute = persistedRoleRoute({ agent }, policy?.primary, fallbacks, liveRolePolicyIdentity(agent, settings, role, input.admission?.epoch));
-    }
-    const exactRouting = policy?.primary !== undefined || acceptedRoleRoute !== undefined
-        || fallbacks.some((route) => route.reasoningEffort !== undefined && route.provider === selectedRoute.provider
-            && route.model === selectedRoute.model && route.reasoningEffort === selectedRoute.reasoningEffort);
     return {
         version: DSMM_STATUS_VERSION,
         ...(input.admission?.roleAvailability === undefined ? {} : { roles: structuredClone(input.admission.roleAvailability) }),
@@ -75,23 +62,8 @@ export function createDsmmStatusSnapshot(input) {
             ...(selectedRoute.provider === undefined ? {} : { provider: selectedRoute.provider }),
             ...(selectedRoute.model === undefined ? {} : { model: selectedRoute.model }),
             family,
-            deepseekV4Pro,
-            deepseekFlash,
             ...(selectedRoute.reasoningEffort === undefined ? {} : { currentReasoningEffort: selectedRoute.reasoningEffort })
         },
-        calibration: ordinaryRoot ? {
-            mode: deepseekFlash ? settings.deepseekFlashCalibration : settings.deepseekV4ProCalibration,
-            applies: false, action: "native-owned"
-        } : exactRouting ? {
-            mode: deepseekFlash ? settings.deepseekFlashCalibration : settings.deepseekV4ProCalibration,
-            applies: false, action: "fixed-role-policy"
-        } : resolveCalibration({
-            calibration: deepseekFlash ? settings.deepseekFlashCalibration : settings.deepseekV4ProCalibration,
-            inScope,
-            targetRoute: deepseekV4Pro || deepseekFlash,
-            policyEffort: resolvePolicyEffort(settings, selectedPreset, deepseekFlash),
-            currentReasoningEffort: selectedRoute.reasoningEffort
-        }),
         rolePolicy: {
             ...(role === undefined ? {} : { role }),
             applies: inScope && !invalidDescriptor,
@@ -134,12 +106,12 @@ export function formatDsmmStatus(snapshot) {
                 : "out of scope";
     const provider = snapshot.route.provider ?? "unavailable";
     const model = snapshot.route.model ?? "unavailable";
-    const policyEffort = snapshot.calibration.policyEffort ?? "not applicable";
     const currentReasoningEffort = snapshot.route.currentReasoningEffort ?? "provider default";
     return [
         "Deepwork status",
         `Mode: ${snapshot.mode.active ? "active" : "inactive"} (${snapshot.mode.name})`,
         ...snapshot.modules?.map((module) => `Module ${module.descriptor.id}: desired=${module.desired.enabled} (${module.desired.source}, ${module.desired.capture}); startup-mounted=${module.startupMounted}; admitted=${module.admitted}; next-root=${module.nextRoot.admitted}; pending=${module.pending}; reason=${module.reason ?? "none"}; host-bundle-enabled=${module.hostBundleEnabled}`) ?? [],
+        ...(snapshot.subagentRuntime === undefined ? [] : [`Native subagents: binding=${snapshot.subagentRuntime.binding}; admission-ready=${snapshot.subagentRuntime.deliveryFenceReady}; restart-required=${snapshot.subagentRuntime.restartRequired}; reason=${snapshot.subagentRuntime.reason ?? "none"}`]),
         `Scope: ${scope}`,
         ...(snapshot.admission === undefined ? [] : [`Profile admission: ${snapshot.admission.scope}; profile=${snapshot.admission.profile?.id ?? "deployment baseline"}; epoch=${snapshot.admission.epoch}`]),
         ...(snapshot.deployment === undefined ? [] : [`Deployment capture: global=${snapshot.deployment.globalRevision}; native=${snapshot.deployment.nativeRevision}; restart-required=${snapshot.deployment.restartRequired.join(",") || "none"}`]),
@@ -149,7 +121,7 @@ export function formatDsmmStatus(snapshot) {
         `Route: ${provider}/${model} [${snapshot.route.family}]`,
         `Role policy: ${displayRole(snapshot.rolePolicy.role)}; strategy=${snapshot.rolePolicy.strategy}; primary=${snapshot.rolePolicy.primary === undefined ? "inherit" : `${snapshot.rolePolicy.primary.provider}/${snapshot.rolePolicy.primary.model}`}; fallbacks=${snapshot.rolePolicy.fallbackSource}; retries=${snapshot.rolePolicy.rateLimit.maxRetries}; threshold=${snapshot.rolePolicy.rateLimit.switchAfterRateLimits}; switches=${snapshot.rolePolicy.rateLimit.maxSwitches}`,
         ...(snapshot.rolePolicy.runtimeState === undefined ? [] : [`Retry state: retries=${snapshot.rolePolicy.runtimeState.retries}; rate limits=${snapshot.rolePolicy.runtimeState.rateLimitFailures}; switches=${snapshot.rolePolicy.runtimeState.switches}; delay ms=${snapshot.rolePolicy.runtimeState.totalDelayMs}`]),
-        `Reasoning: ${snapshot.calibration.mode}; policy=${policyEffort}; current=${currentReasoningEffort}; action=${snapshot.calibration.action}`,
+        `Reasoning: current=${currentReasoningEffort}`,
         `Runtime recovery: ${snapshot.runtimeRecovery.enabled ? "enabled" : "disabled"}; applies=${snapshot.runtimeRecovery.applies ? "yes" : "no"}; fallbacks=${snapshot.runtimeRecovery.fallbackRouteCount}; max attempts=${snapshot.runtimeRecovery.maxFallbackAttempts}`,
         `Idle continuation: ${snapshot.runtimeRecovery.idleContinuation.enabled ? "enabled" : "disabled"}; max=${snapshot.runtimeRecovery.idleContinuation.maxContinuations}`,
         "Effective settings: use /dsmm-status json for the normalized snapshot"
@@ -174,26 +146,6 @@ function resolveRoute(agent) {
 function readString(value) {
     return typeof value === "string" ? value : undefined;
 }
-function resolvePolicyEffort(settings, _selectedPreset, flash) {
-    return flash ? settings.deepseekFlashDefaultReasoningEffort : settings.deepseekV4ProDefaultReasoningEffort;
-}
-function resolveCalibration(input) {
-    if (input.calibration === "off") {
-        return { mode: input.calibration, applies: false, action: "disabled" };
-    }
-    if (!input.inScope) {
-        return { mode: input.calibration, applies: false, action: "out-of-scope" };
-    }
-    if (!input.targetRoute) {
-        return { mode: input.calibration, applies: false, action: "non-target-route" };
-    }
-    if (input.calibration === "auto") {
-        return input.currentReasoningEffort === undefined
-            ? { mode: input.calibration, applies: true, policyEffort: input.policyEffort, action: "fill-missing" }
-            : { mode: input.calibration, applies: true, policyEffort: input.policyEffort, action: "preserve-explicit" };
-    }
-    return { mode: input.calibration, applies: true, policyEffort: input.policyEffort, action: "enforce" };
-}
 /** Read-only diagnostics only; never use this copy as configuration input. */
 export function readOnlySettings(settings) {
     return {
@@ -204,10 +156,6 @@ export function readOnlySettings(settings) {
         modeName: settings.modeName,
         defaultActive: settings.defaultActive,
         promptOrder: settings.promptOrder,
-        deepseekV4ProCalibration: settings.deepseekV4ProCalibration,
-        deepseekV4ProDefaultReasoningEffort: settings.deepseekV4ProDefaultReasoningEffort,
-        deepseekFlashCalibration: settings.deepseekFlashCalibration,
-        deepseekFlashDefaultReasoningEffort: settings.deepseekFlashDefaultReasoningEffort,
         skills: { ...settings.skills },
         roles: { ...settings.roles },
         roleRouting: Object.fromEntries(Object.entries(settings.roleRouting).map(([role, policy]) => [role, {

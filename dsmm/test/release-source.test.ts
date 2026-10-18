@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Source-only pack authority is deliberately not published.
-import { assertPackSource, CONTROL_FILES } from "../scripts/release-source.mjs";
+import { assertPackSource, CONTROL_FILES, CONTROL_FILES_031 } from "../scripts/release-source.mjs";
 const sha = "a".repeat(40);
 const context = { mode: "future", releaseSha: sha, controlSha: sha, tag: "dsmm-scoped-v0.2.0" };
 test("pack authority binds exact tracked tag/checkout/control without reading dirty roadmap bytes", () => {
@@ -16,4 +16,15 @@ test("pack authority binds exact tracked tag/checkout/control without reading di
   assert.throws(() => assertPackSource("owned-checkout", context, () => "b".repeat(40)));
   assert.throws(() => assertPackSource("owned-checkout", context, (_root: string, args: string[]) => args[0] === "rev-parse" ? args[1] === "HEAD" ? sha : "b".repeat(40) : ""));
   assert.throws(() => assertPackSource("owned-checkout", context, (_root: string, args: string[]) => { if (args[0] === "cat-file") throw Error("missing tracked control"); return args[0] === "rev-parse" ? sha : ""; }));
+});
+
+test("031 pack authority uses only the exact build-only control surface", () => {
+  const calls: string[][] = [];
+  const tagged = { ...context, version: "0.3.1", tag: "dsmm-scoped-v0.3.1" };
+  const execute = (_root: string, args: string[]) => { calls.push(args); return args[0] === "rev-parse" ? sha : ""; };
+  assert.deepEqual(assertPackSource("owned-checkout", tagged, execute), { releaseSha: sha, controlSha: sha, tag: tagged.tag });
+  const checked = new Set(calls.filter(([command]) => command === "cat-file").map((row) => row[2]));
+  for (const path of [".github/workflows/dsmm-release.yml", "dsmm/scripts/release-contract.mjs", "dsmm/scripts/release-source.mjs", "dsmm/scripts/check-dsmm-release-completion.mjs"]) {
+    assert.ok(CONTROL_FILES_031.includes(path)); assert.ok(checked.has(`${sha}:${path}`));
+  }
 });

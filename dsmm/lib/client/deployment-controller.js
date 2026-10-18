@@ -1,10 +1,36 @@
-import { equal, editLayer, layerDiff, mergeLayer, record, validateEditorValue } from "./deployment-data.js";
+import { equal, editLayer, layerDiff, mergeLayer, record, scopeSchema, validateEditorValue } from "./deployment-data.js";
 class Refusal extends Error {
     code;
     constructor(code) {
         super(code);
         this.code = code;
     }
+}
+/** Native wire shape only; schema semantics remain independently validated. */
+function isNativeJson(value, active = new Set()) {
+    if (value === null || typeof value === "string" || typeof value === "boolean")
+        return true;
+    if (typeof value === "number")
+        return Number.isFinite(value);
+    if (typeof value !== "object" || active.has(value) || Object.getOwnPropertySymbols(value).length > 0)
+        return false;
+    const array = Array.isArray(value), prototype = Object.getPrototypeOf(value);
+    if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null)
+        return false;
+    active.add(value);
+    const properties = Object.getOwnPropertyDescriptors(value);
+    const valid = Object.entries(properties).every(([key, descriptor]) => array && key === "length" || descriptor.enumerable
+        && Object.hasOwn(descriptor, "value") && (!array || /^(0|[1-9][0-9]*)$/u.test(key) && Number(key) < value.length)
+        && isNativeJson(descriptor.value, active));
+    active.delete(value);
+    return valid && (!array || Object.keys(properties).length === value.length + 1);
+}
+function nativePathEdit(edit) {
+    if (edit.op === "unset")
+        return edit;
+    if (!isNativeJson(edit.value))
+        throw new Refusal("validation");
+    return { op: "set", path: edit.path, value: edit.value };
 }
 async function unwrap(promise) {
     const result = await promise;
@@ -21,7 +47,7 @@ export class DeploymentController {
     remote;
     layer;
     rowNamespace;
-    state = { snapshot: null, draft: {}, dirty: false, busy: false, issue: null, saved: false, session: null };
+    state = { snapshot: null, draft: {}, dirty: false, busy: false, issue: null, saved: false, session: null, raw: {}, invalidFields: [], refreshRequired: false };
     listeners = new Set();
     generation = 0;
     disposed = false;
@@ -31,6 +57,7 @@ export class DeploymentController {
     connection = null;
     connectionBaseline;
     stopConnection = null;
+    children = new Set();
     constructor(remote, layer, rowNamespace = null) {
         this.remote = remote;
         this.layer = layer;
@@ -42,6 +69,8 @@ export class DeploymentController {
     bindConnection(source) {
         this.stopConnection?.();
         this.connection = source;
+        for (const child of this.children)
+            child.bindConnection(source);
         this.stopConnection = source.subscribe(() => {
             if (this.disposed)
                 return;
@@ -53,6 +82,7 @@ export class DeploymentController {
         const controller = new DeploymentController(this.remote, "profile", namespace);
         if (this.connection !== null)
             controller.bindConnection(this.connection);
+        this.children.add(controller);
         return controller;
     }
     currentConnection() { return this.connection === null || this.connection.getSnapshot() !== undefined && this.connection.getSnapshot() === this.connectionBaseline; }
@@ -72,8 +102,26 @@ export class DeploymentController {
             this.invalid.add(path);
         else
             this.invalid.delete(path);
-        this.publish({ dirty: this.invalid.size > 0 || !equal(this.baseline, this.state.draft), saved: false });
+        this.publish({ invalidFields: [...this.invalid], dirty: this.invalid.size > 0 || !equal(this.baseline, this.state.draft), saved: false });
     }
+    setRaw(path, text, invalid) {
+        if (!this.canEdit())
+            return;
+        this.publish({ raw: { ...this.state.raw, [path]: { text, invalid } } });
+        this.setInvalid(path, invalid);
+    }
+    clearRaw(prefix) {
+        if (!this.canEdit())
+            return;
+        const raw = Object.fromEntries(Object.entries(this.state.raw).filter(([path]) => path !== prefix && !path.startsWith(`${prefix}.`)));
+        for (const path of [...this.invalid])
+            if (path === prefix || path.startsWith(`${prefix}.`))
+                this.invalid.delete(path);
+        this.publish({ raw, invalidFields: [...this.invalid], dirty: this.invalid.size > 0 || !equal(this.baseline, this.state.draft) });
+    }
+    canEdit() { return !this.disposed && !this.state.busy && !this.state.refreshRequired && this.state.snapshot !== null && this.state.snapshot.globalRevision !== "unavailable" && (this.layer === "global" || this.state.snapshot.nativeRevision !== "unavailable") && this.currentConnection() && (this.state.issue === null || this.state.issue === "validation") && (this.layer === "global" || this.canWriteProfile()); }
+    canSave() { return this.canEdit() && this.state.issue === null && this.state.dirty && this.invalid.size === 0; }
+    pendingPaths() { return [...new Set([...layerDiff(this.baseline, this.state.draft).map(edit => edit.path.join(".")), ...this.invalid])]; }
     canWriteProfile(snapshot = this.state.snapshot) {
         const native = this.form?.state;
         return this.currentConnection() && snapshot !== null && this.rowNamespace !== null && this.rowNamespace === snapshot.namespace
@@ -82,7 +130,7 @@ export class DeploymentController {
             && equal(native.base ?? null, snapshot.nativeForm.base) && equal(native.user ?? null, snapshot.nativeForm.user);
     }
     edit(path, value) {
-        if (this.state.busy || this.disposed || this.state.snapshot === null || !this.currentConnection() || this.state.issue === "not-owned" || this.layer === "profile" && !this.canWriteProfile())
+        if (!this.canEdit())
             return;
         const draft = editLayer(this.state.draft, path, value);
         this.publish({ draft, dirty: this.invalid.size > 0 || !equal(this.baseline, draft), issue: null, saved: false });
@@ -99,6 +147,8 @@ export class DeploymentController {
             const snapshot = await unwrap(this.remote.describeSettings());
             if (this.disposed || generation !== this.generation)
                 return;
+            if (snapshot.globalRevision === "unavailable" || this.layer === "profile" && snapshot.nativeRevision === "unavailable")
+                throw new Refusal("unavailable");
             const old = this.state.snapshot;
             if (old !== null && (old.entryId !== snapshot.entryId || old.hostProfileKey !== snapshot.hostProfileKey))
                 throw new Refusal("unavailable");
@@ -110,7 +160,7 @@ export class DeploymentController {
                 this.invalid.clear();
                 this.connectionBaseline = connection;
                 this.baseline = this.layer === "global" ? snapshot.global : record(snapshot.nativeForm?.user) ? snapshot.nativeForm.user : {};
-                this.publish({ snapshot, draft: structuredClone(this.baseline), dirty: false, issue: null });
+                this.publish({ snapshot, draft: structuredClone(this.baseline), raw: {}, invalidFields: [], dirty: false, issue: null, refreshRequired: false });
             }
         }
         catch (error) {
@@ -124,22 +174,20 @@ export class DeploymentController {
     }
     async save() {
         const { snapshot, draft, dirty, busy, issue } = this.state;
-        if (this.disposed || snapshot === null || !dirty || busy || issue !== null || !this.currentConnection() || this.invalid.size > 0 || this.layer === "profile" && !this.canWriteProfile())
+        if (!this.canSave() || snapshot === null || !dirty || busy || issue !== null)
             return;
-        const schema = this.layer === "global" ? snapshot.schema : { ...snapshot.schema, fields: Object.fromEntries(Object.entries(snapshot.schema.fields ?? {}).filter(([key]) => key !== "modules")) };
-        const editable = { ...draft };
-        if (this.layer === "profile") {
-            if (!equal(editable.sessionPersistence, this.baseline.sessionPersistence)) {
-                this.publish({ issue: "validation" });
-                return;
-            }
-            delete editable.sessionPersistence;
+        if (snapshot.globalRevision === "unavailable" || this.layer === "profile" && snapshot.nativeRevision === "unavailable") {
+            this.publish({ issue: "unavailable" });
+            return;
         }
+        const selectedSchema = scopeSchema(snapshot, this.layer);
+        const schema = { ...selectedSchema, fields: Object.fromEntries(Object.entries(selectedSchema.fields ?? {}).filter(([key]) => key !== (this.layer === "global" ? "runtime" : "modules"))) };
+        const mergedSchema = { ...snapshot.schema, fields: { ...snapshot.schema.fields, ...snapshot.nativeSchema?.fields } };
+        const editable = { ...draft };
         const lower = this.layer === "global" ? snapshot.defaults : mergeLayer(mergeLayer(snapshot.defaults, snapshot.global), snapshot.nativeForm?.base ?? {});
         const candidate = mergeLayer(lower, editable);
         const merged = (this.layer === "global" ? mergeLayer(candidate, snapshot.profile) : candidate);
-        delete merged.sessionPersistence;
-        if (!validateEditorValue(editable, schema, true) || !validateEditorValue(merged, snapshot.schema)) {
+        if (!validateEditorValue(editable, schema, true) || !validateEditorValue(merged, mergedSchema)) {
             this.publish({ issue: "validation" });
             return;
         }
@@ -156,28 +204,40 @@ export class DeploymentController {
                 return;
             if (current.entryId !== snapshot.entryId || current.hostProfileKey !== snapshot.hostProfileKey || current.globalRevision !== snapshot.globalRevision)
                 throw new Refusal("conflict");
-            if (this.layer === "global")
-                await unwrap(this.remote.save({ expectedRevision: snapshot.globalRevision, edits }));
+            let acceptedRefreshRequired = false;
+            if (this.layer === "global") {
+                const accepted = await unwrap(this.remote.save({ expectedRevision: snapshot.globalRevision, edits }));
+                acceptedRefreshRequired = accepted.refreshRequired === true || accepted.revision === "unavailable";
+            }
             else {
                 if (current.nativeRevision !== snapshot.nativeRevision || !this.canWriteProfile(current))
                     throw new Refusal("conflict");
                 const form = this.form;
-                if (!await form.mutate(edits, snapshot.nativeFormRevision))
-                    throw new Refusal("conflict");
+                if (!await form.mutate(edits.map(nativePathEdit), snapshot.nativeFormRevision))
+                    throw new Refusal("unconfirmed");
             }
             if (this.disposed || generation !== this.generation)
                 return;
             this.baseline = structuredClone(draft);
-            this.publish({ dirty: false, saved: true, issue: null });
+            this.invalid.clear();
+            this.publish({ dirty: false, saved: true, issue: null, raw: {}, invalidFields: [], refreshRequired: true });
             // A successful durable save remains successful even if the follow-up read fails.
+            if (acceptedRefreshRequired)
+                return;
             try {
                 const next = await unwrap(this.remote.describeSettings());
-                if (!this.disposed && generation === this.generation)
-                    this.publish({ snapshot: next });
+                if (!this.disposed && generation === this.generation) {
+                    if (next.entryId !== snapshot.entryId || next.hostProfileKey !== snapshot.hostProfileKey || next.globalRevision === "unavailable" || this.layer === "profile" && next.nativeRevision === "unavailable")
+                        this.publish({ refreshRequired: true });
+                    else {
+                        this.baseline = structuredClone(this.layer === "global" ? next.global : record(next.nativeForm?.user) ? next.nativeForm.user : {});
+                        this.publish({ snapshot: next, draft: structuredClone(this.baseline), refreshRequired: false });
+                    }
+                }
             }
             catch {
                 if (!this.disposed && generation === this.generation)
-                    this.publish({ issue: "unavailable" });
+                    this.publish({ refreshRequired: true });
             }
         }
         catch (error) {

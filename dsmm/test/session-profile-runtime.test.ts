@@ -1,25 +1,17 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { TestContext } from "node:test";
-import { Context } from "@deepseek-ai/cordis";
-import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";
-import { SessionId, SessionLogOffset } from "@deepseek-ai/dsh-session";
-import * as JsonlSessionPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
+import { SessionId } from "@deepseek-ai/dsh-session";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { ModelSelectionRef } from "@deepseek-ai/dsh-agent";
-import type { DshAgent, DshContext } from "../lib/dsh-types.js";
-import { createProfileRuntime, DsmmProfileRuntime } from "../lib/profile-runtime.js";
-import { ProfileStore } from "../lib/profile-store.js";
-import type { SessionProfileCommit } from "../lib/profile-store.js";
-import { DsmmProfileError } from "../lib/profiles.js";
-import type { DsmmProfileDocument } from "../lib/profiles.js";
-import type { SessionProfileSelectRequest } from "../lib/profile-types.js";
-import DsmmSessionPersistence from "../lib/session-persistence.js";
-import { resolveConfig } from "../lib/settings.js";
+import type { DshAgent } from "../src/dsh-types.js";
+import { createProfileRuntime, DsmmProfileRuntime } from "../src/profile-runtime.js";
+import { ProfileStore } from "../src/profile-store.js";
+import type { SessionProfileSelectRequest } from "../src/profile-types.js";
+import { resolveConfig } from "../src/settings.js";
 import { headerRoutes, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
 const route = (model: string) => ({ provider: "fixture", model, reasoningEffort: "high" });
@@ -35,50 +27,35 @@ async function request(runtime: DsmmProfileRuntime, agent: Agent, id: string | n
   return { sessionId: agent.id, id, ...(revision === undefined ? {} : { expectedRevision: revision }), expectedSelectionRevision: state.selection.selectionRevision, expectedAdmissionEpoch: state.admissionEpoch };
 }
 function gate() { let release!: () => void; const promise = new Promise<void>((done) => { release = done; }); return { promise, release }; }
-function pauseSessionCandidate(t: TestContext, entered: ReturnType<typeof gate>, hold: ReturnType<typeof gate>) {
-  const select = ProfileStore.prototype.selectSession;
-  t.mock.method(ProfileStore.prototype, "selectSession", function<T>(this: ProfileStore, input: SessionProfileSelectRequest, epoch: string,
-    validate: (document: DsmmProfileDocument | null) => T | Promise<T>, commit: SessionProfileCommit<T>) {
-    return select.bind(this)<T>(input, epoch, async document => {
-      entered.release(); await hold.promise;
-      return validate(document);
-    }, commit);
-  });
-}
-async function localRuntime(f: Awaited<ReturnType<typeof nativeRoutingFixture>>, validateCandidate: () => Promise<void>, lookup?: Map<string, DshAgent>) {
-  const ctx: DshContext = { get(name) { return (name === "agents" ? { list: () => lookup === undefined ? f.agents.list() as unknown as DshAgent[] : [...lookup.values()], get: (id: string) => lookup === undefined ? structural(f.agents.get(SessionId(id))!) : lookup.get(id), isOwnedBy: (id: string, owner: DshAgent) => f.agents.isOwnedBy(SessionId(id), owner as unknown as Agent) } : f.ctx.get(name)) as never; } };
-  const runtime = new DsmmProfileRuntime(ctx, resolveConfig(), centralStore(f), { validateCandidate });
-  await runtime.initialize();
-  return runtime;
-}
 
-test("minimal default and native idle mode writes survive profile changes/reopen without model selection", async () => {
+test("ordinary native mode writes survive future-default changes and reopen without model selection", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true });
   try {
     const runtime = runtimeOf(f);
-    const minimal = await f.create({ agentPreset: "minimal" });
-    const standard = await f.create({ agentPreset: "standard" });
-    const before = await runtime.getSession(structural(minimal));
-    assert.equal(before.deepwork!.active, false); assert.equal(before.deepwork!.explicit, false);
-    assert.equal((await runtime.getSession(structural(standard))).deepwork!.active, true);
+    const ordinary = await f.create({ agentPreset: "standard" });
+    const before = await runtime.getSession(structural(ordinary));
+    assert.equal(before.deepwork!.active, true); assert.equal(before.deepwork!.explicit, false);
     const toggle = (state: Awaited<ReturnType<DsmmProfileRuntime["getSession"]>>, active: boolean) => ({ sessionId: state.sessionId, active, expectedModeRevision: state.deepwork!.revision, expectedAdmissionEpoch: state.admissionEpoch });
-    const nativeChoice = structuredClone(minimal.options);
-    const enabled = await runtime.selectMode(toggle(before, true), structural(minimal));
-    assert.equal(enabled.deepwork!.active, true); assert.equal(enabled.deepwork!.explicit, true); assert.deepEqual(minimal.options, nativeChoice);
-    await runFixtureTurn(minimal);
-    assert.match(JSON.stringify(f.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/u);
+    const nativeChoice = structuredClone(ordinary.options);
+    const disabled = await runtime.selectMode(toggle(before, false), structural(ordinary));
+    assert.equal(disabled.deepwork!.active, false); assert.equal(disabled.deepwork!.explicit, true); assert.deepEqual(ordinary.options, nativeChoice);
+    await runFixtureTurn(ordinary);
+    assert.doesNotMatch(JSON.stringify(f.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/u);
     const saved = await runtime.save({ id: "mode-off-default", content: '{"version":1,"id":"mode-off-default","settings":{"defaultActive":false}}', expectedRevision: null });
-    const switched = await runtime.selectSession(await request(runtime, minimal, saved.id, saved.revision), structural(minimal));
-    assert.equal(switched.deepwork!.active, true); assert.equal(switched.deepwork!.explicit, true);
-    await assert.rejects(runtime.selectMode(toggle(enabled, false), structural(minimal)), { code: "conflict" });
-    const disabled = await runtime.selectMode(toggle(switched, false), structural(minimal));
-    assert.equal(disabled.deepwork!.active, false); assert.equal(disabled.deepwork!.explicit, true);
-    await runFixtureTurn(minimal); assert.doesNotMatch(JSON.stringify(f.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/u);
-    const seed = minimal.session.snapshotEvents();
-    const resumed = await f.create({ agentPreset: "minimal" }, undefined, { seed });
-    assert.equal((await runtime.getSession(structural(resumed))).deepwork!.active, false);
+    await runtime.select({ id: saved.id, expectedRevision: saved.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+    const future = await f.create({ agentPreset: "standard" });
+    const futureState = await runtime.getSession(structural(future));
+    assert.equal(futureState.deepwork!.active, false); assert.equal(futureState.deepwork!.explicit, false);
+    assert.equal(futureState.canApplyOverlay, false); assert.equal(futureState.applyOverlayUnavailableReason, "new-session-required");
+    assert.equal((await runtime.getSession(structural(ordinary))).deepwork!.active, false, "existing admission remains immutable");
+    const enabled = await runtime.selectMode(toggle(disabled, true), structural(ordinary));
+    assert.equal(enabled.deepwork!.active, true); assert.equal(enabled.deepwork!.explicit, true);
+    await runFixtureTurn(ordinary); assert.match(JSON.stringify(f.adapter.calls.at(-1)?.messages), /DEEPWORK MODE ENABLED!/u);
+    const seed = ordinary.session.snapshotEvents();
+    const resumed = await f.create({ agentPreset: "standard" }, undefined, { seed });
+    assert.equal((await runtime.getSession(structural(resumed))).deepwork!.active, true);
     assert.equal((await runtime.getSession(structural(resumed))).deepwork!.explicit, true);
-    assert.equal(minimal.session.snapshotEvents().filter((event) => event.type === "model/selection").length, 0);
+    assert.equal(ordinary.session.snapshotEvents().filter((event) => event.type === "model/selection").length, 0);
     const dw = await f.create({ agentPreset: "dsmm-orchestrator" });
     const managed = await runtime.getSession(structural(dw));
     assert.equal(managed.deepwork!.active, true); assert.equal(managed.deepwork!.locked, false);
@@ -89,101 +66,18 @@ test("minimal default and native idle mode writes survive profile changes/reopen
   } finally { await f.dispose(); }
 });
 
-test("native maintenance race and mode persistence refusal leave accepted mode and model unchanged", async () => {
+test("native maintenance race leaves the accepted mode and model unchanged", async () => {
   const f = await nativeRoutingFixture({ defaultActive: true });
   try {
-    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "minimal" });
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "standard" });
     const structuralAgent = structural(agent), before = await runtime.getSession(structuralAgent);
-    const input = { sessionId: before.sessionId, active: true, expectedModeRevision: before.deepwork!.revision, expectedAdmissionEpoch: before.admissionEpoch };
+    const input = { sessionId: before.sessionId, active: false, expectedModeRevision: before.deepwork!.revision, expectedAdmissionEpoch: before.admissionEpoch };
     const barrier = gate(); const maintenance = agent.runMaintenance(() => barrier.promise);
     try { await assert.rejects(runtime.selectMode(input, structuralAgent), { code: "maintenance" }); }
     finally { barrier.release(); await maintenance; }
-    const append = structuralAgent.session.append;
-    structuralAgent.session.append = () => { throw new Error("PRIVATE_DISK_ERROR"); };
-    try { await assert.rejects(runtime.selectMode(input, structuralAgent), { code: "io" }); }
-    finally { structuralAgent.session.append = append; }
     assert.deepEqual((await runtime.getSession(structuralAgent)).deepwork, before.deepwork);
     assert.equal(agent.session.snapshotEvents().filter((event) => event.type === "deepwork/mode").length, 0);
   } finally { await f.dispose(); }
-});
-
-test("native idle switches isolate two roots and global default; old/new children keep their exact admission snapshots", async () => {
-  const f = await nativeRoutingFixture({}, { headless: true });
-  const children: Array<Awaited<ReturnType<typeof f.subagents.startActivation>>> = [];
-  try {
-    const runtime = runtimeOf(f);
-    const a = await runtime.save({ id: "a", content: profile("a", "session-a"), expectedRevision: null });
-    const b = await runtime.save({ id: "b", content: profile("b", "session-b"), expectedRevision: null });
-    const first = await f.create({ agentPreset: "dsmm-orchestrator" }, undefined, { agentOptions: { provider: "fixture", model: "native-a", reasoningEffort: ReasoningEffortId("low") } });
-    const second = await f.create({ agentPreset: "dsmm-orchestrator" }, undefined, { agentOptions: { provider: "fixture", model: "native-b", reasoningEffort: ReasoningEffortId("low") } });
-    const beforeGlobal = await runtime.describe();
-    const switchedA = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
-    assert.deepEqual(switchedA.configuration, (await runtime.getSession(structural(first))).configuration);
-    const oldAdmission = runtime.admission(structural(first));
-    const oldChildRun = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Old admission", delivery: "caller", signal: new AbortController().signal,
-      request: { parent: first, prompt: [{ type: "text", text: "capture the old admission" }] } });
-    children.push(oldChildRun);
-    const oldChild = f.agents.get(oldChildRun.childId)!;
-    assert.ok(oldChild);
-    await assert.rejects(async () => runtime.selectSession(await request(runtime, first, "b", b.revision), structural(oldChild)), { code: "not-owned" });
-    assert.equal((await oldChildRun.result).stopReason, "completed");
-    const oldChildAdmission = runtime.admission(structural(oldChild));
-    assert.equal(oldChildAdmission.epoch, oldAdmission.epoch);
-    assert.equal(oldChildAdmission.appliedRevision, a.revision);
-    assert.equal(oldChildAdmission.childCapture?.parentSessionId, first.id);
-    assert.equal(oldChildAdmission.childCapture?.originalAdmissionEpoch, oldAdmission.epoch);
-    assert.deepEqual(oldChildAdmission.settings.roleRouting, oldAdmission.settings.roleRouting);
-    const switchedB = await runtime.selectSession(await request(runtime, second, "b", b.revision), structural(second));
-    await runFixtureTurn(first); await runFixtureTurn(second);
-    assert.equal(headerRoutes(first).at(-1)?.model, "native-a", "profile switch preserves the first root's native model");
-    assert.equal(headerRoutes(second).at(-1)?.model, "native-b", "the second root's native model remains independent");
-    assert.deepEqual(switchedA.profileModel, route("session-a"));
-    assert.deepEqual(switchedB.profileModel, route("session-b"));
-    assert.notEqual(switchedA.admissionEpoch, switchedB.admissionEpoch);
-    assert.deepEqual(switchedA.globalDefault, { selectedId: beforeGlobal.selectedId, appliedRevision: beforeGlobal.appliedRevision, selectionRevision: beforeGlobal.selectionRevision });
-    assert.equal(existsSync(join(f.profileDir, "dsmm-profiles", ".selection.json")), false);
-    const reapplied = await runtime.selectSession(await request(runtime, first, "a", a.revision), structural(first));
-    assert.notEqual(reapplied.admissionEpoch, switchedA.admissionEpoch, "same revision explicitly reapplied starts a fenced epoch");
-    assert.equal(runtime.admission(structural(oldChild)), oldChildAdmission, "already-created child is never recursively rebound");
-    const newChildRun = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Reapplied admission", delivery: "caller", signal: new AbortController().signal,
-      request: { parent: first, prompt: [{ type: "text", text: "capture the reapplied admission" }] } });
-    children.push(newChildRun);
-    const newChild = f.agents.get(newChildRun.childId)!;
-    assert.ok(newChild);
-    assert.equal((await newChildRun.result).stopReason, "completed");
-    const newChildAdmission = runtime.admission(structural(newChild));
-    assert.equal(newChildAdmission.epoch, reapplied.admissionEpoch);
-    assert.equal(newChildAdmission.appliedRevision, a.revision);
-    assert.equal(newChildAdmission.childCapture?.parentSessionId, first.id);
-    assert.equal(newChildAdmission.childCapture?.originalAdmissionEpoch, reapplied.admissionEpoch);
-    assert.notEqual(runtime.admission(structural(newChild)).epoch, runtime.admission(structural(oldChild)).epoch);
-    await assert.rejects(async () => runtime.selectSession({ ...(await request(runtime, first, "b", b.revision)), expectedAdmissionEpoch: switchedA.admissionEpoch }, structural(first)), { code: "conflict" });
-    const lineageOnly = await f.create({ parentSession: first.id, isSeeded: true, agentPreset: "dsmm-orchestrator" }, undefined, { seed: first.session.snapshotEvents(), inheritedEventCount: SessionLogOffset(first.session.snapshotEvents().length) });
-    assert.equal(runtime.admission(structural(lineageOnly)).scope, "global-default", "durable fork lineage never transfers a session choice without live ownership");
-    assert.equal(runtime.admission(structural(lineageOnly)).appliedRevision, null);
-    await runtime.save({ id: "a", content: profile("a", "edited-only"), expectedRevision: a.revision });
-    assert.equal(runtime.admission(structural(first)).appliedRevision, a.revision);
-    assert.equal(runtime.admission(structural(second)).appliedRevision, b.revision);
-    const oldRoleChild = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Old role snapshot", delivery: "caller", signal: new AbortController().signal,
-      request: { parent: first, prompt: [{ type: "text", text: "old child snapshot" }] } });
-    const oldRoleAgent = f.agents.get(oldRoleChild.childId)!;
-    assert.ok(oldRoleAgent);
-    try {
-      assert.equal((await oldRoleChild.result).stopReason, "completed");
-      assert.equal(headerRoutes(oldRoleAgent).at(-1)?.model, "session-a-review");
-      await runtime.selectSession(await request(runtime, first, "b", b.revision), structural(first));
-      const newRoleChild = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "New role snapshot", delivery: "caller", signal: new AbortController().signal,
-        request: { parent: first, prompt: [{ type: "text", text: "new child snapshot" }] } });
-      const newRoleAgent = f.agents.get(newRoleChild.childId)!;
-      assert.ok(newRoleAgent);
-      try {
-        assert.equal((await newRoleChild.result).stopReason, "completed");
-        assert.equal(headerRoutes(newRoleAgent).at(-1)?.model, "session-b-review");
-        assert.equal(runtime.admission(structural(oldRoleAgent)).appliedRevision, a.revision);
-        assert.equal(runtime.admission(structural(newRoleAgent)).appliedRevision, b.revision);
-      } finally { await newRoleChild.dispose(); }
-    } finally { await oldRoleChild.dispose(); }
-  } finally { for (const child of children.reverse()) await child.dispose(); await f.dispose(); }
 });
 
 test("an unscoped root displays its exact captured global profile after the future-root default changes", async () => {
@@ -201,7 +95,7 @@ test("an unscoped root displays its exact captured global profile after the futu
     assert.equal(snapshot.scope, "global-default");
     assert.equal(snapshot.selection.selectionRevision, "absent", "display identity cannot overwrite the actual sidecar CAS state");
     assert.equal(snapshot.admittedSelection?.selectedId, "a");
-    assert.equal(snapshot.admittedSelection?.appliedRevision, a.revision);
+    assert.equal(snapshot.admittedSelection?.sourceRevision, a.revision);
     assert.equal(snapshot.globalDefault.selectedId, "b");
     assert.deepEqual(snapshot.profileModel, route("captured-a"), "explicit model action metadata comes from the captured admission, not future global B");
     assert.equal(snapshot.admissionEpoch, admission.epoch);
@@ -212,11 +106,9 @@ test("an unscoped root displays its exact captured global profile after the futu
 
 test("profile model metadata follows the admitted ordinary root role without changing native selection or locks", async () => {
   const f = await nativeRoutingFixture();
-  const children: Array<Awaited<ReturnType<typeof f.subagents.startActivation>>> = [];
   try {
     const runtime = runtimeOf(f);
     const nativeSelection: ModelSelectionRef = { current: { provider: "fixture", model: "native-tab", reasoningEffort: ReasoningEffortId("low") }, assembled: undefined };
-    const root = await f.create({ agentPreset: "dsmm-orchestrator" }, nativeSelection);
     const draft = await runtime.save({ id: "metadata", expectedRevision: null, content: JSON.stringify({ version: 1, id: "metadata", settings: {
       defaultActive: false, roleRouting: {
         "dsmm-orchestrator": { primary: { provider: "fixture", model: "declared-main", reasoningEffort: "max" }, fallbackRoutes: [route("not-the-primary")] },
@@ -224,7 +116,9 @@ test("profile model metadata follows the admitted ordinary root role without cha
         "dsmm-reviewer": { primary: route("declared-reviewer") },
       },
     } }) });
-    const selected = await runtime.selectSession(await request(runtime, root, draft.id, draft.revision), structural(root));
+    await runtime.select({ id: draft.id, expectedRevision: draft.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+    const root = await f.create({ agentPreset: "dsmm-orchestrator" }, nativeSelection);
+    const selected = await runtime.getSession(structural(root));
     assert.deepEqual(selected.profileModel, { provider: "fixture", model: "declared-main", reasoningEffort: "max" });
     assert.deepEqual(nativeSelection.current, { provider: "fixture", model: "native-tab", reasoningEffort: "low" });
     await runFixtureTurn(root);
@@ -249,174 +143,27 @@ test("profile model metadata follows the admitted ordinary root role without cha
     assert.equal((await runtime.getSession(structural(root))).profileModel, undefined, "inactive non-DW roots do not infer an orchestrator model");
     root.session.append("deepwork/mode", { active: true });
     assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main");
-    const childRun = await f.subagents.startActivation({ provider: "dsmm-role-reviewer", label: "Admitted child", delivery: "caller", signal: new AbortController().signal,
-      request: { parent: root, prompt: [{ type: "text", text: "complete the admitted child" }] } });
-    children.push(childRun);
-    const child = f.agents.get(childRun.childId)!;
-    assert.ok(child);
-    await assert.rejects(runtime.getSession(structural(child)), { code: "not-owned" });
-    assert.equal((await childRun.result).stopReason, "completed");
     const noPrimary = await runtime.save({ id: "no-primary", expectedRevision: null, content: JSON.stringify({ version: 1, id: "no-primary", settings: { roleRouting: { "dsmm-orchestrator": { fallbackRoutes: [route("fallback-only")] } } } }) });
-    const applied = await runtime.selectSession(await request(runtime, root, noPrimary.id, noPrimary.revision), structural(root));
-    assert.equal(applied.profileModel, undefined, "fallbacks and actual native route never become a declared profile primary");
+    await runtime.select({ id: noPrimary.id, expectedRevision: noPrimary.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+    assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main", "future defaults cannot replace an immutable admission");
+    const future = await f.create({ agentPreset: "dsmm-orchestrator" });
+    assert.equal((await runtime.getSession(structural(future))).profileModel, undefined, "fallbacks and actual native routes never become a declared profile primary");
     assert.deepEqual(nativeSelection.current, { provider: "fixture", model: "native-tab", reasoningEffort: "low" });
-  } finally { for (const child of children.reverse()) await child.dispose(); await f.dispose(); }
+  } finally { await f.dispose(); }
 });
 
-test("native running and foreign maintenance activities refuse immediately; a queued wake uses the committed new epoch", async t => {
-  const f = await nativeRoutingFixture();
-  const wait = gate(); const entered = gate();
-  try {
-    const agent = await f.create({ agentPreset: "dsmm-orchestrator" });
-    const runtime = await localRuntime(f, async () => { entered.release(); await wait.promise; });
-    const saved = await runtime.save({ id: "a", content: profile("a", "wake-new"), expectedRevision: null });
-    const select = await request(runtime, agent, "a", saved.revision);
-    const foreign = gate(); const held = agent.runMaintenance(async () => foreign.promise);
-    await assert.rejects(async () => runtime.selectSession(select, structural(agent)), { code: "maintenance" });
-    foreign.release(); await held;
-    f.adapter.beforeStream = async () => wait.promise;
-    agent.followup(createUserMessage({ source: { kind: "user" }, content: [{ type: "text", text: "bounded busy fixture" }] }));
-    assert.equal(agent.status, "running");
-    await assert.rejects(async () => runtime.selectSession(select, structural(agent)), { code: "busy" });
-    wait.release(); await agent.whenIdle(); f.adapter.beforeStream = undefined;
-    const validation = gate(); const validating = gate();
-    const current = runtimeOf(f);
-    pauseSessionCandidate(t, validating, validation);
-    const pending = current.selectSession(await request(current, agent, "a", saved.revision), structural(agent));
-    await validating.promise;
-    const oldEpoch = current.admission(structural(agent)).epoch;
-    agent.followup(createUserMessage({ source: { kind: "user" }, content: [{ type: "text", text: "wake behind maintenance" }] }));
-    assert.equal(agent.status, "idle", "native maintenance reserves idle even with queued waking input");
-    assert.equal(f.adapter.calls.length, 1, "queued wake cannot begin before durable profile publication");
-    validation.release(); const committed = await pending; await agent.whenIdle();
-    assert.notEqual(committed.admissionEpoch, oldEpoch);
-    assert.equal(headerRoutes(agent).at(-1)?.model, "native-default", "queued wake observes new profile policy without an implicit model change");
-    assert.deepEqual(committed.profileModel, route("wake-new"));
-    assert.deepEqual(committed.configuration, (await current.getSession(structural(agent))).configuration, "queued wake cannot remove a committed safe admission projection");
-  } finally { wait.release(); await f.dispose(); }
-});
-
-for (const failure of ["caller-abort", "native-cancel", "replacement", "disposed"] as const) {
-  test(`native idle session switch ${failure} during validation retains disk and exact old admission`, async () => {
-    const f = await nativeRoutingFixture(); const hold = gate(); const entered = gate();
-    try {
-      const agent = await f.create();
-      const lookup = new Map<string, DshAgent>([[agent.id, structural(agent)]]);
-      const runtime = await localRuntime(f, async () => { entered.release(); await hold.promise; }, lookup);
-      const saved = await runtime.save({ id: "a", content: profile("a", "cancelled-new"), expectedRevision: null });
-      const old = runtime.admission(structural(agent));
-      const controller = new AbortController();
-      const pending = runtime.selectSession(await request(runtime, agent, "a", saved.revision), structural(agent), controller.signal);
-      await entered.promise;
-      if (failure === "caller-abort") controller.abort();
-      if (failure === "native-cancel") agent.cancel({ kind: "user" });
-      if (failure === "replacement") lookup.set(agent.id, { id: agent.id, session: structural(agent).session });
-      if (failure === "disposed") lookup.delete(agent.id);
-      hold.release();
-      await assert.rejects(pending, { code: failure === "caller-abort" || failure === "native-cancel" ? "cancelled" : "not-owned" });
-      assert.equal(runtime.admission(structural(agent)), old);
-      assert.equal((await new ProfileStore(join(f.profileDir, "dsmm-profiles")).loadSessionSelection(agent.id)).selectionRevision, "absent");
-    } finally { hold.release(); await f.dispose(); }
-  });
-}
-
-test("the final pre-rename fence rechecks native cancellation and exact Agent identity after immutable staging", async () => {
-  for (const failure of ["cancel", "replace"] as const) {
-    const f = await nativeRoutingFixture();
-    try {
-      const agent = await f.create();
-      let captured = structural(agent);
-      let fenceCalls = 0;
-      class FinalFenceStore extends ProfileStore {
-        override selectSession<T>(input: SessionProfileSelectRequest, nextEpoch: string, validate: (document: DsmmProfileDocument | null) => T | Promise<T>, publication: SessionProfileCommit<T>) {
-          return super.selectSession(input, nextEpoch, validate, { ...publication, assertCurrent() {
-            if (++fenceCalls === 4) {
-              if (failure === "cancel") agent.cancel({ kind: "user" });
-              else captured = { id: agent.id, session: structural(agent).session };
-            }
-            publication.assertCurrent();
-          } });
-        }
-      }
-      const ctx: DshContext = { get(name) { return (name === "agents" ? { list: () => [captured], get: () => captured, isOwnedBy: () => false } : undefined) as never; } };
-      const runtime = new DsmmProfileRuntime(ctx, resolveConfig(), new FinalFenceStore(join(f.profileDir, "dsmm-profiles")), { validateCandidate() {} });
-      await runtime.initialize();
-      const saved = await runtime.save({ id: "a", content: profile("a", "never-committed"), expectedRevision: null });
-      const old = runtime.admission(structural(agent));
-      await assert.rejects(runtime.selectSession(await request(runtime, agent, "a", saved.revision), structural(agent)), { code: failure === "cancel" ? "cancelled" : "not-owned" });
-      assert.equal(fenceCalls, 4);
-      assert.equal(runtime.admission(structural(agent)), old);
-      assert.equal((await new ProfileStore(join(f.profileDir, "dsmm-profiles")).loadSessionSelection(agent.id)).selectionRevision, "absent");
-      assert.equal(existsSync(join(f.profileDir, "dsmm-profiles", ".revisions", `${saved.revision}.jsonc`)), true, "staging an immutable orphan does not activate it");
-    } finally { await f.dispose(); }
-  }
-});
-
-test("native handle disposal cancels profile validation before committing or publishing late state", async t => {
-  const f = await nativeRoutingFixture(); const entered = gate(); const hold = gate();
-  const handle = await f.agents.create({ sessionId: SessionId("dsmm-real-disposal"), agentOptions: { provider: "fixture", model: "native-default" } });
-  try {
-    const runtime = runtimeOf(f);
-    const saved = await runtime.save({ id: "a", content: profile("a", "dispose-route"), expectedRevision: null });
-    pauseSessionCandidate(t, entered, hold);
-    const old = runtime.admission(structural(handle.agent));
-    const pending = runtime.selectSession(await request(runtime, handle.agent, "a", saved.revision), structural(handle.agent));
-    await entered.promise;
-    const disposed = handle.dispose();
-    hold.release();
-    await assert.rejects(pending);
-    await disposed;
-    assert.equal(f.agents.get(handle.agent.id), undefined);
-    assert.equal(runtime.admission(structural(handle.agent)), old);
-    assert.equal((await new ProfileStore(join(f.profileDir, "dsmm-profiles")).loadSessionSelection(handle.agent.id)).selectionRevision, "absent");
-  } finally { hold.release(); await handle.dispose(); await f.dispose(); }
-});
-
-test("trusted caller authority is rechecked after awaited validation and in the final session commit fence", async () => {
-  for (const boundary of ["validation", "pre-rename"] as const) {
-    const f = await nativeRoutingFixture(); const entered = gate(); const hold = gate();
-    try {
-      const agent = await f.create();
-      let authorized = true;
-      let checks = 0;
-      const runtime = await localRuntime(f, async () => { if (boundary === "validation") { entered.release(); await hold.promise; } });
-      const saved = await runtime.save({ id: "a", content: profile("a", "authority-route"), expectedRevision: null });
-      const old = runtime.admission(structural(agent));
-      const pending = runtime.selectSession(await request(runtime, agent, "a", saved.revision), structural(agent), undefined, () => {
-        // Start, native maintenance entry, store entry, post-validation,
-        // post-staging and final pre-rename all pass the same trusted fence.
-        if (++checks === 7 && boundary === "pre-rename") authorized = false;
-        if (!authorized) throw new DsmmProfileError("not-owned", "The trusted native caller authority was withdrawn.");
-      });
-      if (boundary === "validation") { await entered.promise; authorized = false; hold.release(); }
-      await assert.rejects(pending, { code: "not-owned" });
-      assert.equal(runtime.admission(structural(agent)), old);
-      assert.equal((await new ProfileStore(join(f.profileDir, "dsmm-profiles")).loadSessionSelection(agent.id)).selectionRevision, "absent");
-      if (boundary === "pre-rename") assert.equal(checks, 7);
-    } finally { hold.release(); await f.dispose(); }
-  }
-});
-
-test("session Apply preserves all route candidates without model validation or provider work", async () => {
+test("advanced Apply is explicitly unavailable and cannot replace an immutable native admission", async () => {
   const f = await nativeRoutingFixture();
   try {
-    const runtime = runtimeOf(f); const agent = await f.create();
-    let metadataCalls = 0;
-    f.adapter.resolveModel = async () => { metadataCalls++; throw new Error("Model metadata is not an Apply dependency"); };
-    const save = (id: string, policy: unknown) => runtime.save({ id, expectedRevision: null, content: JSON.stringify({ version: 1, id, settings: { roleRouting: { "dsmm-orchestrator": policy } } }) });
-    const unavailable = { provider: "no-such-native-adapter", model: "manual-model" };
-    const viable = await save("viable", { primary: unavailable, fallbackRoutes: [route("manual-resolvable"), unavailable] });
-    await runtime.selectSession(await request(runtime, agent, "viable", viable.revision), structural(agent));
-    const inherited = await save("inherited", { fallbackRoutes: [unavailable] });
-    await runtime.selectSession(await request(runtime, agent, "inherited", inherited.revision), structural(agent));
-    const old = runtime.admission(structural(agent));
-    f.adapter.unsupportedMaxModels.add("unsupported-exact");
-    const invalid = await save("invalid", { primary: { ...route("unsupported-exact"), reasoningEffort: "max" }, fallbackRoutes: [route("available-but-not-permission-to-normalize")] });
-    await runtime.selectSession(await request(runtime, agent, "invalid", invalid.revision), structural(agent));
-    assert.notEqual(runtime.admission(structural(agent)), old);
-    assert.equal(runtime.admission(structural(agent)).settings.roleRouting["dsmm-orchestrator"]?.primary?.reasoningEffort, "max");
-    assert.equal(metadataCalls, 0);
-    assert.equal(f.adapter.calls.length, 0);
+    const runtime = runtimeOf(f), agent = await f.create({ agentPreset: "dsmm-orchestrator" });
+    const saved = await runtime.save({ id: "future", content: profile("future", "future-model"), expectedRevision: null });
+    const before = runtime.admission(structural(agent));
+    const snapshot = await runtime.getSession(structural(agent));
+    assert.equal(snapshot.canApplyOverlay, false);
+    assert.equal(snapshot.applyOverlayUnavailableReason, "new-session-required");
+    await assert.rejects(runtime.selectSession(await request(runtime, agent, saved.id, saved.revision), structural(agent)), { code: "unavailable" });
+    assert.equal(runtime.admission(structural(agent)), before);
+    assert.equal((await centralStore(f).loadSessionSelection(agent.id)).selectionRevision, "absent");
   } finally { await f.dispose(); }
 });
 
@@ -434,7 +181,7 @@ test("explicit store startup lock contention still refuses, while strict legacy 
     await assert.rejects(explicit.initialize(), { code: "lock-timeout" });
     assert.equal(listeners, 0);
     const legacy = await createProfileRuntime({ get: (name) => (name === "profileContext" ? { dir: root } : undefined) as never }, resolveConfig());
-    assert.equal(legacy.admission().appliedRevision, saved.revision);
+    assert.equal(legacy.admission().sourceRevision, saved.revision);
     assert.equal((await legacy.describe()).readOnly, true);
     assert.equal(readFileSync(join(storeDir, ".selection.json")).equals(pointer), true);
     assert.equal(readFileSync(join(storeDir, ".lock"), "utf8"), "preexisting-init-owner");
@@ -465,55 +212,4 @@ test("an exact native entered Agent cannot bypass its sidecar through a synchron
     assert.equal(enteredObserved, true);
     assert.equal(runtime.admission(structural(early)).scope, "global-default");
   } finally { await f.dispose(); }
-});
-
-test("native persisted resume honors explicit immutable session pins and baseline; stock readers remain compatible", async () => {
-  const profileDir = mkdtempSync(join(tmpdir(), "dsmm-session-resume-"));
-  const storage = { root: join(profileDir, "logs"), compression: "none" as const };
-  let f = await nativeRoutingFixture({}, { profileDir });
-  try {
-    await f.ctx.plugin(DsmmSessionPersistence, storage).await();
-    const runtime = runtimeOf(f);
-    const saved = await runtime.save({ id: "a", content: profile("a", "pinned-a"), expectedRevision: null });
-    const b = await runtime.save({ id: "b", content: profile("b", "global-b"), expectedRevision: null });
-    const pinned = await f.create({ agentPreset: "dsmm-orchestrator" });
-    const baseline = await f.create({ agentPreset: "dsmm-orchestrator" });
-    const unscoped = await f.create({ agentPreset: "dsmm-orchestrator" });
-    await runtime.selectSession(await request(runtime, pinned, "a", saved.revision), structural(pinned));
-    await runtime.selectSession(await request(runtime, baseline, null), structural(baseline));
-    const pinnedEpoch = runtime.admission(structural(pinned)).epoch;
-    await runFixtureTurn(pinned); await runFixtureTurn(baseline); await runFixtureTurn(unscoped);
-    const ids = [pinned.id, baseline.id, unscoped.id];
-    await runtime.save({ id: "a", content: profile("a", "draft-not-admitted"), expectedRevision: saved.revision });
-    await runtime.select({ id: "b", expectedRevision: b.revision, expectedSelectionRevision: "absent" });
-    await f.dispose();
-    const readerCtx = new Context();
-    try {
-      await readerCtx.plugin(JsonlSessionPersistence, storage).await();
-      for (const id of ids) { const reader = await readerCtx.sessionPersistence.open(id, "read"); try { assert.ok((await reader.read()).events.length > 0); } finally { await reader.close(); } }
-    } finally { await readerCtx.fiber.dispose(); }
-    f = await nativeRoutingFixture({}, { profileDir });
-    await f.ctx.plugin(DsmmSessionPersistence, storage).await();
-    for (const [index, id] of ids.entries()) {
-      const handle = await f.agents.resume({ resumeSessionId: id, agentOptions: { provider: "fixture", model: "native-default", reasoningEffort: ReasoningEffortId("low") } });
-      try {
-        const admitted = runtimeOf(f).admission(structural(handle.agent));
-        assert.equal(admitted.scope, index === 0 ? "session-override" : index === 1 ? "deployment-baseline" : "global-default");
-        assert.equal(admitted.appliedRevision, index === 0 ? saved.revision : index === 1 ? null : b.revision);
-        if (index === 0) assert.equal(admitted.epoch, pinnedEpoch);
-        await runFixtureTurn(handle.agent);
-        assert.equal(headerRoutes(handle.agent).at(-1)?.model, "native-default", "cold profile pins do not replace native model authority");
-        assert.deepEqual((await runtimeOf(f).getSession(structural(handle.agent))).profileModel, index === 0 ? route("pinned-a") : index === 1 ? undefined : route("global-b"));
-      } finally { await handle.dispose(); }
-    }
-    const store = centralStore(f);
-    const sidecar = join(store.stateDir, ".sessions", `${createHash("sha256").update(ids[0]!).digest("hex")}.json`);
-    const before = readFileSync(sidecar);
-    unlinkSync(join(store.profileDir, ".revisions", `${saved.revision}.jsonc`));
-    await assert.rejects(f.agents.resume({ resumeSessionId: ids[0]! }), { code: "corrupt-selection" });
-    assert.equal(f.agents.get(ids[0]!), undefined, "failed created admission is rolled back by native factory before any wake");
-    assert.equal(readFileSync(sidecar).equals(before), true);
-    writeFileSync(sidecar, "{}");
-    await assert.rejects(f.agents.resume({ resumeSessionId: ids[0]! }), { code: "corrupt-selection" });
-  } finally { await f.dispose(); rmSync(profileDir, { recursive: true, force: true }); }
 });

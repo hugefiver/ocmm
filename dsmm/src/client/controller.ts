@@ -7,12 +7,14 @@ import type { DsmmProfilesRemote } from "../profile-remote.js";
 import { isProfileId } from "../profile-remote.js";
 import type { ProfileDiagnostic, ProfileDiagnosticCode, ProfileDiagnosticLocation, ProfileErrorInfo, ProfileReadResult, ProfileSnapshot } from "../profile-types.js";
 import { safeIssue } from "./diagnostics.js";
+import { isConfigRevision } from "../config-revision.js";
+import { writableSelectionVersion } from "./configuration-display.js";
 import type { SessionProfileSnapshot } from "../profile-types.js";
 import type { ModelCatalog, SessionSelectModelRequest, SessionSelectModelValue } from "@deepseek-ai/dsh-api-session-controller";
 import { editStructuredPath, moveFallback } from "./structured.js";
 import type { JsonPath } from "./structured.js";
 
-export interface ProfileEditor { id: string; content: string; revision: string | null; warnings?: ProfileDiagnostic[] }
+export interface ProfileEditor { id: string; content: string; revision: string | null; warnings?: ProfileDiagnostic[]; refreshRequired?: true }
 export interface ProfilesNotice { key: "saved" | "applied" | "reset"; id?: string }
 export interface ProfilesIssue { kind: "domain" | "transport" | "assembly"; code: string; message?: string; field?: string; reason?: ProfileDiagnosticCode; location?: ProfileDiagnosticLocation; source?: "selection" | "profile-model" }
 export interface SessionApplyOptions { useProfileModel?: boolean }
@@ -81,7 +83,7 @@ export const NEW_PROFILE_CONTENT = '{\n  "version": 1,\n  "id": "new-profile",\n
 
 /** A valid external CAS conflict is reconcilable; corruption is never reset implicitly. */
 export function canReconcileSelection(snapshot: ProfileSnapshot | null): boolean {
-  return snapshot !== null && (snapshot.selectionRevision === "absent" || /^[a-f0-9]{64}$/u.test(snapshot.selectionRevision))
+  return snapshot !== null && !snapshot.refreshRequired && writableSelectionVersion(snapshot.selectionRevision)
     && (snapshot.selectionError === undefined || snapshot.selectionError.code === "conflict");
 }
 
@@ -231,7 +233,7 @@ export class ProfilesController {
   }
   private async setDeepwork(active: boolean): Promise<void> {
     const { currentSessionId: id, session } = this.current;
-    if (this.disposed || id === null || session?.deepwork === undefined || session.deepwork.locked || !session.switchAllowed
+    if (this.disposed || id === null || session?.deepwork === undefined || session.refreshRequired || session.selection.refreshRequired || session.deepwork.locked || session.canToggleMode !== true
       || this.current.sessionBusy !== null || this.current.busy !== null || this.remote.selectMode === undefined) return;
     const generation = ++this.sessionGeneration;
     const live = () => !this.disposed && generation === this.sessionGeneration && id === this.current.currentSessionId;
@@ -246,11 +248,12 @@ export class ProfilesController {
   }
   private async selectSession(reset: boolean, options?: SessionApplyOptions, modelOnly = false): Promise<void> {
     const { currentSessionId: id, session, sessionChoice, snapshot } = this.current;
-    if (this.disposed || id === null || session === null || !session.switchAllowed || this.current.sessionBusy !== null
-      || this.current.busy !== null || this.current.dirty || this.current.pendingEditor !== null) return;
+    if (this.disposed || id === null || session === null || session.refreshRequired || session.selection.refreshRequired || !writableSelectionVersion(session.selection.selectionRevision)
+      || (modelOnly ? session.canSelectModel !== true : session.canApplyOverlay !== true || session.applyOverlayUnavailableReason === "new-session-required") || this.current.sessionBusy !== null
+      || this.current.busy !== null || this.current.dirty || this.current.invalidFields.length > 0 || this.current.pendingEditor !== null) return;
     const selectedId = reset ? null : sessionChoice;
     const revision = snapshot?.profiles.find((profile) => profile.id === selectedId)?.revision;
-    if (!modelOnly && selectedId !== null && revision == null) return;
+    if (!modelOnly && selectedId !== null && !isConfigRevision(revision)) return;
     const generation = ++this.sessionGeneration;
     const useProfileModel = !reset && options?.useProfileModel === true;
     const selector = this.modelSelector, selectorGeneration = this.modelSelectorGeneration;
@@ -270,10 +273,14 @@ export class ProfilesController {
         expectedSelectionRevision: session.selection.selectionRevision, expectedAdmissionEpoch: session.admissionEpoch,
       }));
       if (accepted.sessionId !== id) throw { kind: "assembly", code: "unavailable" };
-      if (modelOnly && (accepted.admissionEpoch !== session.admissionEpoch || accepted.deepwork?.revision !== session.deepwork?.revision || !accepted.switchAllowed)) throw { kind: "domain", code: "conflict" };
+      if (modelOnly && (accepted.admissionEpoch !== session.admissionEpoch || accepted.deepwork?.revision !== session.deepwork?.revision)) throw { kind: "domain", code: "conflict" };
       if (!live()) return;
       this.publish({ session: accepted, sessionChoice: accepted.selection.selectedId, sessionNotice: useProfileModel ? null : reset ? "reset" : "applied" });
-      if (!useProfileModel || !live()) return;
+      if (!useProfileModel || accepted.refreshRequired || accepted.selection.refreshRequired || !live()) return;
+      if (accepted.canSelectModel !== true || !writableSelectionVersion(accepted.selection.selectionRevision)) {
+        this.publish({ sessionIssue: { kind: "assembly", code: accepted.selectModelUnavailableReason ?? "unavailable", source: "profile-model" } });
+        return;
+      }
       if (accepted.profileModel === undefined) {
         this.publish({ sessionIssue: { kind: "assembly", code: "model-unconfigured", source: "profile-model" } });
         return;
@@ -406,19 +413,19 @@ export class ProfilesController {
   }
   private editContent(content: string): void {
     const editor = this.current.editor;
-    if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null) return;
+    if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null) return;
     this.publish({ editor: { ...editor, content }, dirty: this.accepted === null || this.accepted.content !== content || this.accepted.id !== editor.id, issue: null, notice: null });
   }
   private editPath(path: JsonPath, value: unknown): void {
     const editor = this.current.editor;
-    if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null) return;
+    if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null) return;
     const content = editStructuredPath(editor.content, path, value);
     if (content === null) { this.publish({ issue: { kind: "domain", code: "validation", field: "content" }, notice: null }); return; }
     this.editContent(content);
   }
   private editRoute(path: JsonPath, provider: string, model: string): void {
     const editor = this.current.editor;
-    if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null) return;
+    if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null) return;
     let content: string | null = editor.content;
     for (const [key, value] of [["provider", provider], ["model", model], ["reasoningEffort", undefined]] as const) {
       content = editStructuredPath(content, [...path, key], value);
@@ -428,13 +435,13 @@ export class ProfilesController {
   }
   private editFallbackOrder(role: string, from: number, to: number): void {
     const editor = this.current.editor;
-    if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null) return;
+    if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null) return;
     const content = moveFallback(editor.content, role, from, to);
     if (content !== null) this.editContent(content);
   }
   async save(): Promise<void> {
     const editor = this.current.editor;
-    if (editor === null || !this.current.dirty || this.current.snapshot === null || this.current.busy !== null || this.current.pendingEditor !== null || this.current.invalidFields.length > 0) return;
+    if (editor === null || editor.refreshRequired || editor.revision !== null && !isConfigRevision(editor.revision) || !this.current.dirty || this.current.snapshot === null || this.current.busy !== null || this.current.pendingEditor !== null || this.current.invalidFields.length > 0) return;
     if (!isProfileId(editor.id)) {
       this.publish({ issue: { kind: "domain", code: "validation", field: "id" }, notice: null, validationEpoch: this.current.validationEpoch + 1 });
       return;
@@ -453,7 +460,7 @@ export class ProfilesController {
   }
   async apply(): Promise<void> {
     const { editor, snapshot, dirty } = this.current;
-    if (editor?.revision == null || !canReconcileSelection(snapshot) || dirty) return;
+    if (editor?.refreshRequired || !isConfigRevision(editor?.revision) || !canReconcileSelection(snapshot) || dirty) return;
     await this.perform("apply", async (live) => {
       const accepted = await this.unwrap(this.remote.select({ id: editor.id, expectedRevision: editor.revision!, expectedSelectionRevision: snapshot!.selectionRevision }));
       if (live()) this.acceptSelection(accepted, { key: "applied", id: accepted.selectedId ?? undefined });

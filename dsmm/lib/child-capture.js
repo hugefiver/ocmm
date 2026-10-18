@@ -1,6 +1,7 @@
 import { copyJson, freezeSettings, resolveConfig, validateSparseConfig } from "./settings.js";
 import { parseModelParameterPolicy } from "./model-parameter-policy.js";
 import { validateProfileOverlay } from "./profiles.js";
+import { isProfileReference } from "./config-revision.js";
 import { DSMM_ROLE_IDS } from "./roles.js";
 import { CHILD_EVIDENCE_FIELDS } from "./child-evidence.js";
 export { CHILD_EVIDENCE_FIELDS, parseChildAdmissionEvidenceView } from "./child-evidence.js";
@@ -105,7 +106,12 @@ export function parseChildAdmissionCapture(input) {
         const pin = object(row.profilePin, ["id", "revision"]);
         if (typeof pin.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(pin.id) || /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(pin.id))
             fail();
-        epoch(pin.revision);
+        if (version === 3) {
+            if (!isProfileReference(pin.revision))
+                fail();
+        }
+        else
+            epoch(pin.revision);
     }
     const invocation = object(row.invocation, ["level", "initialRoute", "routeSource", ...version !== 1 ? ["requestedRoute", "effortSource"] : []]);
     if (typeof invocation.level !== "string" || !["normal", "low", "high", "max"].includes(invocation.level) || !DSMM_ROUTE_SOURCES.includes(invocation.routeSource))
@@ -116,11 +122,18 @@ export function parseChildAdmissionCapture(input) {
         if (invocation.effortSource !== "native" && invocation.effortSource !== "dsmm-config")
             fail();
     }
-    const policyKeys = ["modules", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "defaultActive", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort", "skills", "subagents"];
+    const policyKeys = ["modules", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "defaultActive", "skills", "subagents", ...version === 3 ? [] : HISTORICAL_POLICY_FIELDS];
     const policy = object(row.runtimePolicyCapture, policyKeys);
+    if (version !== 3)
+        for (const key of HISTORICAL_POLICY_FIELDS) {
+            const choices = key.endsWith("Calibration") ? ["off", "auto", "strict"] : ["off", "low", "high"];
+            if (typeof policy[key] !== "string" || !choices.includes(policy[key]))
+                fail();
+        }
     if (version === 1)
         validateLegacyRoutes(policy);
-    const { modules, skills, subagents, ...overlay } = policy;
+    const execution = executionPolicy(policy);
+    const { modules, skills, subagents, ...overlay } = execution;
     validateProfileOverlay(overlay);
     object(modules, ["deepwork"]);
     boolean(object(modules.deepwork, ["enabled"]).enabled);
@@ -142,12 +155,16 @@ export function parseChildAdmissionCapture(input) {
         fail();
     if (typeof row.toolTopology !== "string" || !["per-role", "parameterized"].includes(row.toolTopology))
         fail();
-    validateSparseConfig({ ...policy, ...(Object.hasOwn(row, "locale") ? { locale: row.locale } : {}), subagents: { ...background, toolTopology: row.toolTopology, allowRouteOverride: ceiling.allowRouteOverride, maxDepth: ceiling.maxDepth } }, true);
+    validateSparseConfig({ ...execution, ...(Object.hasOwn(row, "locale") ? { locale: row.locale } : {}), subagents: { ...background, toolTopology: row.toolTopology, allowRouteOverride: ceiling.allowRouteOverride, maxDepth: ceiling.maxDepth } }, true);
     for (const key of ["modules", "runtimePolicy", "workflow", "guards", "runtimeRecovery"])
         completeResolvedObject(policy[key], CAPTURE_POLICY_SHAPE[key]);
     return freezeSettings(row);
 }
 // Persisted protocol completeness is independent of current configuration defaults.
+const HISTORICAL_POLICY_FIELDS = ["deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
+function executionPolicy(policy) {
+    return Object.fromEntries(Object.entries(policy).filter(([key]) => !HISTORICAL_POLICY_FIELDS.includes(key)));
+}
 const CAPTURE_SKILLS = ["brainstorming", "writing-plans", "requesting-code-review", "receiving-code-review", "subagent-driven-development", "dispatching-parallel-agents", "remove-ai-slops", "debugging", "frontend", "git-master", "ast-grep", "coding-agent-sessions", "init-deep", "using-git-worktrees"];
 const CAPTURE_POLICY_SHAPE = {
     modules: { deepwork: { enabled: null } },
@@ -194,7 +211,7 @@ function completeResolvedObject(input, template) {
 export function admissionFromChildCapture(input, nativeSubstrate) {
     const capture = parseChildAdmissionCapture(input);
     const { locale: _locale, ...substrate } = nativeSubstrate;
-    const settings = resolveConfig({ ...substrate, ...capture.runtimePolicyCapture,
+    const settings = resolveConfig({ ...substrate, ...executionPolicy(capture.runtimePolicyCapture),
         modelParameters: { passthrough: capture.version === 1 || capture.modelParameterPolicy.mode !== "native-defaults" },
         roles: Object.fromEntries(DSMM_ROLE_IDS.map(role => [role, capture.authorityCeiling.roles.includes(role)])),
         ...(capture.locale === undefined ? {} : { locale: capture.locale }), subagents: { ...capture.runtimePolicyCapture.subagents,

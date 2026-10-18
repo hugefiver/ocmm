@@ -1,43 +1,48 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createContext, Script } from "node:vm";
 import { build } from "esbuild";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
-import { deferred, permissionFixture } from "./permission-fixture.ts";
+import { deferred } from "./permission-fixture.ts";
+import { nativeConfigRun } from "./permission-deployment-fixture.ts";
+import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
+import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
+import * as Connection from "@deepseek-ai/dsh-client-connection";
 import { PermissionController, permissionChanges } from "../src/client/permission-controller.ts";
 import { PermissionClientError } from "../src/client/permission-client.ts";
 import type { PermissionInvoker, PermissionValue } from "../src/client/permission-client.ts";
-import { DsmmDeploymentConfig } from "../src/deployment-config.ts";
 import { installDeploymentPermissionRules } from "../src/deployment-permission-rules.ts";
-import type { DeploymentPermissionRules } from "../src/deployment-permission-rules.ts";
+import { registerNativePermissionRulesRpc } from "../src/permission-rpc.ts";
 import type { PermissionRuleSnapshot } from "../src/permission-rules.ts";
-import type { DshContext } from "../src/dsh-types.ts";
 import { parsePermissionRulesResult } from "../src/permission-remote.ts";
 import { resolvePermissionControl } from "../src/permission-settings.ts";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 useIsolatedDshEnvironment();
+const connectionSdk = createRequire(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-client-connection"));
+const { CredentialProvider } = await import(pathToFileURL(connectionSdk.resolve("@deepseek-ai/dsh-credentials")).href);
 async function fixture() {
-  const temporary = await realpath(tmpdir()), owned = await realpath(await mkdtemp(join(temporary, "dsmm-permission-client-")));
-  let backend!: DeploymentPermissionRules, writable = true, notify = async (_snapshot: PermissionRuleSnapshot): Promise<void> => {};
-  const f = await permissionFixture(2000, { rules(permissions, ctx) {
-    ctx.provide("profileContext", { home: owned, dir: owned }); ctx.provide("settings", { writable: true }); ctx.provide("webServer", { host: "127.0.0.1" });
-    backend = installDeploymentPermissionRules(ctx, { deployment: new DsmmDeploymentConfig(ctx as unknown as DshContext, {}), assertWritable(root) { assert.equal(ctx.agents.get(root.id), root); if (!writable) throw new Error("Owned readonly"); }, revoke: () => permissions.revokePolicy(), notify: value => notify(value) });
-    return { backend, runtime: backend.runtime };
-  } });
+  const run = nativeConfigRun(), lifetime = new AbortController();
+  try {
+  const profile = await run.createProfile("root-rules-client"), ctx = profile.ctx, root = await profile.create();
+  let writable = true, notify = async (_snapshot: PermissionRuleSnapshot): Promise<void> => {};
+  class MemoryCredentials extends CredentialProvider { async modifyRecord(_key: string, modify: (value: unknown) => Promise<unknown>) { return modify(undefined); } }
+  for (const [plugin, config] of [[TypertRegistry], [TypertGatewayService, {}], [MemoryCredentials], [Connection]] as const) await ctx.plugin(plugin as never, config as never).await();
+  ctx.provide("webServer", { host: "127.0.0.1" });
+  const backend = installDeploymentPermissionRules(ctx, { deployment: profile.deployment, assertWritable(root) { assert.equal(ctx.agents.get(root.id), root); if (!writable) throw new Error("Owned readonly"); }, revoke() {}, notify: value => notify(value) });
+  await ctx.plugin({ name: "owned-native-permission-rules-rpc", inject: ["typert", "connection"], apply(scope: typeof ctx) { registerNativePermissionRulesRpc(scope, backend, backend.runtime); } }).await();
   const calls: Array<{ method: string; args: readonly unknown[] }> = [];
   const invoke: PermissionInvoker = async (method, args, signal) => {
     calls.push({ method, args });
-    try { return await f.invoke(method, { sessionId: args[0], ...args.length > 1 ? { request: args[1] } : {} }, undefined, signal) as PermissionValue<typeof method>; }
+    try { return await ctx.typertGateway.invoke({ namespace: "dsmmPermissions", method, args: { sessionId: args[0], ...args.length > 1 ? { request: args[1] } : {} }, signal, peer: ctx.connection.browserPeer }) as PermissionValue<typeof method>; }
     catch (error) { const failure = remoteErrorOf(error); throw new PermissionClientError(failure?.code === "dsmm-permissions/refused" ? failure.details.code as PermissionClientError["code"] : "unavailable"); }
   };
-  const controller = new PermissionController(); controller.bindConnection(invoke, {}); controller.bindScope(f.root.id, f.root, "root");
+  const controller = new PermissionController(); controller.bindConnection(invoke, {}); controller.bindScope(root.id, root, "root");
   const refresh = (discard = false) => controller.refresh(controller.store.getSnapshot().generation, discard); await refresh();
-  return { ...f, backend, controller, calls, refresh, readonly(value: boolean) { writable = !value; }, notify(value: typeof notify) { notify = value; },
-    async cleanup() { controller.dispose(); await f.dispose(); assert.equal(await realpath(owned), owned); assert.equal(dirname(owned), temporary); assert.ok(basename(owned).startsWith("dsmm-permission-client-")); await rm(owned, { recursive: true, force: false }); } };
+  return { root, lifetime, create: profile.create, backend, controller, calls, refresh, readonly(value: boolean) { writable = !value; }, notify(value: typeof notify) { notify = value; },
+    async cleanup() { lifetime.abort(); controller.dispose(); await run.dispose(); } };
+  } catch (error) { lifetime.abort(); await run.dispose(); throw error; }
 }
 test("rules editor persists explicit changes through strict Root RPC and keeps draft/source CAS", async () => {
   const f = await fixture(), c = f.controller;
@@ -54,7 +59,7 @@ test("rules editor persists explicit changes through strict Root RPC and keeps d
     await f.refresh(true); assert.equal(c.store.getSnapshot().draft!.outsideReads, "allow"); assert.equal(c.store.getSnapshot().dirty, false);
   } finally { await f.cleanup(); }
 });
-test("child, disconnected, readonly and failed notification preserve drafts without saving under stale authority", async () => {
+test("child, disconnected and readonly reject mutation; accepted notification failure remains saved but unsynced", async () => {
   const f = await fixture(), c = f.controller;
   try {
     const generation = c.store.getSnapshot().generation; c.edit(generation, { outsideReads: "deny" });
@@ -66,7 +71,10 @@ test("child, disconnected, readonly and failed notification preserve drafts with
     const generation = controller.store.getSnapshot().generation; controller.edit(generation, { outsideReads: "ask" }); second.readonly(true);
     await controller.save(generation); assert.equal(controller.store.getSnapshot().dirty, true); assert.equal(controller.store.getSnapshot().draft!.outsideReads, "ask");
     second.readonly(false); await second.refresh(); second.notify(async () => { throw new Error("Owned notification failure"); });
-    await controller.save(generation); assert.equal(controller.store.getSnapshot().dirty, true); assert.equal(second.backend.runtime.status().state, "unsynced");
+    await controller.save(generation); const accepted = controller.store.getSnapshot();
+    assert.equal(accepted.dirty, false); assert.equal(accepted.notice, "saved"); assert.equal(accepted.rules!.snapshot.policy.outsideReads, "ask"); assert.equal(second.backend.runtime.status().state, "unsynced");
+    assert.equal(controller.canEdit(generation), false); assert.equal(controller.canSave(generation), false);
+    const count = second.calls.length; await controller.save(generation); assert.equal(second.calls.length, count);
   } finally { await second.cleanup(); }
 });
 test("late read from a replaced connection cannot publish its policy or rebase a draft", async () => {

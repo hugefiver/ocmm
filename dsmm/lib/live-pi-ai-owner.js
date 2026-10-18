@@ -1,6 +1,6 @@
 import { symbols } from "@deepseek-ai/cordis";
 import { LlmError } from "@deepseek-ai/dsh-llm";
-import { Config } from "@deepseek-ai/dsh-llm-pi-ai";
+import { Config, PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { brandString } from "@deepseek-ai/dsh-brand";
 import { isDeepStrictEqual } from "node:util";
@@ -18,9 +18,12 @@ export class LivePiAiOwner {
         this.ctx = ctx;
         this.native = native;
     }
+    supportsNativeStop(provider) {
+        const registration = this.registrations.get(provider);
+        return registration !== undefined && !(registration.adapter instanceof PiAiAdapter);
+    }
     requiresRaw(config) {
-        return config.customParameters !== undefined || config.stop !== undefined
-            && this.registrations.get(config.provider)?.scope.fiber.entry?.options.name === "@deepseek-ai/dsh-llm-pi-ai";
+        return config.customParameters !== undefined || config.stop !== undefined && !this.supportsNativeStop(config.provider);
     }
     register(scope, providers, adapter, handle) {
         const record = { scope, adapter, life: new AbortController(), generations: new Map(), providers: [...providers] };
@@ -63,7 +66,7 @@ export class LivePiAiOwner {
         if (record === undefined)
             throw new LlmError("Provider registration is not ready", "DSMM_PROVIDER_NOT_READY");
         const { scope, adapter } = record;
-        if (scope.fiber.entry?.options.name !== "@deepseek-ai/dsh-llm-pi-ai")
+        if (!(adapter instanceof PiAiAdapter) || scope.fiber.entry?.options.name !== "@deepseek-ai/dsh-llm-pi-ai")
             throw new LlmError("This provider has no raw executor", "UNSUPPORTED_ROUTE_PARAMETERS");
         const config = scope.fiber.config;
         if (config === null || typeof config !== "object" || !("providers" in config) || config.providers === null || typeof config.providers !== "object"
@@ -127,6 +130,7 @@ export class LivePiAiOwner {
         if (!this.requiresRaw(call)) {
             try {
                 await this.native.resolveCallConfig(call, signal);
+                signal?.throwIfAborted();
                 return route;
             }
             catch (error) {

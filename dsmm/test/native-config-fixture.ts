@@ -7,18 +7,18 @@ import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
 import type { Fiber } from "@deepseek-ai/cordis";
 import { AgentRegistry } from "@deepseek-ai/dsh-agent";
-import { DsmmAgentRegistry } from "../lib/agent-registry.js";
 import type { Agent, AgentHandle } from "@deepseek-ai/dsh-agent";
 import { AgentLoop } from "@deepseek-ai/dsh-agent-loop";
 import { LlmRuntime, ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import { SessionId, SessionStore } from "@deepseek-ai/dsh-session";
 import { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
+import { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
 import * as nativeSpawn from "@deepseek-ai/dsh-subagent-spawn-in-process";
 import { SystemPrompt } from "@deepseek-ai/dsh-system-prompt";
 import { ToolRuntime } from "@deepseek-ai/dsh-tools";
 import DsmmPlugin, { DSMM_ROLE_IDS } from "../lib/index.js";
-import type { DsmmDeploymentConfig, DsmmPluginConfig, DsmmProfileRuntime } from "../lib/index.js";
-import SubagentRuntimePlugin from "../lib/runtime-integration.js";
+import { DsmmDeploymentConfig } from "../lib/deployment-config.js";
+import type { DsmmPluginConfig, DsmmProfileRuntime } from "../lib/index.js";
 import { nativeFixturePlugin, RoutingFixtureAdapter } from "./native-routing-fixture.ts";
 import * as ManagedSettings from "../src/managed-settings.ts";
 
@@ -66,9 +66,9 @@ interface NativeConfigProfile {
 const { Loader }: { Loader: new (ctx: Context) => Context["loader"] } = presetSdk("@deepseek-ai/cordis-plugin-loader");
 const { SettingsForms }: { SettingsForms: new (ctx: Context) => NativeSettings } = presetSdk("@deepseek-ai/dsh-settings");
 const { ConfigEditor }: { ConfigEditor: new (ctx: Context) => NativeConfigEditor } = settingsSdk("@deepseek-ai/dsh-config-editor");
-const { mountRootInclude, loadProfileDirectory, readProfilePatches, composeEntries, getDshRuntimeVersion } = presetSdk("@deepseek-ai/dsh-app-boot");
+const { mountRootInclude, loadProfileDirectory, readProfilePatches, composeEntries } = presetSdk("@deepseek-ai/dsh-app-boot");
 
-export function nativeConfigRun(options: { managedPermissionSettings?: boolean; managedRuntime?: boolean } = {}): {
+export function nativeConfigRun(options: { managedPermissionSettings?: boolean; managedRuntime?: boolean; stockRuntime?: boolean } = {}): {
   root: string;
   home: string;
   createProfile(name: string, override?: DsmmPluginConfig): Promise<NativeConfigProfile>;
@@ -106,34 +106,33 @@ export function nativeConfigRun(options: { managedPermissionSettings?: boolean; 
     const loaded = loadProfileDirectory("dsh", dir, presetSdk.resolve("@deepseek-ai/dsh-app-boot"));
     assert.deepEqual(loaded.layers, []);
     assert.deepEqual(loaded.skippedBundles, []);
-    assert.equal(getDshRuntimeVersion(), "0.2.1-rc.1");
     const profileContext = { ...loaded, home, installAnchor: presetSdk.resolve("@deepseek-ai/dsh-app-boot"), overlays: [], startedBundles: [] };
     const ctx = new Context();
     const handles: AgentHandle[] = [];
     try {
       ctx.provide("profileContext", profileContext);
       await Promise.all([
-        ctx.plugin(options.managedRuntime ? DsmmAgentRegistry : AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
+        ctx.plugin(AgentRegistry), ctx.plugin(SessionStore), ctx.plugin(SessionProjectionRegistry),
         ctx.plugin(LlmRuntime), ctx.plugin(SystemPrompt, {}), ctx.plugin(ToolRuntime, { mode: "native" }), ctx.plugin(SkillRegistry, {})
       ].map((fiber) => fiber.await()));
-      if (options.managedRuntime) {
+      if (options.managedRuntime || options.stockRuntime) {
         const filesystem = await nativeFixturePlugin("@deepseek-ai/dsh-fs-local");
         await ctx.plugin(filesystem.default, { cwd: dir }).await();
         const workingDirectory = await nativeFixturePlugin("@deepseek-ai/dsh-working-directory");
         await ctx.plugin(workingDirectory.default, { defaultDirectory: dir }).await();
-        const startup = ctx.plugin(SubagentRuntimePlugin, {}); await startup.await();
-        assert.equal(startup.state, 2, "managed runtime must activate before Core startup");
+        const startup = ctx.plugin(SubagentRuntime, {}); await startup.await();
+        assert.equal(startup.state, 2, "native runtime must activate before Core startup");
         const { SessionQueryEngine } = await nativeFixturePlugin("@deepseek-ai/dsh-session-query", "@deepseek-ai/dsh-subagent-spawn-in-process");
         class ExactQuery extends SessionQueryEngine {
           async searchSessions(): Promise<never> { throw new Error("config fixture does not offer full-text search"); }
           async searchEvents(): Promise<never> { throw new Error("config fixture does not offer full-text search"); }
         }
         await ctx.plugin(ExactQuery).await();
-      }
+      } else await ctx.plugin(SubagentRuntime, {}).await();
       const adapter = new RoutingFixtureAdapter();
       ctx.llm.registerAdapter(["fixture"], adapter);
       await ctx.plugin(AgentLoop, {}).await();
-      if (options.managedRuntime) await ctx.plugin(nativeSpawn, { providerName: "spawn" }).await();
+      if (options.managedRuntime || options.stockRuntime) await ctx.plugin(nativeSpawn, { providerName: "spawn" }).await();
       await ctx.plugin(Loader).await();
       ctx.loader.builtins["fixture-dsmm"] = { default: DsmmPlugin };
       const include = await mountRootInclude(ctx, basePath, readProfilePatches("dsh", profileContext));
@@ -150,7 +149,8 @@ export function nativeConfigRun(options: { managedPermissionSettings?: boolean; 
       else await ctx.plugin(SettingsForms).await();
       const editor = ctx.get("configEditor") as NativeConfigEditor;
       const settings = ctx.get("settings") as NativeSettings;
-      const deployment = ctx.get("dsmmDeploymentConfig") as DsmmDeploymentConfig;
+      const deployment: object | undefined = ctx.get("dsmmDeploymentConfig");
+      assert.ok(deployment instanceof DsmmDeploymentConfig);
       const runtime = ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
       assert.ok(editor && settings && deployment && runtime);
       assert.deepEqual(editor.entries(), [entry], "only the Include-owned DSMM row is addressable");

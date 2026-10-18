@@ -9,7 +9,6 @@ import {
 } from "../lib/status.js";
 import type { DsmmStatusSnapshot } from "../lib/status.js";
 import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
-import type { DsmmSettings } from "../lib/settings.js";
 
 interface AgentOptions {
   events?: DshSessionEvent[];
@@ -93,15 +92,7 @@ function createFormatterFixture(): DsmmStatusSnapshot {
       provider: "deepseek-official",
       model: "deepseek-v4-pro",
       family: "deepseek",
-      deepseekV4Pro: true,
-      deepseekFlash: false,
       currentReasoningEffort: "high"
-    },
-    calibration: {
-      mode: "auto",
-      applies: true,
-      policyEffort: "max",
-      action: "preserve-explicit"
     },
     rolePolicy: { role: "dsmm-reviewer", applies: false, fallbackRoutes: settings.runtimeRecovery.fallbackRoutes.map((route) => ({ ...route })), fallbackSource: "global", strategy: "startup-lock", rateLimit: { ...settings.runtimePolicy.rateLimit } },
     runtimeRecovery: {
@@ -118,15 +109,13 @@ function createFormatterFixture(): DsmmStatusSnapshot {
   };
 }
 
-test("ordinary-root status reports native-owned model selection instead of dormant profile routing and calibration", () => {
-  const settings = resolveConfig({ deepseekV4ProCalibration: "strict", roleRouting: { "dsmm-reviewer": {
+test("ordinary-root status reports native-owned model selection instead of dormant profile routing", () => {
+  const settings = resolveConfig({ roleRouting: { "dsmm-reviewer": {
     primary: { provider: "configured", model: "profile-primary", reasoningEffort: "max" },
     fallbackRoutes: [{ provider: "configured", model: "profile-backup" }], strategy: "rate-limit-fallback"
   } }, runtimeRecovery: { enabled: true, fallbackRoutes: [{ provider: "configured", model: "global-backup" }] } });
   const { agent, appended } = createAgent({ headerPreset: "dsmm-reviewer", ...officialRoute("low") });
   const snapshot = createDsmmStatusSnapshot({ agent, settings, modeActive: true });
-  assert.equal(snapshot.calibration.action, "native-owned"); assert.equal(snapshot.calibration.applies, false);
-  assert.equal(snapshot.calibration.policyEffort, undefined);
   assert.equal(snapshot.rolePolicy.strategy, "startup-lock"); assert.equal(snapshot.rolePolicy.primary, undefined);
   assert.deepEqual(snapshot.rolePolicy.fallbackRoutes, []); assert.equal(snapshot.rolePolicy.fallbackSource, "disabled");
   assert.equal(snapshot.runtimeRecovery.fallbackRouteCount, 0);
@@ -145,7 +134,7 @@ test("status formatter renders the exact bounded Deepwork summary with DW role l
     "Workflow policy: risk-based",
     "Route: deepseek-official/deepseek-v4-pro [deepseek]",
     "Role policy: DW Reviewer; strategy=startup-lock; primary=inherit; fallbacks=global; retries=3; threshold=3; switches=2",
-    "Reasoning: auto; policy=max; current=high; action=preserve-explicit",
+    "Reasoning: current=high",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",
     "Effective settings: use /dsmm-status json for the normalized snapshot"
@@ -176,14 +165,7 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
       inScope: false
     },
     route: {
-      family: "unknown",
-      deepseekV4Pro: false,
-      deepseekFlash: false
-    },
-    calibration: {
-      mode: "auto",
-      applies: false,
-      action: "out-of-scope"
+      family: "unknown"
     },
     runtimeRecovery: {
       enabled: false,
@@ -205,7 +187,7 @@ test("status formatter uses unavailable and not-applicable labels for ordinary i
     "Workflow policy: risk-based",
     "Route: unavailable/unavailable [unknown]",
     "Role policy: none; strategy=startup-lock; primary=inherit; fallbacks=disabled; retries=3; threshold=3; switches=2",
-    "Reasoning: auto; policy=not applicable; current=provider default; action=out-of-scope",
+    "Reasoning: current=provider default",
     "Runtime recovery: disabled; applies=no; fallbacks=0; max attempts=0",
     "Idle continuation: disabled; max=3",
     "Effective settings: use /dsmm-status json for the normalized snapshot"
@@ -225,14 +207,7 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
     route: {
       provider: "openai",
       model: "gpt-5.6",
-      family: "gpt",
-      deepseekV4Pro: false,
-      deepseekFlash: false
-    },
-    calibration: {
-      mode: "auto",
-      applies: false,
-      action: "non-target-route"
+      family: "gpt"
     },
     rolePolicy: { role: "dsmm-orchestrator", applies: false, fallbackRoutes: fixture.rolePolicy.fallbackRoutes, fallbackSource: "global", strategy: "startup-lock", rateLimit: { ...fixture.effectiveSettings.runtimePolicy.rateLimit } }
   });
@@ -244,7 +219,7 @@ test("status formatter identifies active generic deepwork from snapshot scope", 
     "Workflow policy: risk-based",
     "Route: openai/gpt-5.6 [gpt]",
     "Role policy: DW Orchestrator; strategy=startup-lock; primary=inherit; fallbacks=global; retries=3; threshold=3; switches=2",
-    "Reasoning: auto; policy=not applicable; current=provider default; action=non-target-route",
+    "Reasoning: current=provider default",
     "Runtime recovery: enabled; applies=yes; fallbacks=2; max attempts=2",
     "Idle continuation: disabled; max=3",
     "Effective settings: use /dsmm-status json for the normalized snapshot"
@@ -273,14 +248,7 @@ test("status snapshot reports an inactive ordinary session without a route", () 
       inScope: false
     },
     route: {
-      family: "unknown",
-      deepseekV4Pro: false,
-      deepseekFlash: false
-    },
-    calibration: {
-      mode: "auto",
-      applies: false,
-      action: "native-owned"
+      family: "unknown"
     },
     rolePolicy: { applies: false, fallbackRoutes: [], fallbackSource: "disabled", strategy: "startup-lock", rateLimit: { ...settings.runtimePolicy.rateLimit } },
     runtimeRecovery: {
@@ -298,7 +266,7 @@ test("status snapshot reports an inactive ordinary session without a route", () 
   assert.equal(appended(), 0);
 });
 
-test("status snapshot reports active generic deepwork as a non-target GPT route", () => {
+test("status snapshot reports active generic deepwork with the observed model family", () => {
   const { agent } = createAgent({ provider: "openai", model: "gpt-5.6" });
   const snapshot = createDsmmStatusSnapshot({ agent, settings: DEFAULT_DSMM_SETTINGS, modeActive: true });
 
@@ -311,14 +279,7 @@ test("status snapshot reports active generic deepwork as a non-target GPT route"
   assert.deepEqual(snapshot.route, {
     provider: "openai",
     model: "gpt-5.6",
-    family: "gpt",
-    deepseekV4Pro: false,
-    deepseekFlash: false
-  });
-  assert.deepEqual(snapshot.calibration, {
-    mode: "auto",
-    applies: false,
-    action: "native-owned"
+    family: "gpt"
   });
 });
 
@@ -341,8 +302,7 @@ test("newest valid DSMM preset creates preset-only scope", () => {
     dsmmPreset: true,
     inScope: true
   });
-  assert.equal(snapshot.calibration.policyEffort, undefined);
-  assert.equal(snapshot.calibration.action, "native-owned");
+  assert.equal(snapshot.rolePolicy.role, "dsmm-reviewer");
 });
 
 test("request headers take complete precedence over stale agent options", () => {
@@ -361,11 +321,8 @@ test("request headers take complete precedence over stale agent options", () => 
     provider: "deepseek-official",
     model: "deepseek-v4-pro",
     family: "deepseek",
-    deepseekV4Pro: true,
-    deepseekFlash: false,
     currentReasoningEffort: "high"
   });
-  assert.equal(selectedSnapshot.calibration.action, "native-owned");
 
   const malformedHeader = createAgent({
     provider: "deepseek-official",
@@ -379,86 +336,8 @@ test("request headers take complete precedence over stale agent options", () => 
   });
 
   assert.deepEqual(malformedSnapshot.route, {
-    family: "unknown",
-    deepseekV4Pro: false,
-    deepseekFlash: false
+    family: "unknown"
   });
-  assert.equal(malformedSnapshot.calibration.action, "native-owned");
-});
-
-test("auxiliary status snapshot applies the complete calibration action matrix", () => {
-  const cases: Array<{
-    name: string;
-    settings: DsmmSettings;
-    agent: AgentOptions;
-    modeActive: boolean;
-    action: "disabled" | "out-of-scope" | "non-target-route" | "preserve-explicit" | "fill-missing" | "enforce";
-    applies: boolean;
-    policyEffort?: "off" | "low" | "high" | "max";
-  }> = [
-    {
-      name: "off wins for a scoped exact route without effort",
-      settings: { ...DEFAULT_DSMM_SETTINGS, deepseekV4ProCalibration: "off" },
-      agent: officialRoute(),
-      modeActive: true,
-      action: "disabled",
-      applies: false
-    },
-    {
-      name: "automatic mode is out of scope before examining an exact route",
-      settings: DEFAULT_DSMM_SETTINGS,
-      agent: officialRoute(),
-      modeActive: false,
-      action: "out-of-scope",
-      applies: false
-    },
-    {
-      name: "automatic mode excludes in-scope non-target routes",
-      settings: DEFAULT_DSMM_SETTINGS,
-      agent: { provider: "openai", model: "gpt-5.6" },
-      modeActive: true,
-      action: "non-target-route",
-      applies: false
-    },
-    {
-      name: "automatic mode preserves explicit effort on exact routes",
-      settings: DEFAULT_DSMM_SETTINGS,
-      agent: officialRoute("high"),
-      modeActive: true,
-      action: "preserve-explicit",
-      applies: true,
-      policyEffort: "high"
-    },
-    {
-      name: "automatic mode fills a missing effort on exact routes",
-      settings: DEFAULT_DSMM_SETTINGS,
-      agent: officialRoute(),
-      modeActive: true,
-      action: "fill-missing",
-      applies: true,
-      policyEffort: "high"
-    },
-    {
-      name: "strict mode enforces configured effort despite an explicit effort",
-      settings: { ...DEFAULT_DSMM_SETTINGS, deepseekV4ProCalibration: "strict" },
-      agent: officialRoute("low"),
-      modeActive: true,
-      action: "enforce",
-      applies: true,
-      policyEffort: "high"
-    }
-  ];
-
-  for (const scenario of cases) {
-    const snapshot = createDsmmStatusSnapshot({
-      agent: createAgent({ ...scenario.agent, origin: "subagent" }).agent,
-      settings: scenario.settings,
-      modeActive: scenario.modeActive
-    });
-    assert.equal(snapshot.calibration.action, scenario.action, scenario.name);
-    assert.equal(snapshot.calibration.applies, scenario.applies, scenario.name);
-    assert.equal(snapshot.calibration.policyEffort, scenario.policyEffort, scenario.name);
-  }
 });
 
 test("runtime recovery summary reports configuration separately from applicability", () => {
@@ -502,7 +381,7 @@ test("effective settings are an exhaustive defensive copy with private paths and
     modeName: "focused-work",
     defaultActive: true,
     promptOrder: 80,
-    deepseekV4ProDefaultReasoningEffort: "low",
+    modelParameters: { passthrough: false },
     skills: { brainstorming: false },
     roles: { "dsmm-reviewer": false },
     presets: { materialize: true, root: "C:/presets" },
@@ -551,6 +430,7 @@ test("effective settings are an exhaustive defensive copy with private paths and
   assert.equal(settings.lsp.command, "C:/PRIVATE_LSP_SENTINEL/private-server.exe", "runtime settings are not redacted in place");
   assert.deepEqual(settings.lsp.args, ["--config=C:/PRIVATE_LSP_SENTINEL/config.json", "PRIVATE_PARAMETER_SENTINEL"]);
   assert.notEqual(copy, settings);
+  assert.notEqual(copy.modelParameters, settings.modelParameters);
   assert.notEqual(copy.skills, settings.skills);
   assert.notEqual(copy.roles, settings.roles);
   assert.notEqual(copy.presets, settings.presets);
@@ -569,6 +449,7 @@ test("effective settings are an exhaustive defensive copy with private paths and
   assert.notEqual(copy.lsp.env, settings.lsp.env);
 
   settings.skills.brainstorming = true;
+  settings.modelParameters.passthrough = true;
   settings.roles["dsmm-reviewer"] = true;
   settings.presets.root = "C:/changed";
   settings.workflow.reviewCap = 9;
@@ -582,6 +463,7 @@ test("effective settings are an exhaustive defensive copy with private paths and
   settings.lsp.env.CHANGED = "true";
 
   assert.equal(copy.skills.brainstorming, false);
+  assert.equal(copy.modelParameters.passthrough, false);
   assert.equal(copy.roles["dsmm-reviewer"], false);
   assert.equal(copy.presets.root, "<configured>");
   assert.equal(copy.workflow.reviewCap, 3);

@@ -6,10 +6,12 @@ import { parseArgs } from "node:util";
 import {
   computeDigests, expectedAssetNames, readArtifactIdentity, validateArtifactIdentity, validateDockerReceipt,
   validateTarballBuffer, validateTransportAssets, verifyRegistryArtifact, validateArtifactDirectory, registryVerificationFailure,
+  BOOTSTRAP, resolveReleaseContext,
 } from "./dsmm-release.mjs";
 import { cleanupOwnedRoot, createOwnedRoot, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
-import { isReviewedSource, isSource030 } from "./release-contract.mjs";
-import { HISTORICAL_TOPOLOGY, RELEASE_TOPOLOGY, RECOVERY_022, SPLIT_RELEASE_JOBS } from "./release-recovery-policy.mjs";
+import { isBuildOnlyRelease, isReviewedSource } from "./release-contract.mjs";
+import { HISTORICAL_TOPOLOGY, RELEASE_TOPOLOGY, PUBLICATION_TOPOLOGY, RECOVERY_022, SPLIT_RELEASE_JOBS, PUBLICATION_JOBS } from "./release-recovery-policy.mjs";
+import { controlFilesForVersion } from "./release-source.mjs";
 
 export const REQUIRED_JOBS = ["import-bootstrap", "prepare", "publish", "verify", "github-release"];
 const REPOSITORY = "hugefiver/ocmm";
@@ -72,12 +74,14 @@ export function validateRunEvidence(run, workflow, jobs, identity, expected) {
   requireCondition(identity.controlSha === expected.controlSha, "artifact control commit differs");
   requireCondition(run.repository?.full_name === REPOSITORY && run.head_repository?.full_name === REPOSITORY, "wrong workflow repository");
   requireCondition(workflow.path === WORKFLOW && workflow.id === run.workflow_id, "wrong workflow file/ID");
-  requireCondition(run.status === "completed" && run.conclusion === "success", "workflow has not successfully terminated");
   requireCondition(run.head_sha === identity.controlSha, "workflow control commit differs");
   const bootstrap = identity.origin === "frozen-local-bootstrap", recovery = identity.mode === "recovery-022", dispatch = bootstrap || recovery;
   const topology = expected.releaseTopology ?? HISTORICAL_TOPOLOGY;
-  requireCondition([HISTORICAL_TOPOLOGY, RELEASE_TOPOLOGY].includes(topology), "untrusted topology");
-  requireCondition(topology === RELEASE_TOPOLOGY ? identity.releaseTopology === RELEASE_TOPOLOGY : identity.releaseTopology === undefined && !recovery, "artifact topology differs from trusted control expectation");
+  const publication = topology === PUBLICATION_TOPOLOGY;
+  requireCondition([HISTORICAL_TOPOLOGY, RELEASE_TOPOLOGY, PUBLICATION_TOPOLOGY].includes(topology), "untrusted topology");
+  requireCondition(topology === HISTORICAL_TOPOLOGY ? identity.releaseTopology === undefined && !recovery : identity.releaseTopology === topology, "artifact topology differs from trusted control expectation");
+  requireCondition(run.status === "completed" && (publication ? ["success", "failure"].includes(run.conclusion) : run.conclusion === "success"), "workflow has not validly terminated");
+  if (publication) requireCondition(workflow.id === RECOVERY_022.workflowId, "publication workflow ID differs");
   if (recovery) requireCondition(workflow.id === RECOVERY_022.workflowId && expected.mode === "recovery-022", "recovery workflow/expected mode differs");
   if (expected.mode !== undefined) requireCondition(identity.mode === expected.mode, "expected release mode differs");
   requireCondition(run.event === (dispatch ? "workflow_dispatch" : "push"), "workflow event differs");
@@ -85,7 +89,7 @@ export function validateRunEvidence(run, workflow, jobs, identity, expected) {
   requireCondition(identity.ref === (dispatch ? "refs/heads/master" : `refs/tags/${identity.tag}`), "artifact release ref differs");
   requireCondition(identity.workflow.ref === `${REPOSITORY}/${WORKFLOW}@${identity.ref}`, "artifact workflow ref differs");
   requireCondition(run.head_branch === (dispatch ? "master" : identity.tag), "workflow branch/tag differs");
-  const requiredJobs = topology === RELEASE_TOPOLOGY ? SPLIT_RELEASE_JOBS : REQUIRED_JOBS;
+  const requiredJobs = publication ? PUBLICATION_JOBS : topology === RELEASE_TOPOLOGY ? SPLIT_RELEASE_JOBS : REQUIRED_JOBS;
   requireCondition(jobs.length === requiredJobs.length, "unexpected workflow job set");
   requireCondition(new Set(jobs.map(job => job.name)).size === jobs.length, "duplicate workflow jobs");
   requireCondition(new Set(jobs.map(job => job.id)).size === jobs.length, "duplicate job IDs");
@@ -94,11 +98,66 @@ export function validateRunEvidence(run, workflow, jobs, identity, expected) {
     const job = jobs.find(candidate => candidate.name === name);
     requireCondition(Number.isSafeInteger(job?.id) && job.id > 0, `required job ${name} has an invalid ID`);
     const expectedConclusion = skipped.has(name) ? "skipped" : "success";
-    requireCondition(job?.status === "completed" && job.conclusion === expectedConclusion, `required job ${name} has the wrong mode-specific conclusion`);
+    requireCondition(job?.status === "completed" && (publication && name === "github-release"
+      ? ["success", "failure", "skipped"].includes(job.conclusion) : job.conclusion === expectedConclusion), `required job ${name} has the wrong mode-specific conclusion`);
     requireCondition(String(job.run_id) === String(expected.runId) && String(job.run_attempt) === String(expected.runAttempt), `job ${name} is from another run/attempt`);
   }
   return jobs.map(({ id, name, status, conclusion, run_attempt }) => ({ id, name, status, conclusion, runAttempt: run_attempt,
-    applicability: skipped.has(name) ? "NOT_APPLICABLE" : "REQUIRED" }));
+    applicability: publication && name === "github-release" ? "INDEPENDENT_DELIVERY" : skipped.has(name) ? "NOT_APPLICABLE" : "REQUIRED" }));
+}
+
+export async function checkTerminalPublication(expected, { request = github, downloadArtifact = defaultDownloadArtifact } = {}) {
+  requireCondition(expected.releaseTopology === PUBLICATION_TOPOLOGY, "publication requires trusted publication topology");
+  requireCondition(["future", "bootstrap", "recovery-022"].includes(expected.mode), "publication requires an explicit expected mode");
+  const run = request(`actions/runs/${expected.runId}/attempts/${expected.runAttempt}`);
+  if (run.status !== "completed") throw new Error("workflow is still running");
+  const workflow = request(`actions/workflows/${run.workflow_id}`);
+  const comparison = request(`compare/${expected.controlSha}...master`);
+  requireCondition(["ahead", "identical"].includes(comparison.status) && comparison.merge_base_commit?.sha === expected.controlSha, "publication control left trusted master history");
+  const recovery = expected.mode === "recovery-022", bootstrap = expected.mode === "bootstrap";
+  const version = recovery ? RECOVERY_022.version : bootstrap ? BOOTSTRAP.version : expected.version;
+  const tag = `dsmm-scoped-v${version}`;
+  requireCondition(/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(version ?? ""), "trusted package version missing");
+  const ref = bootstrap || recovery ? "refs/heads/master" : `refs/tags/${tag}`;
+  const context = resolveReleaseContext({ repository: REPOSITORY, eventName: bootstrap || recovery ? "workflow_dispatch" : "push",
+    inputs: recovery ? { recovery: RECOVERY_022.selector } : {}, ref, eventSha: expected.controlSha,
+    controlSha: expected.controlSha, workflowSha: expected.controlSha, workflowRef: `${REPOSITORY}/${WORKFLOW}@${ref}`,
+    peeledSha: await peelRemoteTag(tag, request), runId: expected.runId, runAttempt: expected.runAttempt, packageVersion: version,
+    controlInDefaultHistory: true, sourceInDefaultHistory: true, sourceHasControls: true });
+  const rawJobs = completeInventory(request(`actions/runs/${expected.runId}/attempts/${expected.runAttempt}/jobs?per_page=100`), "jobs");
+  const artifacts = completeInventory(request(`actions/runs/${expected.runId}/artifacts?per_page=100`), "artifacts");
+  const select = name => {
+    const matches = artifacts.filter(artifact => artifact.name === name);
+    requireCondition(matches.length === 1, "exact publication artifact missing or ambiguous");
+    const artifact = matches[0];
+    requireCondition(Number.isSafeInteger(artifact.id) && artifact.id > 0 && artifact.expired === false
+      && /^sha256:[a-f0-9]{64}$/u.test(artifact.digest ?? "") && artifact.workflow_run?.id === Number(expected.runId)
+      && artifact.workflow_run.head_sha === expected.controlSha && artifact.workflow_run.head_branch === (bootstrap || recovery ? "master" : tag), "publication artifact identity differs");
+    return artifact;
+  };
+  const artifact = select(`dsmm-accepted-${expected.runId}-${expected.runAttempt}`);
+  const owner = createOwnedRoot();
+  try {
+    const directory = join(owner.root, "accepted"); mkdirSync(directory);
+    await downloadArtifact(artifact, directory, expected);
+    // Expected context comes from trusted control and fixed policy, not downloaded metadata.
+    const identity = validateArtifactDirectory(directory, context);
+    const jobs = validateRunEvidence(run, workflow, rawJobs, identity, expected);
+    let bootstrapImportEvidence = { outcome: "NOT_APPLICABLE", job: "import-bootstrap" };
+    if (bootstrap) {
+      const imported = select(context.bootstrapImport.artifactName), importedDirectory = join(owner.root, "imported"); mkdirSync(importedDirectory);
+      await downloadArtifact(imported, importedDirectory, expected);
+      validateArtifactDirectory(importedDirectory, context);
+      const files = path => new Map(readdirSync(path).map(name => [name, readFileSync(join(path, name))]));
+      bootstrapImportEvidence = validateBootstrapImportArtifact(imported, identity, files(directory), files(importedDirectory));
+    } else requireCondition(!artifacts.some(item => item.name === `dsmm-bootstrap-${expected.runId}-${expected.runAttempt}`), "unexpected bootstrap import");
+    return { schemaVersion: 1, mode: "npm-publication", outcome: "COMPLETED", repository: REPOSITORY, releaseTopology: PUBLICATION_TOPOLOGY,
+      workflow: { file: WORKFLOW, id: workflow.id, controlSha: expected.controlSha, runId: expected.runId, runAttempt: expected.runAttempt,
+        status: run.status, conclusion: run.conclusion, jobs }, artifact: identity,
+      publication: { outcome: "COMPLETED", packageName: identity.packageName, version: identity.version, job: recovery ? "publish-recovery-022" : "publish", basis: "successful-guarded-pnpm-exit" },
+      githubRelease: jobs.find(job => job.name === "github-release"), bootstrapImportEvidence,
+      nonclaims: { registryReadback: "NOT_RUN", postPublicationInstall: "NOT_RUN", githubReleaseAssets: "NOT_CHECKED", authenticatedDesktop: "NOT_EXERCISED" } };
+  } finally { cleanupOwnedRoot(owner); }
 }
 
 export function validateVerificationReceipt(receipt, identity) {
@@ -117,7 +176,7 @@ export function validateVerificationReceipt(receipt, identity) {
       && p.workflowFile === WORKFLOW && p.predicateType === "https://slsa.dev/provenance/v1"
       && p.source === "npm-registry-served-validated-attestation-over-https" && p.independentSigstoreVerification === false, "recovery provenance receipt differs");
   }
-  if (isSource030(identity.version)) {
+  if (isBuildOnlyRelease(identity.version)) {
     requireCondition(receipt.freshInstall?.outcome === "NOT_RUN_RELEASE_POLICY" && Object.keys(receipt.freshInstall).length === 1, "native installation policy differs");
   } else {
     validateInstallReceipt(receipt.freshInstall, { version: identity.version, sha256: identity.sha256 });
@@ -145,7 +204,7 @@ export async function verifyPublishedArtifact(identity, { registryCheck = verify
   validateArtifactIdentity(identity);
   const { tarball: _tarball, ...registry } = await registryCheck(identity);
   let freshInstall;
-  try { freshInstall = isSource030(identity.version) ? { outcome: "NOT_RUN_RELEASE_POLICY" } : await installProbe(identity); }
+  try { freshInstall = isBuildOnlyRelease(identity.version) ? { outcome: "NOT_RUN_RELEASE_POLICY" } : await installProbe(identity); }
   catch (error) {
     if (!["0.1.8", "0.1.9"].includes(identity.version) && !isReviewedSource(identity.version)) throw error;
     throw new NativeInstallEvidenceMismatch("fresh native registry installation failed");
@@ -466,7 +525,7 @@ export async function checkTerminalCompletion(expected, { request = github, down
     requireCondition(lstatSync(join(proofDirectory, "dsmm-registry-verification.json")).isFile(), "verification artifact must not be a link");
     const recorded = JSON.parse(readFileSync(join(proofDirectory, "dsmm-registry-verification.json"), "utf8"));
     validateVerificationReceipt(recorded, identity);
-    if (!isSource030(identity.version)) validateInstalledFileHashes(recorded.freshInstall, accepted.files);
+    if (!isBuildOnlyRelease(identity.version)) validateInstalledFileHashes(recorded.freshInstall, accepted.files);
     const publication = await publishedCheck(identity, {
       installProbe: async () => recorded.freshInstall,
     });
@@ -478,9 +537,9 @@ export async function checkTerminalCompletion(expected, { request = github, down
       artifact: identity, githubRelease: { id: release.id, tag: release.tag_name, draft: false, assetIds: release.assets.map(({ id, name }) => ({ id, name })) },
       publication,
       bootstrapImportEvidence,
-      freshInstallEvidence: isSource030(identity.version) ? { outcome: "NOT_RUN_RELEASE_POLICY" }
+      freshInstallEvidence: isBuildOnlyRelease(identity.version) ? { outcome: "NOT_RUN_RELEASE_POLICY" }
         : { origin: "CI verify job, Linux/Node 24", artifactId: proofArtifact.id, runId: expected.runId, runAttempt: expected.runAttempt },
-      nonclaims: { ...publication.nonclaims, terminalHostNativeInstall: isSource030(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "NOT_RUN_REDUNDANT_TO_BOUND_CI_PROOF" },
+      nonclaims: { ...publication.nonclaims, terminalHostNativeInstall: isBuildOnlyRelease(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "NOT_RUN_REDUNDANT_TO_BOUND_CI_PROOF" },
     };
   } finally {
     cleanupOwnedRoot(owner);
@@ -552,14 +611,16 @@ export function parseCompletionArguments(args) {
     "control-sha": { type: "string" }, receipt: { type: "string" },
     "origin-version": { type: "string" },
     recovery: { type: "string" },
+    bootstrap: { type: "boolean" },
   } });
-  requireCondition(positionals.length === 1 && ["verify", "terminal", "terminal-continuation"].includes(positionals[0]), "choose verify, terminal or terminal-continuation mode");
+  requireCondition(positionals.length === 1 && ["verify", "terminal", "terminal-continuation", "terminal-publication"].includes(positionals[0]), "choose a supported completion mode");
   requireCondition(typeof values.receipt === "string" && values.receipt.length > 0, "--receipt is required");
   if (values["origin-version"] !== undefined) {
     requireCondition(positionals[0] === "terminal-continuation", "--origin-version is only valid for terminal-continuation");
     resolvePublishedOriginPolicy(values["origin-version"]);
   }
-  if (values.recovery !== undefined) requireCondition(positionals[0] === "terminal" && values.recovery === RECOVERY_022.selector, "invalid recovery terminal selector");
+  if (values.recovery !== undefined) requireCondition(["terminal", "terminal-publication"].includes(positionals[0]) && values.recovery === RECOVERY_022.selector, "invalid recovery terminal selector");
+  if (values.bootstrap !== undefined) requireCondition(positionals[0] === "terminal-publication" && values.bootstrap && !values.recovery, "invalid bootstrap terminal selector");
   if (positionals[0] === "verify") requireCondition(Boolean(values["artifact-dir"]), "--artifact-dir is required");
   else {
     for (const key of ["run-id", "run-attempt"]) requireCondition(/^[1-9][0-9]*$/u.test(values[key] ?? ""), `invalid --${key}`);
@@ -579,20 +640,27 @@ export async function main(args = process.argv.slice(2)) {
       receipt = await verifyPublishedArtifact(identity);
     } else {
       const expected = { runId: options["run-id"], runAttempt: options["run-attempt"], controlSha: options["control-sha"] };
-      if (options.mode === "terminal") {
+      if (["terminal", "terminal-publication"].includes(options.mode)) {
         const checkout = fileURLToPath(new URL("../..", import.meta.url));
         requireCondition(execFileSync("git", ["-C", checkout, "rev-parse", "HEAD"], { encoding: "utf8" }).trim() === expected.controlSha, "terminal checkout must be the exact trusted control HEAD");
-        expected.releaseTopology = RELEASE_TOPOLOGY;
-        if (options.recovery) expected.mode = "recovery-022";
+        expected.releaseTopology = options.mode === "terminal-publication" ? PUBLICATION_TOPOLOGY : RELEASE_TOPOLOGY;
+        if (options.mode === "terminal-publication") {
+          const manifest = JSON.parse(execFileSync("git", ["-C", checkout, "show", `${expected.controlSha}:dsmm/package.json`], { encoding: "utf8" }));
+          requireCondition(manifest.name === "@dsmm/dsmm", "trusted source package differs");
+          for (const path of controlFilesForVersion(manifest.version)) execFileSync("git", ["-C", checkout, "cat-file", "-e", `${expected.controlSha}:${path}`], { stdio: "pipe" });
+          expected.version = manifest.version;
+          expected.mode = options.recovery ? "recovery-022" : options.bootstrap ? "bootstrap" : "future";
+        } else if (options.recovery) expected.mode = "recovery-022";
       }
       receipt = options.mode === "terminal-continuation"
         ? await checkTerminalPublishedContinuation(expected, { originVersion: options["origin-version"] })
-        : await checkTerminalCompletion(expected);
+        : options.mode === "terminal-publication" ? await checkTerminalPublication(expected) : await checkTerminalCompletion(expected);
     }
   } catch (error) {
     // Failed state preserves all tags, assets and registry identities.
     receipt = { schemaVersion: options?.mode === "terminal-continuation" ? 2 : 1,
       ...(options?.mode === "terminal-continuation" ? { mode: "published-continuation" } : {}),
+      ...(options?.mode === "terminal-publication" ? { mode: "npm-publication" } : {}),
       outcome: error instanceof EvidenceMismatch ? "FAILED" : "UNRESOLVED", reason: "required release evidence could not be established; immutable surfaces were not changed",
       ...(verificationFailureForError(error) ? { failure: verificationFailureForError(error) } : {}) };
   }

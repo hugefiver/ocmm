@@ -31,7 +31,10 @@ const snapshot: ProfileSnapshot = { ...selection, profiles: [{ id: "p", revision
 const saved: ProfileReadResult = { id: "p", content: raw, revision, warnings: [warning] };
 function session(id: string): SessionProfileSnapshot {
   return { sessionId: id, selection, globalDefault: selection, admittedSelection: { selectedId: "p", appliedRevision: revision, selectionRevision: revision },
-    admissionEpoch: "original-epoch", scope: "global-default", switchAllowed: true, warnings: [warning] };
+    admissionEpoch: "original-epoch", scope: "global-default", switchAllowed: true,
+    canSelectModel: false, selectModelUnavailableReason: "model-unconfigured",
+    canToggleMode: false, toggleModeUnavailableReason: "runtime-unavailable",
+    canApplyOverlay: false, applyOverlayUnavailableReason: "new-session-required", warnings: [warning] };
 }
 function fixture(overrides: Partial<DsmmProfilesRemote> = {}) {
   const calls: string[] = [];

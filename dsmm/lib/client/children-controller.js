@@ -1,7 +1,6 @@
 import { ROLE_CONTROL_REMOTE, parseChildSessionSnapshot, parseRoleControlDescendants, parseRoleControlErrorInfo, parseRoleControlPromptRequest } from "../role-control-remote.js";
 export const EMPTY_CHILD_DRAFT = { text: "", delivery: "queue", images: [], imageBusy: false, uncertain: false };
 export const childActionKey = (childId) => `child:${childId}`;
-export const runActionKey = (toolCallId, runId) => `run:${JSON.stringify([toolCallId, runId])}`;
 export function enabled(availability) { return availability?.enabled === true; }
 class ControlFailure extends Error {
     safe;
@@ -26,7 +25,7 @@ export class ChildrenController {
         subscribe: (listener) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; },
     };
     actions = {
-        refresh: generation => this.refresh(generation), background: (generation, call, run) => this.background(generation, call, run),
+        refresh: generation => this.refresh(generation),
         prompt: (generation, child) => this.prompt(generation, child), interrupt: (generation, child) => this.interrupt(generation, child),
         editText: (generation, child, text) => this.editDraft(generation, child, { text }),
         setDelivery: (generation, child, delivery) => this.editDraft(generation, child, { delivery }),
@@ -171,30 +170,6 @@ export class ChildrenController {
     finish(key) { const pending = new Map(this.current.pending); pending.delete(key); this.publish({ pending }); }
     refuse(key, error) { const issues = new Map(this.current.issues); issues.set(key, this.issue(error)); this.publish({ issues }); }
     accepted(key, outcome) { const outcomes = new Map(this.current.outcomes); outcomes.set(key, outcome); this.publish({ outcomes }); }
-    async background(generation, toolCallId, runId) {
-        const key = runActionKey(toolCallId, runId), snapshot = this.current.snapshot;
-        const run = snapshot?.runs.find(row => row.toolCallId === toolCallId && row.invocation?.runId === runId);
-        if (!this.available(generation) || this.current.pending.has(key) || this.current.outcomes.get(key)?.kind === "background"
-            || run?.state !== "running" || !enabled(run.background) || !enabled(snapshot?.capabilities.background))
-            return;
-        this.begin(key, "background");
-        try {
-            const receipt = await this.unwrap("background", () => this.remote.background(snapshot.sessionId, { sessionId: snapshot.sessionId, toolCallId, runId, expectedAdmissionEpoch: snapshot.admissionEpoch }));
-            if (!this.live(generation))
-                return;
-            if (receipt.runId !== runId)
-                throw new ControlFailure({ kind: "protocol", code: "conflict", unknown: true });
-            this.accepted(key, { kind: "background", receipt });
-        }
-        catch (error) {
-            if (this.live(generation))
-                this.refuse(key, error);
-        }
-        finally {
-            if (this.live(generation))
-                this.finish(key);
-        }
-    }
     canControl(generation, id, action) {
         const child = this.child(id);
         return this.available(generation) && !this.current.pending.has(childActionKey(id)) && child?.mode === "continuable" && !child.readonly

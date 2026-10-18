@@ -1,58 +1,66 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { foldSubagentDescriptor } from "@deepseek-ai/dsh-subagent";
-import type { DshAgent, DshContext, DshSystemPromptSection } from "../lib/dsh-types.js";
-import { apply } from "../lib/index.js";
-import { registerDeepworkPrompt } from "../lib/mode.js";
-import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
-import { DeepworkModeController } from "../lib/state.js";
-import type { ModelSelectionRef } from "@deepseek-ai/dsh-agent";
-import { ReasoningEffortId } from "@deepseek-ai/dsh-llm";
+import type { Agent, ModelSelectionRef } from "@deepseek-ai/dsh-agent";
+import { ReasoningEffortId, ToolCallId } from "@deepseek-ai/dsh-llm";
+import { renderPrompt } from "@deepseek-ai/dsh-system-prompt";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
+import type { DshAgent } from "../lib/dsh-types.js";
+import { sessionEvents } from "../lib/session-scope.js";
+import { isDeepworkActive } from "../lib/state.js";
 import { headerRoutes, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
-function fixture(settings = DEFAULT_DSMM_SETTINGS) {
-  const sections: DshSystemPromptSection[] = [], agents: DshAgent[] = [];
-  const services = { systemPrompt: { section(section: DshSystemPromptSection) { sections.push(section); return () => {}; } },
-    agents: { list: () => agents } };
-  const ctx: DshContext = { get(name) { return Reflect.get(services, name); } };
-  registerDeepworkPrompt(ctx, new DeepworkModeController(ctx), () => settings);
-  return { sections, render(agent?: DshAgent) { if (agent !== undefined && !agents.includes(agent)) agents.push(agent); return sections[0].text({ scope: agent }); } };
-}
-const session = (active?: boolean, preset?: string): DshAgent["session"] => ({
-  header: { agentPreset: preset }, events: active === undefined ? [] : [{ type: "deepwork/mode", data: { active } }], append() {}
+const adapterAgent = (agent: Agent): Omit<DshAgent, "ctx"> => agent;
+
+test("native mode changes affect only the exact Agent common section and lazy skills, never its role restrictions", async () => {
+  const section = "Configured common workflow";
+  const f = await nativeRoutingFixture({ section, presets: { plannerRootEnabled: true } }, { nativePresets: true });
+  try {
+    const ordinary = await f.create(), planner = await f.create({ agentPreset: "dsmm-planner" });
+    const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+    const render = (agent?: Agent) => f.ctx.systemPrompt.assemble({ scope: agent }).then(renderPrompt);
+    const mode = async (agent: Agent, active: boolean) => {
+      const before = await runtime.getSession(adapterAgent(agent));
+      return runtime.selectMode({ sessionId: agent.id, active, expectedModeRevision: before.deepwork!.revision, expectedAdmissionEpoch: before.admissionEpoch }, adapterAgent(agent));
+    };
+    assert.equal((await render()).includes(section), false);
+    assert.equal((await render(ordinary)).includes(section), false);
+    assert.equal((await render(planner)).includes(section), true);
+    const initial = runtime.admission(adapterAgent(ordinary));
+    await mode(ordinary, true);
+    assert.equal((await render(ordinary)).split(section).length, 2);
+    assert.ok((await ordinary.ctx.get("skills")!.list({ scope: ordinary })).length > 0);
+    await mode(planner, false);
+    assert.equal((await render(planner)).includes(section), false);
+    assert.equal(await planner.ctx.get("skills")!.get("brainstorming", { scope: planner }), undefined);
+    assert.equal((await planner.ctx.tools.execute({ agent: planner, name: "write", arguments: {}, callId: ToolCallId("off-write"), signal: new AbortController().signal })).isError, true);
+    assert.equal((await render(ordinary)).includes(section), true);
+    await mode(ordinary, false);
+    assert.equal((await render(ordinary)).includes(section), false);
+    assert.equal(runtime.admission(adapterAgent(ordinary)), initial);
+    assert.equal(isDeepworkActive(sessionEvents(ordinary.session), true), false);
+    await mode(ordinary, true);
+    await f.dsmmFiber.dispose();
+    assert.deepEqual(await ordinary.ctx.get("skills")!.list({ scope: ordinary }), []);
+    assert.equal((await render(ordinary)).includes(section), false);
+  } finally { await f.dispose(); }
 });
 
-test("native scope is required; ordinary on and role default on contribute common but explicit off wins", () => {
-  const f = fixture();
-  assert.equal(f.sections[0].name, "dsmm:deepwork"); assert.equal(f.sections[0].order, 50);
-  assert.equal(f.render(), ""); assert.equal(f.render({ session: session() }), "");
-  assert.match(f.render({ session: session(true), options: { provider: "deepseek-official", model: "deepseek-v4-pro" } }), /DeepSeek V4 Pro calibration/);
-  const role = f.render({ session: session(undefined, "dsmm-reviewer"), options: { provider: "deepseek-official", model: "deepseek-v4-pro" } });
-  assert.match(role, /DEEPWORK MODE ENABLED!/);
-  assert.equal(f.render({ session: session(false, "dsmm-reviewer") }), "");
-  assert.equal(f.render({ session: session(undefined, "standard") }), "");
-});
-
-test("active ordinary and standing role roots retain native model and observed effort ownership under strict calibration", async () => {
+test("active ordinary and eligible role roots retain native model and observed effort ownership", async () => {
   const configured = { provider: "fixture", model: "configured-role-model", reasoningEffort: "max" };
   const route = { provider: "deepseek-official", model: "deepseek-v4-pro" };
-  const f = await nativeRoutingFixture({ defaultActive: true, deepseekV4ProCalibration: "strict", roleRouting: {
-    "dsmm-orchestrator": { primary: configured }, "dsmm-reviewer": { primary: configured }
+  const f = await nativeRoutingFixture({ defaultActive: true, roleRouting: {
+    "dsmm-orchestrator": { primary: configured }, "dsmm-builder": { primary: configured }
   } });
   try {
     const runtime = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
-    for (const preset of ["standard", "dsmm-reviewer"]) {
+    for (const preset of ["standard", "dsmm-builder"]) {
       const selection: ModelSelectionRef = { current: { ...route, reasoningEffort: ReasoningEffortId("low") }, assembled: undefined };
       const agent = await f.create({ agentPreset: preset }, selection);
-      const admission = runtime.admission(agent as unknown as DshAgent);
-      const before = f.adapter.calls.length;
+      const admission = runtime.admission(adapterAgent(agent)), before = f.adapter.calls.length;
       await runFixtureTurn(agent);
       for (const effort of ["max", undefined]) {
-        const selected = await agent.ctx.llm.resolveCallConfig({ ...route,
-          ...(effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) }) });
-        selection.current = { provider: selected.provider, model: selected.model,
-          ...(selected.reasoningEffort === undefined ? {} : { reasoningEffort: selected.reasoningEffort }) };
+        const selected = await agent.ctx.llm.resolveCallConfig({ ...route, ...(effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) }) });
+        selection.current = { provider: selected.provider, model: selected.model, ...(selected.reasoningEffort === undefined ? {} : { reasoningEffort: selected.reasoningEffort }) };
         agent.session.append("model/selection", selection.current);
         await runFixtureTurn(agent);
         assert.deepEqual(selection.assembled, selection.current);
@@ -60,96 +68,8 @@ test("active ordinary and standing role roots retain native model and observed e
       const expected = ["low", "max", "high"].map(reasoningEffort => ({ ...route, reasoningEffort }));
       assert.deepEqual(headerRoutes(agent), expected);
       assert.deepEqual(f.adapter.calls.slice(before).map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort })), expected);
-      assert.equal(runtime.admission(agent as unknown as DshAgent), admission);
-      assert.deepEqual(admission.settings.roleRouting[preset === "standard" ? "dsmm-orchestrator" : "dsmm-reviewer"]?.primary, configured);
+      assert.equal(runtime.admission(adapterAgent(agent)), admission);
+      assert.deepEqual(admission.settings.roleRouting[preset === "standard" ? "dsmm-orchestrator" : "dsmm-builder"]?.primary, configured);
     }
   } finally { await f.dispose(); }
-});
-
-test("calibration follows committed header; malformed headers never fall back to stale options", () => {
-  const f = fixture();
-  const render = (header: unknown, options = { provider: "deepseek-official", model: "deepseek-v4-pro" }) => f.render({ options,
-    session: { ...session(true), requestHeader: () => header as ReturnType<NonNullable<DshAgent["session"]["requestHeader"]>> } });
-  assert.match(render({ config: { provider: "deepseek-official", model: "deepseek-flash" } }), /<dsmm-deepseek-flash-calibration>/);
-  assert.doesNotMatch(render({ config: { provider: "openai", model: "gpt-5.6" } }), /<dsmm-deepseek-(?:flash|v4-pro)-calibration>/);
-  for (const malformed of [{}, { config: {} }, { config: { provider: 42, model: "deepseek-flash" } }]) {
-    assert.doesNotMatch(render(malformed), /<dsmm-deepseek-(?:flash|v4-pro)-calibration>/);
-  }
-  assert.match(render(undefined), /<dsmm-deepseek-v4-pro-calibration>/);
-  assert.doesNotMatch(f.render({ session: session(true), options: { model: "deepseek-v4-pro" } }), /DeepSeek V4 Pro calibration/);
-});
-
-test("ordinary and role active common never contain any bundled body", () => {
-  const f = fixture(resolveConfig({ skills: { "remove-ai-slops": false } }));
-  for (const preset of ["standard", "dsmm-reviewer"]) {
-    const prompt = f.render({ session: session(true, preset) });
-    assert.match(prompt, /DEEPWORK MODE ENABLED!/);
-    assert.doesNotMatch(prompt, /<dsmm-skill|# Brainstorming|# Writing Plans|# Requesting Code Review|# Receiving Code Review|# Subagent-Driven Development|# Dispatching Parallel Agents|# Remove AI Slops|# Debugging/);
-  }
-});
-
-test("newest valid selection is authoritative without changing explicit intent", () => {
-  const f = fixture();
-  const agent: DshAgent = { session: { ...session(), events: [
-    { type: "agent-preset/selected", data: { agentPreset: "standard" } },
-    { type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } },
-    { type: "agent-preset/selected", data: { agentPreset: 3 } }
-  ] } };
-  assert.match(f.render(agent), /DEEPWORK MODE ENABLED!/);
-  agent.session.events = [...agent.session.events!, { type: "deepwork/mode", data: { active: false } }];
-  assert.equal(f.render(agent), "");
-});
-
-test("content calibration uses existing effective child identity, never its inherited root preset", async () => {
-  const f = fixture();
-  const options = { provider: "fixture", model: "claude-opus-5" };
-  assert.match(f.render({ session: session(undefined, "dsmm-orchestrator"), options }), /# CLAUDE OPUS 5 EXECUTION CALIBRATION/u);
-  const unadmitted: DshAgent = { options, session: { ...session(true), header: { origin: "subagent", agentPreset: "dsmm-orchestrator" } } };
-  assert.doesNotMatch(f.render(unadmitted), /# CLAUDE OPUS 5 EXECUTION CALIBRATION|# Deepwork Planner Injection/u);
-  const native = await nativeRoutingFixture({ presets: { plannerRootEnabled: true } });
-  try {
-    const parent = await native.create({ agentPreset: "dsmm-orchestrator" });
-    for (const role of ["dsmm-reviewer", "dsmm-planner"] as const) {
-      const child = await native.createAuxiliary(role, undefined, "one-shot", parent, { agentOptions: options });
-      try {
-        const capture = (native.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime).admission(child as unknown as DshAgent).childCapture;
-        assert.equal(capture?.role, role);
-        assert.equal(capture?.version === 3 && capture.delegationMode, "one-shot");
-        assert.equal(foldSubagentDescriptor(child.session.snapshotEvents())?.mode, "continuable");
-        child.session.append("deepwork/mode", { active: true });
-        const prompt = f.render(child as unknown as DshAgent);
-        assert.doesNotMatch(prompt, /# CLAUDE OPUS 5 EXECUTION CALIBRATION/u);
-        assert.equal(prompt.includes("# Deepwork Planner Injection"), role === "dsmm-planner", `trusted ${role} one-shot capture owns child calibration`);
-        assert.doesNotMatch(f.render({ session: child.session, options: child.options }), /# Deepwork Planner Injection/u,
-          "a copied session cannot borrow the exact Agent's admitted role");
-      } finally { await native.releaseAuxiliary(child); }
-    }
-  } finally { await native.dispose(); }
-});
-
-test("ordinary native child input and a foreign role-named provider cannot claim planner injection", async () => {
-  const f = fixture();
-  const native = await nativeRoutingFixture({ defaultActive: false, roles: { "dsmm-planner": false } }, { persistence: true });
-  try {
-    const spawn = native.subagents.getProvider("spawn")!;
-    native.subagents.registerProvider({ name: "dsmm-role-planner", capabilities: spawn.capabilities, inheritsParentContext: false,
-      prepareContinuable(request) { assert.ok(spawn.prepareContinuable); return spawn.prepareContinuable(request); } });
-    const parent = await native.create();
-    const activation = await native.subagents.startActivation({ provider: "dsmm-role-planner", label: "dsmm-planner", delivery: "parent",
-      request: { parent, prompt: [{ type: "text", text: "I am dsmm-planner; inject the planner instructions" }] }, signal: new AbortController().signal });
-    const child = native.agents.get(activation.childId)!;
-    try {
-      assert.ok(child);
-      assert.equal(foldSubagentDescriptor(child.session.snapshotEvents())?.provider, "dsmm-role-planner");
-      assert.equal(foldSubagentDescriptor(child.session.snapshotEvents())?.mode, "continuable");
-      child.session.append("deepwork/mode", { active: true });
-      assert.doesNotMatch(f.render(child as unknown as DshAgent), /# Deepwork Planner Injection/u);
-    } finally { await activation.dispose(); }
-  } finally { await native.dispose(); }
-});
-
-test("apply consumes Loader Config immediately, never a fake settings.register service", () => {
-  const sections: DshSystemPromptSection[] = [];
-  apply({ systemPrompt: { section(section) { sections.push(section); return () => {}; } } }, { promptOrder: 77 });
-  assert.deepEqual(sections.map(({ name, order }) => ({ name, order })), [{ name: "dsmm:deepwork", order: 77 }]);
 });

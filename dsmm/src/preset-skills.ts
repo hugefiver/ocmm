@@ -1,66 +1,32 @@
-import Schema from "@deepseek-ai/schemastery";
 import { getTraceable } from "@deepseek-ai/cordis";
-import type { DshAgent, DshContext, DshSession, DshSessionEvent, DshSkillRegistry } from "./dsh-types.js";
-import { DSMM_SKILL_NAMES, registerBundledSkills } from "./skills.js";
-import type { DsmmSkillName } from "./skills.js";
+import type { DshAgent, DshContext, DshSkillRegistry } from "./dsh-types.js";
+import { registerBundledSkills } from "./skills.js";
 import { nativeAgentContext, scopeParentOf } from "./native-scope.js";
 import type { DsmmSettingsGetter } from "./settings.js";
 import type { DeepworkModeController } from "./state.js";
 
-export const name = "dsmm/preset-skills";
-export const inject = [] as const;
+const bindings = new WeakMap<DshAgent, () => void>();
 
-export interface PresetSkillsConfig {
-  skills?: DsmmSkillName[];
-}
-
-const SKILL_NAME_SCHEMA = Schema.union(DSMM_SKILL_NAMES.map((name) => Schema.const(name)));
-
-export const Config: Schema<PresetSkillsConfig> = Schema.object({
-  skills: Schema.array(SKILL_NAME_SCHEMA).default([...DSMM_SKILL_NAMES])
-});
-
-export function apply(ctx: DshContext, config: PresetSkillsConfig = {}): void {
-  // Retain the published 0.1.9 Cordis entry shape for older callers. Current
-  // generated presets do not consume it; this hook registers no skills.
-  // The main entry calls registerAgentSkills below for real Agent mounts.
-}
-
-export function registerAgentSkills(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter): void {
-  const mounted = new Map<DshAgent, { parent: object | undefined; registry: DshSkillRegistry; provider: ReturnType<typeof registerBundledSkills> }>();
-  const remove = (agent: DshAgent): void => { mounted.get(agent)?.provider.dispose(); mounted.delete(agent); };
-  const reconcile = (agent: DshAgent): void => {
-    const agentCtx = nativeAgentContext(agent);
+/** Admission owns installation; mode changes only invalidate this Agent's lazy provider. */
+export function registerAgentSkills(ctx: DshContext, controller: DeepworkModeController, getSettings: DsmmSettingsGetter, agent: DshAgent, lifetime: AbortSignal): void {
+  const refresh = bindings.get(agent);
+  if (refresh) { refresh(); return; }
+  let mounted: { parent: object | undefined; registry: DshSkillRegistry; provider: ReturnType<typeof registerBundledSkills> } | undefined;
+  const remove = () => { mounted?.provider.dispose(); mounted = undefined; };
+  const reconcile = () => {
+    const agentCtx = nativeAgentContext(agent), settings = getSettings(agent);
+    if (!settings.modules.deepwork.enabled || !controller.active(agent, settings.defaultActive)) { remove(); return; }
     const presets = ctx.get?.<{ serviceFor(agent: DshAgent, name: string): DshSkillRegistry | undefined }>("agentPresets");
-    const raw = presets?.serviceFor(agent, "skills") ?? agentCtx.get("skills");
-    const previous = mounted.get(agent), parent = scopeParentOf(agent);
-    const settings = getSettings(agent);
-    if (!settings.modules.deepwork.enabled || !controller.active(agent, settings.defaultActive)) { remove(agent); return; }
-    if (raw === undefined) throw new Error("dsmm active skills require the native skill registry; no prompt-body fallback is available");
-    if (previous?.parent === parent && previous?.registry === raw) { previous.provider.invalidate(); return; }
-    remove(agent);
-    const registry = getTraceable(agentCtx, raw);
-    const provider = registerBundledSkills(agentCtx, registry, { agent, controller, getSettings });
-    mounted.set(agent, { parent, registry: raw, provider });
+    const raw = presets?.serviceFor(agent, "skills") ?? agentCtx.get("skills"), parent = scopeParentOf(agent);
+    if (raw === undefined) throw new Error("Active skills require the native skill registry");
+    if (mounted?.parent === parent && mounted?.registry === raw) { mounted.provider.invalidate(); return; }
+    remove();
+    mounted = { parent, registry: raw, provider: registerBundledSkills(agentCtx, getTraceable(agentCtx, raw), { agent, controller, getSettings }) };
   };
-  const stopMode = controller.watch(reconcile);
-  const created = ctx.on?.("agent/created", ({ agent }: { agent: DshAgent }) => reconcile(agent), { global: true });
-  const selected = ctx.on?.("agent-preset/selected", (id: string) => {
-    const agent = ctx.get?.<{ get(id: string): DshAgent | undefined }>("agents")?.get(id);
-    if (agent !== undefined) { remove(agent); reconcile(agent); }
-  }, { global: true });
-  const disposed = ctx.on?.("agent/disposed", ({ agent }: { agent: DshAgent }) => remove(agent), { global: true });
-  const modeEvent = ctx.on?.("session/event", (session: DshSession, event: DshSessionEvent) => {
-    if (event.type !== "deepwork/mode") return;
-    const agent = ctx.get?.<{ list(): DshAgent[] }>("agents")?.list().find((agent) => agent.session === session);
-    if (agent !== undefined) reconcile(agent);
-  }, { global: true });
-  ctx.effect?.(() => () => {
-    stopMode();
-    for (const stop of [created, selected, disposed, modeEvent]) if (typeof stop === "function") stop();
-    for (const agent of [...mounted.keys()]) remove(agent);
-  });
-  for (const agent of ctx.get?.<{ list(): DshAgent[] }>("agents")?.list() ?? []) reconcile(agent);
+  const stopMode = controller.watch(changed => { if (changed === agent) reconcile(); });
+  bindings.set(agent, reconcile);
+  const dispose = () => { stopMode(); remove(); bindings.delete(agent); lifetime.removeEventListener("abort", dispose); };
+  lifetime.addEventListener("abort", dispose, { once: true });
+  ctx.effect?.(() => dispose);
+  reconcile();
 }
-
-export default apply;

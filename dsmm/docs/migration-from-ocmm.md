@@ -1,6 +1,6 @@
 # Migrating from ocmm to DSMM
 
-DSMM is a DSH-native Cordis bundle, not an OpenCode compatibility layer. Don't copy `.opencode/ocmm.jsonc` into DSH. This guide describes current source behavior targeting DSH `0.2.0-rc.2`, including changes not delivered by the published `@dsmm/dsmm@0.2.2` artifact. Check the actual candidate before configuring it.
+DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`. It's a DSH-native Cordis bundle, not an OpenCode compatibility layer. Don't copy `.opencode/ocmm.jsonc` into DSH.
 
 Model selection, authentication, permissions, session ownership and package loading remain DSH-native. Existing OpenCode configuration and sessions may coexist, but they don't become DSMM configuration or fallback sessions. Migration doesn't copy credentials, account records or private provider preferences.
 
@@ -12,9 +12,9 @@ Model selection, authentication, permissions, session ownership and package load
 | Roles and categories | 11 base roles and 11 categories with canonical `dsmm-*` IDs. Cross-cutting defaults off. Only enabled Orchestrator, Builder and opted-in Planner are standing-root eligible. |
 | Skills | Fourteen configurable lazy native skills, discovered through metadata and loaded through `get`/`resourceBase`, not full bodies injected every turn. |
 | Model routing | Generic native capabilities, `modelParameters`, role primary/fallback routes and explicit invocation levels. Ordinary root model/effort stays native-owned. |
-| Settings | Sparse Global/native deployment layers plus independent named Profiles. Save, future default, current-session Apply and native model selection remain separate actions. |
+| Settings | Sparse Global/native deployment layers plus independent named Profiles. Save, future default, mode and native model selection have independent capabilities; live overlay Apply is unavailable. |
 | Safety | Native tool policies and scoped helpers; mandatory role/read-only/delegation fences remain independent of optional workflow mode. DSH owns approval and cancellation. |
-| Child lifecycle | Native one-shot/jobs/continuable interfaces with immutable captures and current direct-parent delivery authority. No guessed task IDs or second retry dispatcher. |
+| Child lifecycle | Official activation/results/disposal, immutable admission and live direct-parent controls. Background is selected before start; no running handoff, guessed task IDs or cold DSMM recovery. |
 | Recovery | Startup locks and explicitly configured bounded rate-limit fallback, requiring positive no-output evidence. Idle continuation is separately opt-in. |
 | LSP/MCP | DSMM automatic integration remains off, even with `lsp.enabled:true`; original interfaces/config remain. Native DSH LSP and independently configured MCP are unaffected. |
 | OpenCode hooks and Codex marketplace | No hook ABI, history/cache mutation or marketplace compatibility. Use native DSH installation and actual exposed capabilities. |
@@ -22,7 +22,7 @@ Model selection, authentication, permissions, session ownership and package load
 
 See [Agent presets](agent-presets.md) for the canonical inventory and permission matrix. An exported template isn't a callable role. Reviewer is primary-lane self-review; Oracle is an external-model check only when the observed route actually differs. A role name alone doesn't prove model heterogeneity.
 
-[Source synchronization](skill-sync.md) defines prompt/resource provenance and fixed-pin distribution. The full frontend library and licenses must be present in the packed artifact; build/check refuses missing or changed resources offline. Resource parity doesn't establish native execution or installed-carrier acceptance.
+[Source synchronization](skill-sync.md) defines prompt/resource provenance and fixed-pin distribution. The full frontend library and licenses must be present in the packed artifact; offline build/check refuses missing or unsafe resources without imposing content locks on local files.
 
 ## Configuration sequence
 
@@ -33,7 +33,7 @@ These steps are operator guidance, not authorization to install or change user p
 3. Translate intended behavior into DSMM's sparse Global or exact native entry `config`, preserving unrelated settings and Loader rows. Use **Plugins → DSMM bundle config** for module drawers; named **Deepwork Profiles** remains separate. Don't copy the removed `settings.yaml` namespace or merged defaults into a sparse layer.
 4. Use `workflow.policy: risk-based` unless deliberately retaining supported legacy controls. Inspect normalized status because omitted values and explicit same-default pins have different inheritance effects.
 5. Configure canonical `roleRouting` IDs and explicit low/high/max levels where needed. Source tier guidance doesn't create suffix roles. Preserve disabled roles; a source `explore` alias maps to `dsmm-code-search`, not another role/tool.
-6. Check cold runtime composition and persistence independently. Main native-only `runtime.enabled` defaults true; false selects official stock on restart. Its Save records desired state without replacing the current owner. Durable DW child delegation still needs compatible Main `sessionPersistence`; stock JSONL zero-configuration support is [deferred](roadmap.md#stock-jsonl-delegation-alpha4-migration-candidate).
+6. Retain official AgentRegistry, SubagentRuntime and JSONL namespace ownership. Don't add a DSMM custom owner, manual-runtime selector or persistence companion. Check actual admission/capabilities independently of saved desired settings.
 7. Verify actual native delegation, useful read/write/tool-result behavior, read-only denial and the child's own request route. Config/catalog inspection isn't execution evidence. Don't enable DSMM LSP through the retained historical manual patch; see [LSP boundary](lsp.md).
 
 Headless task execution uses an effective `defaultActive:true` and a native provider; it doesn't select Agent presets. Command-capable Hosts execute `/deepwork` and `/dsmm-status` through the command adapter, not as model task text. `--dump-config` shows Loader composition, not complete Global-aware DSMM admission.
@@ -42,16 +42,16 @@ Headless task execution uses an effective `defaultActive:true` and a native prov
 
 Brand-calibration/default-effort and MaxReasoningPresets fields reject with `deprecated-field`; [model routing](model-routing.md#generic-model-parameters) lists their exact names. Edit the invalid configuration deliberately using generic routes, parameters and levels. There is no automatic migration or silent field rewrite.
 
-Exact legacy profile libraries remain read-only with original immutable pins. V1 pointers and digest-shaped revision names remain references, not recomputed configuration checksums or permission to adopt the latest draft. Source versions and snapshot IDs distinguish observed/saved state; native CAS, admission epochs, child envelopes and release/resource integrity keep their separate contracts.
+Unsupported legacy profile libraries and history remain untouched; same-name central documents aren't substitutes. Source versions and immutable references distinguish observed/saved state, not permission to adopt the latest draft or restore execution. Native CAS, admission epochs and release/resource integrity keep separate contracts.
 
-Older auxiliary-root sessions can fail native cold resume when the root preset is no longer registered. Preserve history and obtain direction rather than substituting a persona. Child v1/v2/v3 readers retain original versioned evidence and integrity checks without rewriting old captures or reconstructing permissions from the current parent.
+Cold DSMM resume without trusted live admission is unsupported. Preserve history and obtain direction rather than substituting a persona or reconstructing permissions from the current parent. Display metadata and old captures don't grant authority; no automatic import, rewrite or migration is supplied.
 
-Current-session Apply is exact-root, idle and CAS/epoch-fenced. It leaves the native model and existing children unchanged; later children inherit the new admission. **Use profile model** separately requests the admitted immutable profile's model, not a later draft, and newer observed native model/effort intent wins. See [Profiles](profiles.md).
+Live overlay Apply is unavailable; select a saved future default for new sessions. **Use profile model** and ordinary Deepwork mode changes have independent capabilities, not Apply's disabled gate. The model action requests the admitted immutable configuration's model, not a later draft, and newer observed native model/effort intent wins, including same-value reselection. See [Profiles](profiles.md).
 
 ## Carrier and permission limits
 
-Real Desktop and CLI/TUI installations require separate exact authorization. Use the installation-owned carrier, preserve provider/account state and unrelated rows, and follow cold-start requirements. A fully quit Desktop, standalone CLI package check or source compatibility check doesn't by itself prove Electron activation. Don't copy credentials or browser storage into tests.
+Real Desktop and CLI/TUI installations require separate exact authorization. Use the installation-owned carrier on exact rc.2, preserve provider/account state and unrelated rows, and follow cold-start requirements. Desktop plugin installation follows publication and doesn't authorize upgrading the Host. Don't copy credentials or browser storage into tests.
 
-DSH owns depth, sandbox and approval. DSMM doesn't raise those ceilings or infer approval from configuration. The accepted [P1 pending one-shot approval/parent epoch risk](deferred-native-approval-risk.md) remains unresolved. Repeated approval for read-only Git also remains unclassified until the exact call and approval reason are supplied.
+DSH owns depth, sandbox and approval. DSMM doesn't raise those ceilings or infer approval from configuration. [Running-overlay and approval boundaries](deferred-native-approval-risk.md) prohibit rebinding a pending call to another configuration. Repeated approval for read-only Git remains unclassified until the exact call and approval reason are supplied.
 
 Any profile/log repair or rollback needs its own data-preserving scope, concurrency checks and recoverable backup. Migration never authorizes rewriting immutable releases, deleting history or restoring credentials. [Release controls](releasing.md) separate npm publication completion from GitHub Release delivery and installed-carrier acceptance.

@@ -35,6 +35,6 @@ An independently mounted native MCP client using `serverName: dsmm_lsp` uses the
 
 DSMM's read-only role restrictions don't grant rename or format permission. The retained `lspRuntime` status interface reports bounded state, diagnostic codes and tool names, not executable paths, arguments or environment values. Tool discovery alone doesn't prove language-server availability or a successful symbol query.
 
-DSMM's automatic external LSP integration isn't a delivered feature in this version. The existing release validator still requires a completed `receipt.lsp` with `directNativeDiagnosticsAndFormat` and `nativeDshMcpClient`; Docker smoke independently exercises the retained interface. These release checks remain required and don't establish a supported DSMM activation path or certify an independently configured server.
+DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`. Automatic external LSP mounting isn't delivered; the retained interface inventory isn't an activation path.
 
-Independently managed MCP users must verify their actual executable and language-server availability. DSMM doesn't certify or repair the operator's execution environment, and unavailable tools don't waive required release checks.
+DSH's native definition/references/implementation/hover surface isn't a promise of diagnostics, rename or format. The retained external interface above doesn't expand that native scope. Independently managed MCP users must verify actual executable and language-server availability; DSMM doesn't certify or repair that environment.

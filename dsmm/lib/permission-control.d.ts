@@ -1,11 +1,9 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { PreToolDecision, ToolDefinition, ToolExecution, ToolRunContext } from "@deepseek-ai/dsh-tools";
-import type { RoleRunHolder } from "./role-runs.js";
 import type { NativeCommandEntry } from "./permission-settings.js";
 import type { NativePermissionMode } from "./permission-native-access.js";
 export { PermissionRefusal } from "./permission-errors.js";
-export type PermissionRunHolder = Pick<RoleRunHolder, "state" | "owner" | "invocation" | "holderSignal" | "drained">;
 export interface PermissionExecutionAuthority {
     readonly agent: Agent;
     readonly root: Agent;
@@ -15,7 +13,6 @@ export interface PermissionExecutionAuthority {
     readonly owner: object;
     readonly ownerGeneration: string | number;
     readonly signal: AbortSignal;
-    readonly run?: PermissionRunHolder;
 }
 export type PermissionRootApprovalAuthority = Pick<PermissionExecutionAuthority, "root" | "realm" | "admissionRevision" | "permissionRevision" | "owner" | "ownerGeneration" | "signal">;
 export interface PermissionExecutionIntegrity {

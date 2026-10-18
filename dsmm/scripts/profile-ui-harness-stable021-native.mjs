@@ -13,6 +13,7 @@ import { prepareNativeReadonly022 } from "./native-preset-smoke.mjs";
 export const name = "dsmm-stable021-native-browser-acceptance";
 export const inject = ["appReady", "appExit", "agents", "llm", "dsmmProfileRuntime", "dsmmRuntimeIntegration", "typertGateway", "connection", "loader", "sessionPersistence"];
 const CALLS = new Set(["dsmmProfiles/describe", "dsmmProfiles/read", "dsmmProfiles/save", "dsmmProfiles/select", "dsmmProfiles/describeSession", "dsmmProfiles/selectSession",
+  "dsmmConfig/describe", "dsmmConfig/save", "dsmmConfig/describeModules", "dsmmConfig/describeSettings", "dsmmPermissions/describeRules", "dsmmPermissions/saveRules",
   "dsmmChildren/describe", "dsmmChildren/descendants", "dsmmChildren/prompt", "dsmmChildren/background", "session/modelCatalog", "session/create", "session/list"]);
 const STREAMS = new Set(["$events", "session/follow", "session/control"]);
 
@@ -86,6 +87,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   const proofIdentity = stableNativeProofIdentity(manifest, { sourceContract });
   const checks = stableUiChecksForVersion(proofIdentity.packageVersion);
+  const current030 = isSource030(proofIdentity.packageVersion);
   const sdk = createRequire(dshManifest), load = id => import(pathToFileURL(sdk.resolve(id)).href);
   const [{ LlmAdapter, ReasoningEffortId, ToolCallId }, { SessionId }] = await Promise.all([load("@deepseek-ai/dsh-llm"), load("@deepseek-ai/dsh-session")]);
   assert.ok(isAbsolute(env.DSMM_ACCEPTANCE_TOOLS_MANIFEST) && isAbsolute(env.DSMM_BROWSER_EXECUTABLE));
@@ -168,6 +170,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     assert.equal(captured.capture.originalAdmissionEpoch, originalChildAdmission.epoch);
     assert.equal(captured.capture.childSessionId, child.id); assert.equal(captured.capture.parentSessionId, parent.id);
     assert.equal(captured.revision, digest(JSON.stringify(captured.capture)));
+    if (isSource030(proofIdentity.packageVersion)) assert.equal(captured.capture.version, 3);
     assert.equal(child.options.model, "reviewer-original");
     if (isSource022(proofIdentity.packageVersion) || isSource030(proofIdentity.packageVersion)) assert.deepEqual(readonlyDenied, ["write", "edit", "bash", "pwsh"]);
     else {
@@ -180,9 +183,12 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     }
     report.native = { rootId: parent.id, childId: child.id, rootModel: parent.options.model, readonlyDenied, originalChildEpoch: originalChildAdmission.epoch, model: child.options.model,
       originalCaptureSha256: digest(captureBefore), directNativeOwnership: true };
-    report.checks.publicNativeCapturedChild = true;
+    if (current030) {
+      report.currentSurfaces = { childCapture: { version: captured.capture.version, pathVersion: "v1" } };
+      report.checks.publicNativeCapturedChildV3 = true;
+    } else report.checks.publicNativeCapturedChild = true;
     report.stage = "browser-boot";
-    server = await startProfileUiServer({ nativeRequire: sdk, packageRoot, sha256, composition: stableCompositionBundle(COMPOSITION_ID) }); report.nativeClient = server.bundleProof;
+    server = await startProfileUiServer({ nativeRequire: sdk, packageRoot, sha256, composition: stableCompositionBundle(COMPOSITION_ID, { current: current030 }) }); report.nativeClient = server.bundleProof;
     report.clientSha256 = digest(await readFile(report.nativeClient.dsmmClient));
     browser = await chromium.launch({ executablePath: env.DSMM_BROWSER_EXECUTABLE, headless: true, args: ["--disable-extensions", "--disable-sync", "--no-sandbox"] });
     context = await browser.newContext({ viewport: report.viewport, locale: "en-US", serviceWorkers: "block" });
@@ -206,6 +212,23 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     await page.evaluate(() => window.__dsmmUiContext.root.get("connection").reconnect());
     await page.waitForFunction(() => document.querySelector(".dsmm-profiles")?.getAttribute("aria-busy") === "false");
     report.preflight = await page.evaluate(nativeClientPreflight); assert.deepEqual(report.preflight.missingServices, []);
+    if (current030) {
+      report.stage = "browser-deployment-page";
+      const deployment = page.locator("[data-dsmm-page]");
+      await deployment.waitFor();
+      await deployment.getByRole("button", { name: "Run and modules", exact: true }).click();
+      const globalLayer = deployment.locator('[data-dsmm-layer="global"]');
+      const toggle = globalLayer.locator('input[type="checkbox"]').first();
+      await toggle.waitFor(); await toggle.click();
+      await deployment.getByRole("button", { name: "Save Global config", exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('[data-dsmm-layer="global"]')?.getAttribute("aria-busy") === "false");
+      const configSave = report.nativeCalls.findLast(row => row.endpoint === "dsmmConfig/save");
+      assert.equal(configSave?.result, "accepted");
+      await assert.rejects(invoke("dsmmConfig", "save", configSave.args), error => gateway.wireStream.failure(error).details?.code === "conflict");
+      report.currentSurfaces.deploymentPage = { slot: "plugins.bundle.config", entryKey: "@dsmm/dsmm", configCas: true };
+      report.checks.browserDeploymentPageConfigCas = true;
+      await deployment.getByRole("button", { name: "Close module", exact: true }).click();
+    }
     report.stage = "browser-profile-edit-save";
     const profileId = `stable-ui-${randomUUID().slice(0, 8)}`;
     const section = page.locator(".dsmm-profiles").filter({ has: page.getByRole("heading", { name: "Deepwork Profiles", exact: true }) });
@@ -219,7 +242,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     await action("Save profile").click(); await section.getByText(`Saved ${profileId}. The applied policy was not changed.`, { exact: true }).waitFor();
     const saved = await runtime.read(profileId); assert.equal(saved.content, content); assert.equal(saved.warnings[0].code, "blank-label");
     assert.equal((await runtime.describe()).selectedId, null);
-    report.storageProof.savedRevision = saved.revision; report.checks.browserEditSaveWarning = true;
+    report.storageProof.savedRevision = saved.revision; if (!current030) report.checks.browserEditSaveWarning = true;
     report.stage = "future-default-apply";
     await action("Set as future default").click();
     await section.getByText(`Applied ${profileId} for new sessions. Existing sessions were not changed.`, { exact: true }).waitFor();
@@ -230,7 +253,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     await assert.rejects(invoke("dsmmProfiles", "select", globalArgs), error => gateway.wireStream.failure(error).details?.code === "conflict");
     assert.deepEqual(await readFile(profileStorage.pointerPath), pointerBefore);
     report.cas = { future: { code: "conflict", beforeSha256: digest(pointerBefore), afterSha256: digest(await readFile(profileStorage.pointerPath)) } };
-    report.checks.browserFutureApplyAndStaleCas = true;
+    if (!current030) report.checks.browserFutureApplyAndStaleCas = true;
     await section.locator('[data-dsmm-zone="future-default"]').scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(evidenceRoot, "profiles-1280.png") }); report.screenshots.push("profiles-1280.png");
     report.stage = "children-panel";
@@ -239,6 +262,40 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
       window.__dsmmStableOwnedReference = reference; await reference.ready;
     }, parent.id);
     await page.waitForFunction(id => window.__dsmmUiContext.root.get("uiSession").adapter.current.getSnapshot().key === id, parent.id);
+    if (current030) {
+      report.stage = "browser-role-tool-view";
+      const role = page.locator('[data-dsmm-role-tool="dsmm_role"]');
+      await role.waitFor(); assert.equal(await role.getAttribute("data-identity"), "requested");
+      assert.match(await role.innerText(), /DW builder/u);
+      await role.getByRole("button", { name: /Requested Role:/u }).click();
+      assert.match(await role.innerText(), /retain raw input/u);
+      report.currentSurfaces.roleToolView = { slot: "tool.call.toolview", requestedIdentity: true, actualIdentityFromValidatedResult: false, rawArgsPreserved: true, rawOutputPreserved: false };
+      report.checks.browserRoleToolRequestedIdentity = true;
+      await page.evaluate(() => window.__dsmmRoleTool.start());
+      await page.evaluate(() => window.__dsmmRoleTool.result({ role: "dsmm-reviewer", label: "030 actual identity", level: "high", routeSource: "primary", mode: "one-shot", route: { provider: "dsmm-stable021-fixture", model: "reviewer-original", reasoningEffort: "high" } }));
+      await page.waitForFunction(() => document.querySelector('[data-dsmm-role-tool="dsmm_role"]')?.getAttribute("data-identity") === "actual");
+      assert.match(await role.innerText(), /DW reviewer/u); assert.match(await role.innerText(), /030 complete raw output/u);
+      report.currentSurfaces.roleToolView.actualIdentityFromValidatedResult = true;
+      report.currentSurfaces.roleToolView.rawOutputPreserved = true;
+      report.checks.browserRoleToolValidatedActualIdentity = true;
+      report.stage = "browser-permissions";
+      const deployment = page.locator("[data-dsmm-page]");
+      await deployment.getByRole("button", { name: "Permissions and guards", exact: true }).click();
+      const permissions = deployment.locator("[data-dsmm-permissions]");
+      await permissions.waitFor(); await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions]")?.getAttribute("aria-busy") === "false");
+      const webSearch = permissions.getByRole("group", { name: "Web search", exact: true });
+      await webSearch.getByRole("checkbox").click();
+      await permissions.getByRole("button", { name: "Save Global rules", exact: true }).click();
+      await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions]")?.getAttribute("aria-busy") === "false");
+      const permissionSave = report.nativeCalls.findLast(row => row.endpoint === "dsmmPermissions/saveRules");
+      assert.equal(permissionSave?.result, "accepted");
+      await assert.rejects(invoke("dsmmPermissions", "saveRules", permissionSave.args), error => gateway.wireStream.failure(error).details?.code === "stale");
+      await assert.rejects(invoke("dsmmPermissions", "describeRules", { sessionId: child.id }), error => gateway.wireStream.failure(error).details?.code === "not-owned");
+      report.currentSurfaces.permissions = { connectedRootOnly: true, describeRules: true, saveRulesCas: true, readonlyRefused: true };
+      report.checks.browserPermissionsRulesCas = true;
+      await deployment.getByRole("button", { name: "Close module", exact: true }).click();
+    }
+    report.stage = "children-panel";
     const panel = page.locator(".dsmm-children"); await panel.getByRole("heading", { name: "Deepwork children", exact: true }).waitFor();
     await panel.getByRole("button", { name: "Refresh", exact: true }).click();
     await panel.getByRole("region", { name: "Direct children", exact: true }).getByText("Stable native captured reviewer", { exact: true }).waitFor();
@@ -248,7 +305,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     const promptCall = report.nativeCalls.findLast(row => row.endpoint === "dsmmChildren/prompt");
     assert.equal(promptCall.result, "accepted"); assert.equal(typeof promptCall.receipt.messageId, "string");
     assert.equal(promptCall.args.request.childSessionId, child.id); assert.equal(promptCall.args.request.parentSessionId, parent.id);
-    report.native.inboxReceipt = promptCall.receipt; report.checks.browserChildrenNativeInboxReceipt = true;
+    report.native.inboxReceipt = promptCall.receipt; if (!current030) report.checks.browserChildrenNativeInboxReceipt = true;
     await panel.screenshot({ path: join(evidenceRoot, "children-1280.png") }); report.screenshots.push("children-1280.png");
     const live = ctx.get("agents").get(child.id); if (live) await live.whenIdle();
     const delivered = modelCalls.slice(callsBefore).filter(call => call.model === "reviewer-original" && JSON.stringify(call.messages).includes(message));
@@ -258,7 +315,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     assert.equal(observed.routeComparison.liveRoute.route.model, "reviewer-original"); assert.deepEqual(await readFile(capturePath), captureBefore);
     report.native.messageObservation = { childId: observed.id, originalChildEpoch: observed.evidence.originalAdmissionEpoch, liveModel: observed.routeComparison.liveRoute.route.model,
       acceptedNativeReviewerRequestsWithMessage: delivered.length, captureAfterSha256: digest(await readFile(capturePath)) };
-    report.checks.browserChildrenNativeMessage = true;
+    if (!current030) report.checks.browserChildrenNativeMessage = true;
     report.stage = "current-session-apply";
     await page.getByLabel("Current-session profile", { exact: true }).selectOption(profileId);
     await action("Apply profile to current session").click();
@@ -271,7 +328,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     assert.equal(runtime.admission(parent).epoch, applied.admissionEpoch); assert.deepEqual(await readFile(sidecar), sidecarBefore);
     assert.deepEqual(await readFile(profileStorage.pointerPath), pointerBefore); assert.deepEqual(await readFile(capturePath), captureBefore);
     report.cas.current = { code: "conflict", epoch: applied.admissionEpoch, beforeSha256: digest(sidecarBefore), afterSha256: digest(await readFile(sidecar)) };
-    report.checks.browserCurrentApplyAndStaleCas = true;
+    if (!current030) report.checks.browserCurrentApplyAndStaleCas = true;
     report.stage = "browser-same-run-background";
     let enteredStream;
     const entered = new Promise(settle => { enteredStream = settle; });
@@ -327,6 +384,7 @@ export async function runStableNativeBrowser(ctx, { artifact, sha256, sourceCont
     assert.equal(await eventsDigest(), eventsBefore); assert.equal(modelCalls.length, safetyCalls); assert.deepEqual(await readFile(capturePath), captureBefore);
     report.safety = { claimedOperatorPeerRefused: true, foreignParentRefused: true, beforeInboxCancellation: true,
       childEventsBeforeSha256: eventsBefore, childEventsAfterSha256: await eventsDigest(), nativeModelCallsBefore: safetyCalls, nativeModelCallsAfter: modelCalls.length };
+    if (current030) report.checks.browserNativeDeliveryFence = true;
     assert.deepEqual(Object.keys(report.checks).sort(), [...checks].sort());
     for (const check of checks) assert.equal(report.checks[check], true);
     for (const endpoint of ["dsmmProfiles/save", "dsmmProfiles/select", "dsmmProfiles/selectSession", "dsmmChildren/prompt"]) assert.ok(report.nativeCalls.some(row => row.endpoint === endpoint && row.result === "accepted"));

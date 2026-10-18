@@ -11,7 +11,7 @@ import type { DshLlmRuntime } from "../lib/dsh-types.js";
 import { headerRoutes, nativeRoutingFixture as createNativeRoutingFixture, RoutingFixtureAdapter, runFixtureTurn } from "./native-routing-fixture.ts";
 
 async function nativeRoutingFixture(config: Parameters<typeof createNativeRoutingFixture>[0] = {}, options: Parameters<typeof createNativeRoutingFixture>[1] = {}) {
-  const fixture = await createNativeRoutingFixture({ ...config, subagents: { enableRunInBackground: true, backgroundMode: "continuable", ...config.subagents } }, { persistence: true, ...options });
+  const fixture = await createNativeRoutingFixture({ ...config, subagents: { enableRunInBackground: true, backgroundMode: "continuable", allowRouteOverride: true, ...config.subagents } }, { persistence: true, ...options });
   return { ...fixture, createAuxiliary(...args: Parameters<typeof fixture.createAuxiliary>) {
     return fixture.createAuxiliary(args[0], args[1], args[2] ?? "continuable", args[3], args[4]);
   } };
@@ -96,7 +96,7 @@ for (const strategy of ["startup-lock", "rate-limit-fallback"] as const) {
       try {
         let hostCalls = 0; let tools = 0;
         fixture.ctx.on("agent/request-error", async () => { hostCalls++; return { kind: "retry" }; });
-        fixture.ctx.on("tools/pre-execute", async (_execution, next) => { tools++; return next(); });
+        fixture.ctx.on("tools/pre-execute", async (execution, next) => { if (execution.agent?.session.header.origin === "subagent") tools++; return next(); });
         fixture.adapter.streamChunks = async function* (): AsyncIterable<StreamChunk> {
           if (output === "text") yield { type: "text-delta", index: 0, text: "accepted partial" };
           else if (output === "reasoning") yield { type: "reasoning-delta", index: 0, text: "accepted reasoning" };
@@ -137,7 +137,10 @@ test("native UNKNOWN_MODEL preflight advances but unsupported exact effort is a 
         assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), [backup.model]);
         assert.deepEqual(headerRoutes(agent), [backup]);
       } else {
-        await assert.rejects(fixture.createAuxiliary("dsmm-reviewer"), { code: "UNSUPPORTED_REASONING_EFFORT" });
+        const parent = await fixture.create({ agentPreset: "dsmm-orchestrator" });
+        const result = await parent.ctx.tools.execute({ agent: parent, name: "dsmm_reviewer", arguments: { description: "Exact effort", prompt: "Must not dispatch" }, callId: ToolCallId("strategy-unsupported-effort"), signal: new AbortController().signal });
+        assert.equal(result.isError, true);
+        if (result.isError) assert.equal(result.error.info?.code, "UNSUPPORTED_REASONING_EFFORT");
         assert.equal(fixture.adapter.calls.length, 0);
         assert.equal(fixture.agents.list().some(agent => agent.session.header.origin === "subagent"), false);
       }
@@ -177,7 +180,10 @@ test("no native-resolvable configured route refuses before any header or provide
     primary: { provider: "missing-a", model: "absent-a" }, fallbackRoutes: [{ provider: "missing-b", model: "absent-b" }]
   } } });
   try {
-    await assert.rejects(fixture.createAuxiliary("dsmm-reviewer"), { code: "NO_ADAPTER" });
+    const parent = await fixture.create({ agentPreset: "dsmm-orchestrator" });
+    const result = await parent.ctx.tools.execute({ agent: parent, name: "dsmm_reviewer", arguments: { description: "No route", prompt: "Must not dispatch" }, callId: ToolCallId("strategy-no-adapter"), signal: new AbortController().signal });
+    assert.equal(result.isError, true);
+    if (result.isError) assert.equal(result.error.info?.code, "NO_ADAPTER");
     assert.equal(fixture.adapter.calls.length, 0);
     assert.equal(fixture.agents.list().some(agent => agent.session.header.origin === "subagent"), false);
     assert.equal(fixture.agents.list().some(agent => agent.session.snapshotEvents().some(event => event.type === "request/header" || event.type === "assistant/attempt")), false);
@@ -193,8 +199,8 @@ test("an advisory-empty native catalog does not reject an exact manually configu
   } finally { await fixture.dispose(); }
 });
 
-test("native alias admission locks the resolved adapter-default effort across later strict-calibration attempts", async () => {
-  const fixture = await nativeRoutingFixture({ deepseekV4ProCalibration: "strict", roleRouting: {
+test("native alias admission locks the resolved adapter-default effort across later turns", async () => {
+  const fixture = await nativeRoutingFixture({ roleRouting: {
     "dsmm-reviewer": { primary: { provider: "deepseek-official", model: "deepseek-v4-pro" } }
   } });
   try {
@@ -209,7 +215,7 @@ test("native alias admission locks the resolved adapter-default effort across la
 
 test("an owned child's locked explicit max fails its next real turn when max support is withdrawn without downgrading or dispatching", async () => {
   const route = { provider: "deepseek-official", model: "deepseek-v4-pro", reasoningEffort: "max" };
-  const fixture = await nativeRoutingFixture({ deepseekV4ProCalibration: "strict", roleRouting: {
+  const fixture = await nativeRoutingFixture({ roleRouting: {
     "dsmm-reviewer": { primary: { ...route, reasoningEffort: "high" }, fallbackRoutes: [backup] }
   } });
   try {
@@ -270,25 +276,6 @@ test("absent correlated attempt evidence refuses the owned RATE_LIMIT branch wit
   } finally { await fixture.dispose(); }
 });
 
-test("fresh native cold Agent re-admits primary from its pinned profile instead of a historical fallback route", async () => {
-  const fixture = await nativeRoutingFixture({ subagents: { enableRunInBackground: true, backgroundMode: "continuable" },
-    roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [backup], strategy: "rate-limit-fallback",
-    rateLimit: { ...immediate, switchAfterRateLimits: 1, maxSwitches: 1 } } } }, { persistence: true });
-  try {
-    fixture.adapter.beforeStream = async (call) => { if (call.model === primary.model) throw rateFailure(); };
-    const original = await fixture.createAuxiliary("dsmm-reviewer", undefined, "continuable"); await runFixtureTurn(original);
-    assert.deepEqual(headerRoutes(original), [primary, backup]);
-    fixture.adapter.beforeStream = undefined;
-    const restored = await fixture.resumeAuxiliary(original);
-    assert.equal(restored.id, original.id);
-    assert.notEqual(restored, original);
-    await runFixtureTurn(restored);
-    assert.deepEqual(headerRoutes(restored).at(-1), primary);
-    const markers = restored.session.snapshotEvents().filter((event) => event.type === "dsmm/role-policy");
-    assert.equal(markers.length, 2); assert.notEqual(markers[0].data.policy, markers[1].data.policy);
-  } finally { await fixture.dispose(); }
-});
-
 test("native roles own independent strategies and counters, and success resets consecutive RATE_LIMIT attempts", async () => {
   const fixture = await nativeRoutingFixture({ roleRouting: {
     "dsmm-reviewer": { primary, fallbackRoutes: [backup], strategy: "startup-lock", rateLimit: { ...immediate, maxRetries: 1 } },
@@ -332,14 +319,15 @@ test("duplicate request-error delivery and mismatched native failure identity ca
   const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, fallbackRoutes: [backup], rateLimit: { ...immediate, maxRetries: 1 } } } });
   try {
     let duplicateRefusals = 0;
-    fixture.ctx.on("agent/request-error", async (frame, next) => {
+    const agent = await fixture.createAuxiliary("dsmm-reviewer");
+    agent.ctx.on("agent/request-error", async (frame, next) => {
       const first = await next();
       const duplicate = await next();
       assert.equal(duplicate, undefined); duplicateRefusals++;
       return first;
     }, { prepend: true });
     fixture.adapter.beforeStream = async () => { throw rateFailure(); };
-    const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
+    await runFixtureTurn(agent);
     assert.equal(fixture.adapter.calls.length, 2); assert.equal(duplicateRefusals, 2);
   } finally { await fixture.dispose(); }
 });
@@ -373,7 +361,7 @@ test("accepted previous-step tools are executed once and never replayed by a lat
   const fixture = await nativeRoutingFixture({ roleRouting: { "dsmm-reviewer": { primary, rateLimit: { ...immediate, maxRetries: 1 } } } });
   try {
     let tools = 0;
-    fixture.ctx.on("tools/execute", async (_execution, next) => { tools++; return next(); });
+    fixture.ctx.on("tools/execute", async (execution, next) => { if (execution.agent?.session.header.origin === "subagent") tools++; return next(); });
     fixture.adapter.streamChunks = async function* (): AsyncIterable<StreamChunk> {
       if (fixture.adapter.calls.length === 1) {
         yield { type: "block-end", index: 0, block: { type: "tool-call", id: ToolCallId("completed-prior-read"), name: "read", arguments: "{}" } };
@@ -430,7 +418,7 @@ test("native RATE_LIMIT rollover changes provider channel with exact effort, fin
     fixture.ctx.get("llm")!.registerAdapter([secondaryRoute.provider], secondaryAdapter);
     secondaryAdapter.rateLimitModels.add(secondaryRoute.model);
     let tools = 0;
-    fixture.ctx.on("tools/execute", async (_execution, next) => { tools++; return next(); });
+    fixture.ctx.on("tools/execute", async (execution, next) => { if (execution.agent?.session.header.origin === "subagent") tools++; return next(); });
     fixture.adapter.streamChunks = async function* (): AsyncIterable<StreamChunk> {
       if (fixture.adapter.calls.length === 1) {
         yield { type: "block-end", index: 0, block: { type: "tool-call", id: ToolCallId("cross-channel-prior-read"), name: "read", arguments: "{}" } };

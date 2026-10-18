@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { copyFile, mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -35,6 +36,42 @@ test("final-artifact receipt fails closed when frozen container bytes are absent
   assert.throws(() => parseContainerArtifactReceipt("no receipt", sha256), /did not produce/u);
   assert.throws(() => parseContainerArtifactReceipt(`DSMM_FINAL_ARTIFACT_RECEIPT ${JSON.stringify({ ...report, artifact: { sha256, sha256After: "c".repeat(64) } })}`, sha256), /unchanged frozen artifact/u);
   assert.throws(() => parseContainerArtifactReceipt(`DSMM_FINAL_ARTIFACT_RECEIPT ${JSON.stringify(report)}`, "d".repeat(64)), /unchanged frozen artifact/u);
+});
+
+test("DSH runtime input accepts only bytes matching the trusted version policy", async () => {
+  const { dshTarballUrlForVersion, prepareDshRuntimeInput, verifySha512Integrity } = await import(pathToFileURL(join(packageRoot, "scripts", "prepare-dsh-runtime-input.mjs")).href);
+  const bytes = Buffer.from("integrity fixture");
+  const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  assert.deepEqual(verifySha512Integrity(bytes, integrity), {
+    integrity, sha256: createHash("sha256").update(bytes).digest("hex"), size: bytes.length,
+  });
+  assert.throws(() => verifySha512Integrity(Buffer.from("different"), integrity), /integrity mismatch/u);
+  assert.equal(dshTarballUrlForVersion("0.3.0"), "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.2.1-rc.1.tgz");
+  const owned = await mkdtemp(join(tmpdir(), "dsmm-dsh-input-test-"));
+  const destination = join(owned, "input");
+  try {
+    await assert.rejects(() => prepareDshRuntimeInput({ packageVersion: "0.3.1", destination }, async (url: string) => {
+      assert.equal(url, dshTarballUrlForVersion("0.3.1"));
+      return new Response(bytes);
+    }), /integrity mismatch/u);
+    assert.equal(existsSync(destination), false);
+  } finally { await rm(owned, { recursive: true, force: false }); }
+});
+
+test("the exact isolated final-artifact runner mount closure loads without checkout imports", async () => {
+  const { artifactDockerArguments } = await import(pathToFileURL(join(packageRoot, "scripts", "docker-smoke.mjs")).href);
+  const args = artifactDockerArguments({ artifact: "/owned/final-package.tgz", sha256: "a".repeat(64) }, "owned-native-runtime:fixture");
+  const owned = await mkdtemp(join(tmpdir(), "dsmm-isolated-runner-"));
+  try {
+    const scripts = join(owned, "scripts");
+    await mkdir(scripts);
+    const mounts = args.flatMap((arg: string, index: number) => arg === "--mount" ? [args[index + 1]] : []);
+    for (const mount of mounts) {
+      const match = /^type=bind,source=(.+),target=\/dsmm-acceptance\/scripts\/([^,]+),readonly$/u.exec(mount);
+      if (match) await copyFile(match[1], join(scripts, match[2]));
+    }
+    await import(`${pathToFileURL(join(scripts, "docker-smoke.mjs")).href}?isolated=${Date.now()}`);
+  } finally { await rm(owned, { recursive: true, force: false }); }
 });
 
 test("profile hook transport refuses an incomplete stable support closure and mounts every accepted support read-only", async () => {

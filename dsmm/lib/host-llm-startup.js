@@ -12,7 +12,7 @@ export function createDsmmLlmColdStartup(options) {
     let failure;
     let mounted;
     let provider;
-    const dependencies = [...AgentLoop.inject, "dsmmProfileRuntime", "dsmmRuntimeIntegration", "sessionPersistence", "dsmmLlmProviderOwner"];
+    const dependencies = [...AgentLoop.inject, "dsmmProfileRuntime", "dsmmNativeAdmission", "sessionPersistence", "dsmmLlmProviderOwner"];
     const builtin = "dsmm-llm-provider-owner";
     return {
         patches: [{ id: "agent-loop", disabled: true }, { insert: [{ id: options.provider.settingsNamespace, name: `cordis:${builtin}`, config: options.provider.config }] }],
@@ -33,8 +33,8 @@ export function createDsmmLlmColdStartup(options) {
                 try {
                     if (scope.get("agentLoop") !== undefined || provider === undefined)
                         throw new Error("DSMM LLM cold ownership was not established before AgentLoop");
-                    const integration = scope.get("dsmmRuntimeIntegration");
-                    if (integration?.runtime.authority.view().deliveryFenceReady !== true)
+                    const admission = scope.get("dsmmNativeAdmission");
+                    if (admission === undefined || admission.lifetime.signal.aborted)
                         throw new Error("DSMM admission guards are not ready");
                     const original = scope.llm;
                     const stock = Reflect.get(original, symbols.original) ?? original;

@@ -6,7 +6,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 // @ts-expect-error Source-only recovery policy.
-import { RECOVERY_022 as fixed, RELEASE_TOPOLOGY, SPLIT_RELEASE_JOBS, dispatchSelector, selectAcceptedArtifact } from "../scripts/release-recovery-policy.mjs";
+import { RECOVERY_022 as fixed, PUBLICATION_TOPOLOGY, PUBLICATION_JOBS, dispatchSelector, selectAcceptedArtifact } from "../scripts/release-recovery-policy.mjs";
 // @ts-expect-error Source-only release control.
 import { BOOTSTRAP, resolveReleaseContext, githubRequest } from "../scripts/dsmm-release.mjs";
 // @ts-expect-error Source-only recovery admission.
@@ -54,7 +54,7 @@ const absent = async () => new Response(null, { status: 404 });
 
 test("fixed recovery resolution separates product source, control and stable cross-job identity", () => {
   const c = context(); assert.equal(c.mode, "recovery-022"); assert.equal(c.releaseSha, fixed.releaseSha);
-  assert.equal(c.provenance, true); assert.equal(c.releaseTopology, RELEASE_TOPOLOGY);
+  assert.equal(c.provenance, true); assert.equal(c.releaseTopology, PUBLICATION_TOPOLOGY);
   assert.notEqual(c.controlSha, c.releaseSha); assert.equal(c.workflow.sha, c.eventSha);
   assert.ok(!Object.keys(c).some(key => /root|path|absence|directory/iu.test(key)));
   for (const change of [{ peeledSha: "b".repeat(40) }, { controlSha: fixed.releaseSha, workflowSha: fixed.releaseSha, eventSha: fixed.releaseSha },
@@ -65,7 +65,7 @@ test("fixed recovery resolution separates product source, control and stable cro
   for (const inputs of [undefined, {}, { recovery: "" }]) {
     assert.equal(dispatchSelector(inputs), null);
     const bootstrap = resolveReleaseContext({ ...contextInput(), inputs, peeledSha: BOOTSTRAP.releaseSha, packageVersion: BOOTSTRAP.version });
-    assert.equal(bootstrap.mode, "bootstrap"); assert.equal(bootstrap.provenance, false); assert.equal(bootstrap.releaseTopology, RELEASE_TOPOLOGY);
+    assert.equal(bootstrap.mode, "bootstrap"); assert.equal(bootstrap.provenance, false); assert.equal(bootstrap.releaseTopology, PUBLICATION_TOPOLOGY);
   }
   for (const inputs of [null, [], { recovery: true }, { recovery: "unpublished-0.2.1" }, { source: fixed.releaseSha }]) assert.throws(() => dispatchSelector(inputs));
 });
@@ -177,9 +177,9 @@ function condition(job: any, facts: any, results: Record<string, string>, cancel
 
 test("workflow gates tolerate only the selected skipped pair, use direct needs, and keep permissions statically isolated", () => {
   const w = workflow(), j = w.jobs;
-  assert.deepEqual(Object.keys(j).sort(), [...SPLIT_RELEASE_JOBS].sort());
+  assert.deepEqual(Object.keys(j).sort(), [...PUBLICATION_JOBS].sort());
   const facts = { "github.event_name": "workflow_dispatch", "github.ref": "refs/heads/master", "inputs.recovery": fixed.selector };
-  const recoveryResults = { "import-bootstrap": "skipped", prepare: "skipped", publish: "skipped", "prepare-recovery-022": "success", "publish-recovery-022": "success", verify: "success" };
+  const recoveryResults = { "import-bootstrap": "skipped", prepare: "skipped", publish: "skipped", "prepare-recovery-022": "success", "publish-recovery-022": "success" };
   const normalResults = { ...recoveryResults, prepare: "success", publish: "success", "prepare-recovery-022": "skipped", "publish-recovery-022": "skipped" };
   assert.equal(condition(j["import-bootstrap"], facts, {}), false);
   assert.equal(condition(j.prepare, facts, recoveryResults), false);
@@ -190,7 +190,7 @@ test("workflow gates tolerate only the selected skipped pair, use direct needs, 
   assert.equal(condition(j.prepare, ordinaryFacts, { ...normalResults, "import-bootstrap": "success" }), true);
   assert.equal(condition(j.prepare, { ...ordinaryFacts, "github.event_name": "push", "github.ref": `refs/tags/${fixed.tag}` }, normalResults), true);
   assert.equal(condition(j["prepare-recovery-022"], ordinaryFacts, {}), false);
-  for (const name of ["verify", "github-release"]) {
+  for (const name of ["github-release"]) {
     assert.equal(condition(j[name], facts, recoveryResults), true);
     assert.equal(condition(j[name], { ...facts, "inputs.recovery": "" }, normalResults), true);
     assert.equal(condition(j[name], facts, normalResults), false);
@@ -218,7 +218,7 @@ test("workflow gates tolerate only the selected skipped pair, use direct needs, 
       assert.ok(!command.includes("--clobber"), "assets cannot be overwritten");
     }
   }
-  for (const name of ["publish", "publish-recovery-022", "verify", "github-release"]) {
+  for (const name of ["publish", "publish-recovery-022", "github-release"]) {
     const steps = j[name].steps, selected = steps.findIndex((step: any) => step.id === "selected");
     const download = steps.findIndex((step: any) => step.uses?.startsWith("actions/download-artifact@"));
     assert.ok(selected >= 0 && selected < download);
@@ -235,7 +235,7 @@ test("workflow gates tolerate only the selected skipped pair, use direct needs, 
 });
 
 test("recovery workflow builds, verifies and packs original source, with distinct pinned control and source checkouts", () => {
-  const job = workflow().jobs["prepare-recovery-022"];
+  const releaseWorkflow = workflow(), job = releaseWorkflow.jobs["prepare-recovery-022"];
   const checkouts = job.steps.filter((step: any) => step.uses?.startsWith("actions/checkout@"));
   assert.deepEqual(checkouts.map((step: any) => [step.with.path, step.with.ref]), [["control", "${{ github.workflow_sha }}"], ["source", fixed.releaseSha]]);
   let packs = 0, sourceChecks = 0;

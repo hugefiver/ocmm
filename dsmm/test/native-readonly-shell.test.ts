@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+let bashDirectory: string | undefined;
+if (process.platform === "win32") {
+  const git = spawnSync("git.exe", ["--exec-path"], { encoding: "utf8" });
+  assert.ifError(git.error);
+  assert.equal(git.status, 0, git.stderr);
+  const bash = resolve(git.stdout.trim(), "../../..", "bin/bash.exe");
+  assert.ok(existsSync(bash), "real shell coverage requires native Bash from the installed Git distribution");
+  bashDirectory = dirname(bash);
+}
 
 // The process owner removes native-addon caches only after the SDK releases its DLLs.
 for (const managed of [false, true]) {
@@ -14,13 +24,17 @@ for (const managed of [false, true]) {
     `native readonly own-layer-only ${kind} bash/pwsh composes without masking local tools and preserves runtime denial`,
     `native Full Access readonly child blocks real ${kind} bash/pwsh before execution, direct and AgentLoop`,
     `native Full Access readonly Root/DW-off/scope-off rejects ${kind} shell; ordinary switchback and unknown-policy controls execute`,
-    `retained, reinstalled and cold-reopened reviewer keeps real ${kind} shell denial from its original readonly ceiling`
+    `live reviewer keeps real ${kind} shell denial across parent off and future defaults; retired owner cannot recover it`
   ]) {
     test(name, t => {
       const root = mkdtempSync(join(tmpdir(), "dsmm-readonly-shell-home-")), owner = randomUUID();
       writeFileSync(join(root, ".run-owner"), owner, { flag: "wx" });
       try {
         const env = { ...process.env };
+        if (bashDirectory !== undefined) {
+          const pathKey = Object.keys(env).find(key => key.toLowerCase() === "path") ?? "PATH";
+          env[pathKey] = `${bashDirectory}${delimiter}${env[pathKey] ?? ""}`;
+        }
         for (const key of ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "APPDATA", "LOCALAPPDATA", "DSH_HOME", "DSH_AGENTS_HOME"]) {
           const directory = join(root, key); mkdirSync(directory); env[key] = directory;
         }

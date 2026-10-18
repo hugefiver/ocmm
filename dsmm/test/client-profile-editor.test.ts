@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { createContext, runInContext } from "node:vm";
+import { createContext, runInContext, runInThisContext } from "node:vm";
 import { setImmediate } from "node:timers/promises";
 import test from "node:test";
 import { parse } from "jsonc-parser";
-import { ProfilesController } from "../lib/client/controller.js";
-import { editStructuredPath, moveFallback, structuredDocument } from "../lib/client/structured.js";
-import { sessionProfileLabels } from "../lib/client/session-labels.js";
-import { en } from "../lib/client/locales.js";
+import type { ProfilesController as Controller } from "../src/client/controller.js";
+import { editStructuredPath, moveFallback, structuredDocument } from "../src/client/structured.ts";
+import { sessionProfileLabels } from "../src/client/session-labels.ts";
+import { en } from "../src/client/locales.ts";
+import { configurationVersionState, writableSelectionVersion } from "../src/client/configuration-display.ts";
 import { isValidElement } from "react";
 import type { ReactElement } from "react";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { MenuEntry } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { ProfilesActions, ProfilesViewSnapshot } from "../lib/client/controller.js";
-import type { DsmmProfilesRemote } from "../lib/profile-remote.js";
-import type { ProfileSnapshot, SessionProfileSnapshot, SessionProfileSelectRequest } from "../lib/profile-types.js";
+import type { ProfilesActions, ProfilesViewSnapshot } from "../src/client/controller.js";
+import type { DsmmProfilesRemote } from "../src/profile-remote.js";
+import type { ProfileSnapshot, SessionProfileSnapshot, SessionProfileSelectRequest } from "../src/profile-types.js";
 import type { RemoteResult } from "@deepseek-ai/dsh-typert-protocol";
 import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import type { ModelCatalog } from "@deepseek-ai/dsh-api-session-controller";
@@ -24,10 +24,18 @@ import type { SessionSelectModelRequest } from "@deepseek-ai/dsh-api-session-con
 import type { SessionEventSource } from "@deepseek-ai/dsh-api-session-controller/client";
 import type { SessionEventWindow } from "@deepseek-ai/dsh-api-session-controller/client";
 import { Session, SessionId } from "@deepseek-ai/dsh-session";
-import { isProfileId } from "../lib/profile-remote.js";
+import { isProfileId } from "../src/profile-remote.ts";
 import { build } from "esbuild";
 import type { EditableChoiceProps } from "../src/client/EditableChoice.js";
+import type { SessionScope } from "../src/client/SessionProfiles.js";
 import { editStructuredPath as editCurrentPath, moveFallback as moveCurrentFallback, structuredDocument as currentDocument } from "../src/client/structured.js";
+
+const controllerBundle = await build({ entryPoints: [fileURLToPath(new URL("../src/client/controller.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "cjs", external: ["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-ui-primitives", "jsonc-parser"] });
+const sourceRequire = createRequire(import.meta.url), controllerModule = { exports: {} as { ProfilesController: typeof Controller } };
+runInThisContext(`(function(require,module,exports){${controllerBundle.outputFiles[0].text}\n})`)(
+  (id: string) => id === "@deepseek-ai/dsh-client-ui-primitives" ? { Button: NativeProfileButton } : sourceRequire(id), controllerModule, controllerModule.exports);
+const { ProfilesController } = controllerModule.exports;
+type ProfilesController = Controller;
 
 const revision = "a".repeat(64), otherRevision = "b".repeat(64);
 const content = `{
@@ -48,7 +56,8 @@ const content = `{
 }\n`;
 const snapshot: ProfileSnapshot = { profiles: [{ id: "p", label: "P", revision }], selectedId: null, appliedRevision: null, selectionRevision: "absent" };
 function session(id: string, epoch = "epoch-1"): SessionProfileSnapshot {
-  return { sessionId: id, globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, selection: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, scope: "global-default", admissionEpoch: epoch, switchAllowed: true };
+  return { sessionId: id, globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, selection: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, scope: "global-default", admissionEpoch: epoch, switchAllowed: true,
+    canSelectModel: true, canToggleMode: true, canApplyOverlay: true };
 }
 function success<T>(value: T): RemoteResult<T> { return { ok: true, value }; }
 const translate: PropsLocale<"settings.dsmm-profiles">["t"] = (key, values) => {
@@ -103,22 +112,20 @@ type HeaderComponent = (props: HeaderInput) => unknown;
 function NativeProfileMenu() { throw new Error("Tree contract only; native Menu browser behavior is verified separately"); }
 function NativeProfileButton() { throw new Error("Tree contract only; native Button is not rendered in this fixture"); }
 function NativeProfileIcon() { throw new Error("Tree contract only; native SVG is not rendered in this fixture"); }
-async function nativeHeaderComponent(name: "SessionProfiles" | "ProfilesSection" = "SessionProfiles"): Promise<HeaderComponent> {
+async function nativeHeaderComponent(name: "SessionProfiles" | "ProfilesSection" | "SessionScope" = "SessionProfiles"): Promise<HeaderComponent> {
   const require = createRequire(import.meta.url);
-  let factory: ((require: (id: string) => unknown) => { SessionProfiles: HeaderComponent; ProfilesSection: HeaderComponent }) | undefined;
-  const realm = createContext({ TextEncoder, TextDecoder,
-    window: { __ModuleLoader__: { load(row: { factory: typeof factory }) { factory = row.factory; } } },
-  });
-  runInContext(await readFile(new URL("../lib/client.js", import.meta.url), "utf8"), realm);
-  assert.ok(factory);
-  return factory((id) => {
+  const module = { exports: {} as { SessionProfiles: HeaderComponent; ProfilesSection: HeaderComponent; SessionScope: typeof SessionScope } };
+  const sourceRoot = fileURLToPath(new URL("..", import.meta.url));
+  const compiled = await build({ absWorkingDir: sourceRoot, stdin: { resolveDir: sourceRoot, contents: 'export {SessionProfiles,SessionScope} from "./src/client/SessionProfiles.tsx";export {ProfilesSection} from "./src/client/ProfilesSection.tsx";' }, bundle: true, write: false, platform: "node", format: "cjs", external: ["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-ui-primitives", "jsonc-parser"] });
+  const load = (id: string) => {
     // JSX tree contract only, not a renderer/browser substitute. All header
     // behavior runs from the compiled production module and real controller.
     if (id === "react") return { ...require("react"), useId: () => "header-unit", useRef: () => ({ current: null }), useState: () => [false, () => {}], useEffect: () => {} };
     if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button: NativeProfileButton, Menu: NativeProfileMenu, IconBranchOutlineRegular: NativeProfileIcon, Input() { throw new Error("Header tree must not render an editor"); } };
-    assert.equal(id, "react/jsx-runtime");
     return require(id);
-  })[name];
+  };
+  runInContext(compiled.outputFiles[0].text, createContext({ module, exports: module.exports, require: load, TextEncoder, TextDecoder }));
+  return name === "SessionScope" ? props => module.exports.SessionScope({ state: props.readProfileView(), actions: props, t: props.t }) : module.exports[name];
 }
 function headerTree(component: HeaderComponent, controller: ProfilesController, id = controller.store.getSnapshot().currentSessionId): unknown {
   return component({ ...controller.actions, readProfileView: controller.store.getSnapshot, sessionId: id ?? undefined, useProfiles: (select) => select(controller.store.getSnapshot()), t: translate });
@@ -434,9 +441,9 @@ test("session labels keep captured profile A distinct from future global B witho
   f.controller.setSession(captured.sessionId); await settle(f.controller);
   const state = f.controller.store.getSnapshot();
   const labels = sessionProfileLabels(state.session!, translate);
-  assert.ok(labels.admitted.includes(`profile-a (revision ${revision})`));
+  assert.ok(labels.admitted.includes("profile-a")); assert.ok(labels.admitted.includes(en.versionUnknown));
   assert.equal(labels.admitted.includes("profile-b"), false);
-  assert.ok(labels.futureDefault.includes(`profile-b (revision ${otherRevision})`));
+  assert.ok(labels.futureDefault.includes("profile-b")); assert.ok(labels.futureDefault.includes(en.versionUnknown));
   assert.deepEqual(state.session!.selection, { selectedId: null, appliedRevision: null, selectionRevision: "absent" });
   assert.equal(state.sessionChoice, null, "display admission never substitutes the chosen sidecar/CAS target");
   assert.equal(state.editor!.content, draft); assert.equal(state.dirty, true);
@@ -553,11 +560,11 @@ test("header distinguishes unknown captured defaults from explicit baseline and 
 
 test("busy-session menu keeps its trigger inspectable, explains refusal inside and disables mutation rows", async () => {
   const component = await nativeHeaderComponent();
-  const f = fixture({ describeSession: async (id) => success({ ...session(id), switchAllowed: false, switchUnavailableReason: "busy" }) });
+  const f = fixture({ describeSession: async (id) => success({ ...session(id), switchAllowed: false, switchUnavailableReason: "busy", canApplyOverlay: false, applyOverlayUnavailableReason: "busy" }) });
   await f.controller.refresh(); f.controller.setSession("busy-header"); await settle(f.controller);
   const tree = headerTree(component, f.controller);
   assert.equal(menuRowDisabled(tree), true);
-  assert.equal(menuFeedback(tree), "Session is busy.");
+  assert.ok(headerMenu(tree).props.items.some(entry => entry.id === "@overlay-reason" && "text" in entry && entry.text));
   const trigger = elements(tree).find((node) => node.type === NativeProfileButton); assert.ok(trigger); assert.notEqual(trigger.props.disabled, true);
   headerMenu(tree).props.onSelect("p"); await settle(f.controller);
   assert.deepEqual(f.selections, []);
@@ -569,6 +576,109 @@ function appliedWithModel(id: string, model = "profile-main"): SessionProfileSna
     admittedSelection: { selectedId: "p", appliedRevision: revision, selectionRevision: otherRevision },
     profileModel: { provider: "manual-provider", model, reasoningEffort: "exact-profile-effort" } };
 }
+
+test("running native model selection stays available while overlay requires a new session and mode is busy", async () => {
+  const component = await nativeHeaderComponent(), scope = await nativeHeaderComponent("SessionScope");
+  const frame = (id: string): SessionProfileSnapshot => ({ ...appliedWithModel(id), switchAllowed: false,
+    canApplyOverlay: false, applyOverlayUnavailableReason: "new-session-required", canToggleMode: false, toggleModeUnavailableReason: "busy",
+    deepwork: { active: false, explicit: false, locked: false, revision } });
+  const models: SessionSelectModelRequest[] = []; let modes = 0;
+  const f = fixture({ describeSession: async id => success(frame(id)), selectMode: async id => { modes++; return success(frame(id)); } });
+  f.controller.attachModelSelector({ selectModel: async request => { models.push(request); return success({ selected: request }); } });
+  try {
+    await f.controller.refresh(); f.controller.setSession("running-capabilities"); await settle(f.controller);
+    const tree = headerTree(component, f.controller);
+    assert.equal(menuRowDisabled(tree, "p"), true); assert.equal(menuRowDisabled(tree, ""), true);
+    assert.equal(menuRowDisabled(tree, "@mode"), true); assert.equal(menuRowDisabled(tree, "@use-model"), false);
+    for (const id of ["@overlay-reason", "@mode-reason"]) assert.ok(headerMenu(tree).props.items.some(entry => entry.id === id && "text" in entry && entry.text));
+    const nodes = elements(headerTree(scope, f.controller));
+    const buttons = nodes.filter(node => node.type === NativeProfileButton);
+    assert.equal(buttons.find(node => node.props.children === en.headerUseCurrentModel)!.props.disabled, false);
+    for (const label of [en.sessionApply, en.sessionReset]) {
+      const button = buttons.find(node => node.props.children === label)!;
+      assert.equal(button.props.disabled, true);
+      assert.ok(nodes.some(node => node.props.id === button.props["aria-describedby"]));
+    }
+    headerMenu(tree).props.onSelect("p"); headerMenu(tree).props.onSelect("@mode");
+    await f.controller.actions.applySession(); await f.controller.actions.resetSession(); await f.controller.actions.setDeepwork(true);
+    assert.deepEqual(f.selections, []); assert.equal(modes, 0);
+    headerMenu(tree).props.onSelect("@use-model"); await settle(f.controller);
+    assert.equal(models.length, 1); assert.equal(models[0]!.model, "profile-main"); assert.deepEqual(f.selections, []);
+    await f.controller.open("p"); f.controller.actions.setFieldInvalid("maxRetries", true); f.controller.actions.editContent(content);
+    assert.equal(f.controller.store.getSnapshot().dirty, false);
+    assert.equal(menuRowDisabled(headerTree(component, f.controller), "@use-model"), true);
+    await f.controller.actions.useSessionProfileModel(); assert.equal(models.length, 1);
+    f.controller.actions.setFieldInvalid("maxRetries", false);
+    f.controller.actions.editPath(["label"], "Independent save"); await f.controller.save(); await f.controller.apply();
+    assert.ok(f.calls.includes("save")); assert.ok(f.calls.includes("select")); assert.deepEqual(f.selections, []);
+  } finally { f.controller.dispose(); }
+});
+
+test("mode capability is independent of overlay and profile-model capabilities", async () => {
+  const component = await nativeHeaderComponent(); let modes = 0;
+  const frame = (id: string): SessionProfileSnapshot => ({ ...session(id), switchAllowed: false,
+    canApplyOverlay: false, applyOverlayUnavailableReason: "new-session-required", canSelectModel: false, selectModelUnavailableReason: "model-unconfigured",
+    deepwork: { active: false, explicit: false, locked: false, revision } });
+  const f = fixture({ describeSession: async id => success(frame(id)), selectMode: async (id, request) => {
+    modes++; return success({ ...frame(id), deepwork: { active: request.active, explicit: true, locked: false, revision: otherRevision } });
+  } });
+  try {
+    await f.controller.refresh(); f.controller.setSession("independent-mode"); await settle(f.controller);
+    const tree = headerTree(component, f.controller);
+    assert.equal(menuRowDisabled(tree, "@mode"), false); assert.equal(menuRowDisabled(tree, "@use-model"), true); assert.equal(menuRowDisabled(tree, "p"), true);
+    headerMenu(tree).props.onSelect("@mode"); await settle(f.controller);
+    assert.equal(modes, 1); assert.equal(f.controller.store.getSnapshot().session!.deepwork!.active, true); assert.deepEqual(f.selections, []);
+  } finally { f.controller.dispose(); }
+});
+
+test("missing action capabilities fail closed despite a permissive legacy overlay flag", async () => {
+  const component = await nativeHeaderComponent(); let modes = 0, models = 0;
+  const frame = (id: string) => {
+    const value = { ...appliedWithModel(id), deepwork: { active: false, explicit: false, locked: false, revision } };
+    for (const key of ["canApplyOverlay", "canSelectModel", "canToggleMode"]) Reflect.deleteProperty(value, key);
+    return value;
+  };
+  const f = fixture({ describeSession: async id => success(frame(id)), selectMode: async id => { modes++; return success(frame(id)); } });
+  f.controller.attachModelSelector({ selectModel: async request => { models++; return success({ selected: request }); } });
+  try {
+    await f.controller.refresh(); f.controller.setSession("unknown-capabilities"); await settle(f.controller);
+    const tree = headerTree(component, f.controller);
+    for (const id of ["p", "", "@use-model", "@mode"]) assert.equal(menuRowDisabled(tree, id), true);
+    await f.controller.actions.applySession(); await f.controller.actions.resetSession(); await f.controller.actions.useSessionProfileModel(); await f.controller.actions.setDeepwork(true);
+    assert.deepEqual(f.selections, []); assert.equal(modes, 0); assert.equal(models, 0);
+  } finally { f.controller.dispose(); }
+});
+
+test("model-only reread rechecks capability and serializes competing requests", async () => {
+  const accepted = deferred<RemoteResult<SessionProfileSnapshot>>(); let hold = false, reads = 0, models = 0;
+  const frame = (id: string): SessionProfileSnapshot => ({ ...appliedWithModel(id), switchAllowed: false, canApplyOverlay: false, applyOverlayUnavailableReason: "new-session-required" });
+  const f = fixture({ describeSession: async id => { reads++; return hold ? accepted.promise : success(frame(id)); } });
+  f.controller.attachModelSelector({ selectModel: async request => { models++; return success({ selected: request }); } });
+  try {
+    f.controller.setSession("withdrawn-capability"); await settle(f.controller);
+    hold = true; const selecting = f.controller.actions.useSessionProfileModel();
+    await f.controller.actions.useSessionProfileModel(); await f.controller.actions.applySession(); await f.controller.actions.resetSession();
+    assert.equal(reads, 2); assert.deepEqual(f.selections, []);
+    accepted.resolve(success({ ...frame("withdrawn-capability"), canSelectModel: false, selectModelUnavailableReason: "maintenance" })); await selecting;
+    assert.equal(models, 0); assert.equal(f.controller.store.getSnapshot().sessionIssue?.code, "maintenance");
+    assert.equal(f.controller.store.getSnapshot().sessionNotice, null);
+  } finally { f.controller.dispose(); }
+});
+
+test("model-only late reread cannot dispatch after session identity changes or disposal", async () => {
+  for (const boundary of ["session", "dispose"] as const) {
+    const accepted = deferred<RemoteResult<SessionProfileSnapshot>>(); let hold = false, models = 0;
+    const f = fixture({ describeSession: async id => hold && id === "old-model" ? accepted.promise : success(appliedWithModel(id)) });
+    f.controller.attachModelSelector({ selectModel: async request => { models++; return success({ selected: request }); } });
+    f.controller.setSession("old-model"); await settle(f.controller); hold = true;
+    const selecting = f.controller.actions.useSessionProfileModel();
+    if (boundary === "session") { f.controller.setSession("new-model"); await settle(f.controller); } else f.controller.dispose();
+    const before = f.controller.store.getSnapshot();
+    accepted.resolve(success(appliedWithModel("old-model"))); await selecting;
+    assert.equal(models, 0); assert.equal(f.controller.store.getSnapshot(), before);
+    f.controller.dispose();
+  }
+});
 
 test("normal switches, profile saves, model-field edits and session reads never select a native model", async () => {
   const calls: SessionSelectModelRequest[] = [];
@@ -887,4 +997,70 @@ test("session conflicts, busy sessions, invalid form fields and dirty drafts ref
   await f.controller.actions.applySession();
   assert.equal(f.controller.store.getSnapshot().editor!.content, dirty);
   f.controller.dispose();
+});
+
+test("saved profile state uses recorded source version and keeps missing source metadata explicitly unknown", async () => {
+  const component = await nativeHeaderComponent("ProfilesSection");
+  const observed = "stat-v1-123456789-123456790", changed = "stat-v1-123456791-123456792";
+  let sourceRevision: string | undefined = observed;
+  const f = fixture({ describe: async () => success({ ...snapshot, profiles: [{ id: "p", revision: observed }], selectedId: "p", appliedRevision: "snapshot-v1-00000000-0000-4000-8000-000000000001", selectionRevision: changed, ...(sourceRevision === undefined ? {} : { sourceRevision }) }),
+    read: async id => success({ id, content, revision: observed }) });
+  try {
+    await f.controller.refresh(); await f.controller.open("p");
+    const status = () => elements(headerTree(component, f.controller)).find(node => node.props["data-dsmm-editor-state"] !== undefined)!.props.children;
+    assert.equal(status(), en.savedApplied);
+    sourceRevision = changed; await f.controller.refresh(); assert.equal(status(), en.savedNotApplied);
+    sourceRevision = undefined; await f.controller.refresh(); assert.equal(status(), en.savedRelationshipUnknown);
+    assert.equal(f.calls.includes("select"), false); assert.equal(f.controller.store.getSnapshot().dirty, false);
+  } finally { f.controller.dispose(); }
+});
+
+test("version presentation exposes metadata state while CAS keeps its actual observation token", () => {
+  const observed = "stat-v1-123456789-123456790", pin = "snapshot-v1-00000000-0000-4000-8000-000000000001";
+  assert.equal(configurationVersionState(observed), "versionObserved"); assert.equal(writableSelectionVersion(observed), true);
+  assert.equal(configurationVersionState(revision), "versionObserved"); assert.equal(configurationVersionState("native-v1-17"), "versionObserved");
+  assert.equal(configurationVersionState("absent"), "versionAbsent"); assert.equal(writableSelectionVersion("absent"), true);
+  assert.equal(configurationVersionState(null), "versionUnknown"); assert.equal(configurationVersionState("unavailable"), "versionUnknown");
+  assert.equal(configurationVersionState(pin), "versionUnknown"); assert.equal(writableSelectionVersion(pin), false); assert.equal(writableSelectionVersion("unavailable"), false);
+});
+
+test("committed session selection awaiting reread blocks profile and mode replay even with an observed stat version", async () => {
+  const observed = "stat-v1-123456789-123456790", pin = "snapshot-v1-00000000-0000-4000-8000-000000000001";
+  let refreshRequired = true, modeWrites = 0; const selections: SessionProfileSelectRequest[] = [];
+  const frame = (id: string): SessionProfileSnapshot => ({ ...session(id, "c".repeat(64)),
+    selection: { selectedId: "p", appliedRevision: pin, selectionRevision: observed, sourceRevision: observed, ...(refreshRequired ? { refreshRequired: true } : {}) },
+    deepwork: { active: false, explicit: false, locked: false, revision } });
+  const f = fixture({ describe: async () => success({ ...snapshot, profiles: [{ id: "p", revision: observed }] }),
+    describeSession: async id => success(frame(id)), selectSession: async (id, request) => { selections.push(request); return success(frame(id)); },
+    selectMode: async (id, request) => { modeWrites++; return success({ ...frame(id), deepwork: { active: request.active, explicit: true, locked: false, revision: otherRevision } }); } });
+  try {
+    await f.controller.refresh(); f.controller.setSession("pending-selection"); await settle(f.controller);
+    f.controller.actions.chooseSessionProfile("p"); await f.controller.actions.applySession(); await f.controller.actions.setDeepwork(true);
+    assert.equal(selections.length, 0); assert.equal(modeWrites, 0);
+    const component = await nativeHeaderComponent(); const tree = headerTree(component, f.controller);
+    assert.equal(menuRowDisabled(tree, "p"), true); assert.equal(menuRowDisabled(tree, "@mode"), true);
+    refreshRequired = false; await f.controller.refreshSession();
+    refreshRequired = true; await f.controller.actions.applySession({ useProfileModel: true });
+    assert.equal(selections.length, 1); assert.equal(f.controller.store.getSnapshot().sessionIssue, null); assert.equal(f.controller.store.getSnapshot().session?.selection.refreshRequired, true);
+    await f.controller.actions.setDeepwork(true); assert.equal(modeWrites, 0);
+    refreshRequired = false; await f.controller.refreshSession();
+    await f.controller.actions.applySession(); await f.controller.actions.setDeepwork(true);
+    assert.equal(selections.length, 2); assert.equal(selections[0]!.expectedRevision, observed); assert.equal(selections[0]!.expectedSelectionRevision, observed); assert.equal(modeWrites, 1);
+  } finally { f.controller.dispose(); }
+});
+
+test("committed profile save with unavailable version requires explicit reread and cannot replay Save or Apply", async () => {
+  let stored = content, storedRevision = revision, writes = 0;
+  const f = fixture({ read: async id => success({ id, content: stored, revision: storedRevision }), save: async request => {
+    writes++; stored = request.content; storedRevision = otherRevision;
+    return success({ id: request.id, content: stored, revision: "unavailable", refreshRequired: true });
+  } });
+  try {
+    await f.controller.refresh(); await f.controller.open("p"); f.controller.actions.editPath(["label"], "Committed source"); await f.controller.save();
+    const accepted = f.controller.store.getSnapshot(); assert.equal(accepted.notice?.key, "saved"); assert.equal(accepted.dirty, false); assert.equal(accepted.editor?.refreshRequired, true);
+    f.controller.actions.editPath(["label"], "Do not replay"); await f.controller.save(); await f.controller.apply();
+    assert.equal(writes, 1); assert.equal(f.calls.includes("select"), false); assert.equal(f.controller.store.getSnapshot().editor?.content, stored);
+    await f.controller.reload(); assert.equal(f.controller.store.getSnapshot().editor?.refreshRequired, undefined);
+    await f.controller.apply(); assert.equal(f.calls.includes("select"), true); assert.equal(writes, 1);
+  } finally { f.controller.dispose(); }
 });

@@ -17,6 +17,7 @@ export interface SourceRoleContent {
     terminalArtifact: string;
 }
 export declare const SOURCE_ROLE_CATALOG: readonly SourceRoleContent[];
+export declare function buildRoleIdentity(role: Pick<SourceRoleContent, "name" | "id">): string;
 export declare function splitCategory(text: string): {
     base: string;
     calibrations: Map<string, string>;

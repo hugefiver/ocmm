@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import type { DshCommandInvocation, DshCommandsRegistry, DshContext } from "../lib/dsh-types.js";
 import { DSMM_STATUS_COMMAND, parseDeepworkCommandInput, registerDeepworkCommand, registerDsmmStatusCommand } from "../lib/commands.js";
 import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import type { DsmmSettingsGetter } from "../lib/settings.js";
 import { liveRolePolicyIdentity, pinRoleRoute } from "../lib/role-routing.js";
 import { createDsmmStatusSnapshot, formatDsmmStatus } from "../lib/status.js";
-import { DEEPWORK_MODE_EVENT, DeepworkModeController } from "../lib/state.js";
+import { DeepworkModeController } from "../lib/state.js";
 
 type RegisteredCommand = Parameters<DshCommandsRegistry["register"]>[0];
 
@@ -77,13 +78,11 @@ test("registerDsmmStatusCommand is optional and resolves commands through get wi
 
 test("registered status command reads live settings and has no status-only session side effects", async () => {
   const commands: RegisteredCommand[] = [];
-  const events: Array<{ type: string; data?: unknown }> = [];
-  const appended: unknown[] = [];
+  const session = Session.create(SessionId("status-command"));
   const steered: unknown[] = [];
   let settingsCalls = 0;
   let currentSettings = resolveConfig({
     defaultActive: false,
-    deepseekV4ProCalibration: "auto",
     runtimeRecovery: {
       enabled: true,
       fallbackRoutes: [{ provider: "first", model: "first-model" }],
@@ -93,13 +92,7 @@ test("registered status command reads live settings and has no status-only sessi
   const controller = new DeepworkModeController({});
   const agent: DshCommandInvocation["agent"] = {
     async runMaintenance(task) { return task(new AbortController().signal); },
-    session: {
-      events,
-      append(type, data) {
-        events.push({ type, data });
-        appended.push({ type, data });
-      }
-    },
+    session,
     steer(message) {
       steered.push(message);
     }
@@ -115,7 +108,7 @@ test("registered status command reads live settings and has no status-only sessi
   const command = commands.find((candidate) => candidate.name === DSMM_STATUS_COMMAND);
   assert.ok(command);
 
-  const humanBaseline = { appended: appended.length, steered: steered.length, events: events.length };
+  const humanBaseline = { steered: steered.length, events: session.snapshotEvents() };
   const expectedHuman = formatDsmmStatus(createDsmmStatusSnapshot({
     agent,
     settings: currentSettings,
@@ -124,12 +117,11 @@ test("registered status command reads live settings and has no status-only sessi
   const human = await command.handler({ rawInput: "   ", agent });
 
   assert.deepEqual(human, { kind: "success", text: expectedHuman });
-  assert.deepEqual({ appended: appended.length, steered: steered.length, events: events.length }, humanBaseline);
+  assert.deepEqual({ steered: steered.length, events: session.snapshotEvents() }, humanBaseline);
 
   await controller.select(agent, true, currentSettings.defaultActive);
   currentSettings = resolveConfig({
     defaultActive: true,
-    deepseekV4ProCalibration: "strict",
     runtimeRecovery: {
       enabled: true,
       fallbackRoutes: [
@@ -139,19 +131,17 @@ test("registered status command reads live settings and has no status-only sessi
       idleContinuation: { enabled: true, maxContinuations: 7 }
     }
   });
-  const jsonBaseline = { appended: appended.length, steered: steered.length, events: events.length };
+  const jsonBaseline = { steered: steered.length, events: session.snapshotEvents() };
   const json = await command.handler({ rawInput: "json", agent });
 
   assert.equal(json.kind, "success");
   const snapshot = JSON.parse(json.text ?? "") as ReturnType<typeof createDsmmStatusSnapshot>;
   assert.equal(snapshot.mode.active, true);
   assert.equal(snapshot.effectiveSettings.defaultActive, true);
-  assert.equal(snapshot.effectiveSettings.deepseekV4ProCalibration, "strict");
   assert.equal(snapshot.runtimeRecovery.fallbackRouteCount, 0);
   assert.equal(snapshot.effectiveSettings.runtimeRecovery.fallbackRoutes.length, 2, "declared profile routes remain available without implying root switches");
-  assert.equal(snapshot.calibration.action, "native-owned");
   assert.deepEqual(snapshot.runtimeRecovery.idleContinuation, { enabled: true, maxContinuations: 7 });
-  assert.deepEqual({ appended: appended.length, steered: steered.length, events: events.length }, jsonBaseline);
+  assert.deepEqual({ steered: steered.length, events: session.snapshotEvents() }, jsonBaseline);
   assert.equal(settingsCalls, 2);
 });
 
@@ -229,18 +219,19 @@ test("registered command name follows settings.modeName", () => {
 
 test("registered command turns mode on and steers non-empty input", async () => {
   const command = captureCommand();
-  const appended: unknown[] = [];
+  const session = Session.create(SessionId("mode-on-command"));
   const steered: unknown[] = [];
   const result = await command.handler({
     rawInput: " inspect repo",
     agent: {
       async runMaintenance(task) { return task(new AbortController().signal); },
-      session: { events: [], append: (type, payload) => appended.push({ type, payload }) },
+      session,
       steer: (message) => steered.push(message)
     }
   } satisfies DshCommandInvocation);
 
-  assert.deepEqual(appended, [{ type: DEEPWORK_MODE_EVENT, payload: { active: true } }]);
+  assert.deepEqual(session.snapshotEvents().map(({ type, data }) => ({ type, data })), [{ type: "plugin:dsmm/mode", data: { active: true } }]);
+  assert.equal(new DeepworkModeController({}).active({ session }, false), true);
   assert.equal(steered.length, 1);
   assert.deepEqual(steered[0], {
     id: (steered[0] as { id: unknown }).id,
@@ -253,31 +244,33 @@ test("registered command turns mode on and steers non-empty input", async () => 
 
 test("registered command turns mode off without steering", async () => {
   const command = captureCommand();
-  const appended: unknown[] = [];
+  const session = Session.create(SessionId("mode-off-command"));
   const steered: unknown[] = [];
   const result = await command.handler({
     rawInput: " off",
     agent: {
       async runMaintenance(task) { return task(new AbortController().signal); },
-      session: { events: [], append: (type, payload) => appended.push({ type, payload }) },
+      session,
       steer: (message) => steered.push(message)
     }
   } satisfies DshCommandInvocation);
 
-  assert.deepEqual(appended, [{ type: DEEPWORK_MODE_EVENT, payload: { active: false } }]);
+  assert.deepEqual(session.snapshotEvents().map(({ type, data }) => ({ type, data })), [{ type: "plugin:dsmm/mode", data: { active: false } }]);
+  assert.equal(new DeepworkModeController({}).active({ session }, false), false);
   assert.equal(steered.length, 0);
   assert.deepEqual(result, { kind: "success", text: "Leaving deepwork mode." });
 });
 
 test("registered command can turn off a default-active mode", async () => {
   const command = captureCommand({ ...DEFAULT_DSMM_SETTINGS, defaultActive: true });
-  const appended: unknown[] = [];
+  const session = Session.create(SessionId("default-active-off-command"));
   const result = await command.handler({
     rawInput: " off",
-    agent: { session: { events: [], append: (type, payload) => appended.push({ type, payload }) },
+    agent: { session,
       async runMaintenance(task) { return task(new AbortController().signal); } }
   } satisfies DshCommandInvocation);
 
-  assert.deepEqual(appended, [{ type: DEEPWORK_MODE_EVENT, payload: { active: false } }]);
+  assert.deepEqual(session.snapshotEvents().map(({ type, data }) => ({ type, data })), [{ type: "plugin:dsmm/mode", data: { active: false } }]);
+  assert.equal(new DeepworkModeController({}).active({ session }, true), false);
   assert.deepEqual(result, { kind: "success", text: "Leaving deepwork mode." });
 });

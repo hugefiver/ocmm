@@ -5,7 +5,6 @@ import { DSMM_ROLES, DSMM_ROLE_IDS, rolePluginRows } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { enabledSkillNames } from "./skills.js";
 import type { DsmmSettings } from "./settings.js";
-import { isRootRoleEnabled } from "./settings.js";
 import { allowedRoleChildren, readonlyRoleTool, roleFromToolName, READONLY_ROLE_DENIED_TOOLS } from "./role-policy.js";
 import type { PreToolDecision, ToolExecution } from "@deepseek-ai/dsh-tools";
 import { nativeStandingFullAccess } from "./permission-native-access.js";
@@ -45,7 +44,7 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
     if (registry === undefined) throw new Error("dsmm requires the native DSH agentPresets registry");
     const settings = getSettings();
     const enabled = DSMM_ROLE_IDS.filter((id) => settings.modules.deepwork.enabled && settings.roles[id]);
-    const active = DSMM_ROLES.filter((role) => isRootRoleEnabled(settings, role.id));
+    const active = DSMM_ROLES.filter((role) => enabled.includes(role.id));
     const disposers: Array<() => Promise<void>> = [];
     try {
       for (const role of active) {
@@ -147,6 +146,7 @@ export function registerRolePresets(ctx: DshContext, getSettings: () => DsmmSett
   };
 
   if (ctx.inject !== undefined) {
+    if (ctx.get?.("agentPresets") !== undefined) return install(ctx);
     return Promise.resolve(ctx.inject(["agentPresets"], install)).then(() => undefined);
   } else if (ctx.get?.("agentPresets") !== undefined || (ctx as DshContext & { agentPresets?: NativePresetRegistry }).agentPresets !== undefined) {
     void install(ctx).catch((error: unknown) => ctx.logger?.warn(`dsmm native preset registration failed: ${String(error)}`));

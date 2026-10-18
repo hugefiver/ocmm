@@ -1,127 +1,94 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
-import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
-import { DeploymentController } from "./deployment-controller.js";
-import { at, enumValues, equal, inspectorPaths, mergeLayer, parseAdvanced, validateEditorValue, visibleDeploymentPath } from "./deployment-data.js";
-import { deploymentFieldLabels } from "./deployment-locales.js";
-function label(path, t) {
-    const key = path.at(-1);
-    const item = deploymentFieldLabels[key];
-    return item === undefined ? key.replace(/^dsmm-/u, "").replace(/([a-z])([A-Z])/gu, "$1 $2") : item[t("global") === "DSMM 全局配置" ? 1 : 0];
-}
-function displayValue(value, t) {
-    if (value === undefined)
-        return t("unknown");
-    if (typeof value === "boolean")
-        return t(value ? "on" : "off");
-    const text = JSON.stringify(value);
-    return text.length > 120 ? `${text.slice(0, 120)}…` : text;
-}
-function AdvancedField({ schema, path, value, inherited, upper, reset, disabled, onChange, setInvalid, t }) {
-    const id = useId(), name = path.join(".");
-    const serialized = value === undefined ? "" : JSON.stringify(value, null, 2);
-    const [text, setText] = useState(serialized);
-    const [invalid, setLocalInvalid] = useState(false);
-    useEffect(() => { setText(serialized); setLocalInvalid(false); setInvalid(name, false); }, [serialized, reset]);
-    return _jsxs("details", { className: "dsmm-deployment-group", children: [_jsxs("summary", { children: [label(path, t), " \u00B7 ", t("advanced"), " ", _jsx("code", { children: name })] }), _jsxs("div", { className: "dsmm-field", children: [_jsxs("label", { htmlFor: id, children: [label(path, t), " \u00B7 ", t("advanced"), " ", _jsx("code", { children: name })] }), _jsx("p", { className: "dsmm-hint", id: `${id}-hint`, children: t("advancedHint") }), _jsx("textarea", { id: id, rows: 6, maxLength: 32768, value: text, disabled: disabled, "aria-invalid": invalid, "aria-describedby": `${id}-hint ${id}-error`, onChange: event => {
-                            const next = event.currentTarget.value;
-                            setText(next);
-                            let parsed, valid = true;
-                            try {
-                                parsed = parseAdvanced(next);
-                                const candidate = parsed === undefined ? inherited : mergeLayer(inherited, parsed);
-                                valid = parsed === undefined || validateEditorValue(parsed, schema, true) && validateEditorValue(upper === undefined ? candidate : mergeLayer(candidate, upper), schema);
-                            }
-                            catch {
-                                valid = false;
-                            }
-                            setLocalInvalid(!valid);
-                            setInvalid(name, !valid);
-                            if (valid)
-                                onChange(parsed);
-                        } }), _jsx("p", { id: `${id}-error`, className: "dsmm-hint", children: invalid ? t("invalid") : "" }), _jsxs("details", { children: [_jsxs("summary", { children: [t("advanced"), " \u00B7 schema"] }), _jsx("pre", { children: JSON.stringify(schema, null, 2) })] })] })] });
-}
-function ScalarField({ schema, path, controller, disabled, inherited, invalid, t }) {
+import { useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
+import { deploymentWorkspace } from "./deployment-workspace.js";
+import { CONFIG_MODULES, moduleFields, moduleFor, moduleTitle } from "./deployment-modules.js";
+import { at, inspectorPaths, scopeSchema, visibleDeploymentPath } from "./deployment-data.js";
+import { Field, displayValue, permissionText } from "./DeploymentFields.js";
+import { configurationVersionState } from "./configuration-display.js";
+import { PermissionsPanel } from "./PermissionsPanel.js";
+import { permissionEn } from "./permission-locales.js";
+export function ScopeSave({ controller, workspace, refreshOnly = false, t }) {
     const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-    const value = at(state.draft, path), name = path.join("."), id = useId();
-    const [text, setText] = useState(String(value ?? inherited ?? ""));
-    const [bad, setBad] = useState(false);
-    useEffect(() => { setText(String(value ?? inherited ?? "")); setBad(false); invalid(name, false); }, [value, inherited, state.snapshot]);
-    return _jsxs(_Fragment, { children: [_jsxs("label", { htmlFor: id, children: [label(path, t), " ", _jsx("code", { children: name })] }), _jsxs("div", { className: "dsmm-actions", children: [_jsx(Input, { className: "dsmm-input", id: id, type: "text", inputMode: schema.type === "number" ? "decimal" : undefined, value: text, disabled: disabled, "aria-invalid": bad, "aria-describedby": `${id}-error`, onChange: event => {
-                            const raw = event.currentTarget.value;
-                            setText(raw);
-                            const candidate = schema.type === "number" ? Number(raw) : raw;
-                            const valid = (schema.type !== "number" || raw.trim() !== "") && validateEditorValue(candidate, schema);
-                            setBad(!valid);
-                            invalid(name, !valid);
-                            if (valid)
-                                controller.edit(path, candidate);
-                        } }), _jsx(Button, { type: "button", variant: "outline", disabled: disabled || value === undefined && !bad, onClick: () => { setText(String(inherited ?? "")); setBad(false); invalid(name, false); controller.edit(path, undefined); }, children: t("inherit") })] }), _jsxs("p", { id: `${id}-error`, className: "dsmm-hint", children: [bad ? t("invalid") : "", schema.type === "number" && (schema.min !== undefined || schema.max !== undefined) ? ` ${schema.min ?? "—"} – ${schema.max ?? "—"}` : ""] })] });
+    const pending = [...new Set(controller.pendingPaths().map(moduleFor))];
+    return _jsxs("section", { className: "dsmm-scope-save", "aria-label": t(refreshOnly ? "refresh" : "saveScope"), children: [_jsx("p", { className: "dsmm-status", role: "status", "aria-live": "polite", children: refreshOnly ? state.busy ? t("loading") : "" : state.busy ? t("saving") : state.refreshRequired ? t("savedRefreshRequired") : state.saved ? t("saved") : state.dirty ? t("dirty") : "" }), !refreshOnly && pending.length > 0 && _jsxs("p", { children: [t("pendingModules"), ": ", pending.map(module => t(moduleTitle(module))).join(" · ")] }), state.issue !== null && _jsx("p", { className: "dsmm-issue", role: "alert", children: t(state.issue) }), !refreshOnly && state.invalidFields.length > 0 && _jsx("p", { className: "dsmm-issue", role: "alert", children: t("invalid") }), controller.layer === "profile" && !controller.canWriteProfile() && _jsx("p", { className: "dsmm-hint", children: t("unavailableForm") }), _jsxs("div", { className: "dsmm-actions", children: [!refreshOnly && _jsx(Button, { type: "button", variant: "primary", disabled: !controller.canSave(), onClick: () => void (workspace?.save() ?? controller.save()), children: t(controller.layer === "global" ? "saveGlobal" : "saveProfile") }), _jsx(Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => void controller.refresh(), children: t("refresh") }), !refreshOnly && _jsx(Button, { type: "button", variant: "outline", disabled: state.busy || !state.dirty && state.issue === null && !state.refreshRequired, onClick: () => void controller.refresh(true), children: t("discard") })] })] });
 }
-function Field({ schema, path, controller, invalid, t }) {
-    if (schema.type === "transform" && schema.inner !== undefined)
-        schema = schema.inner;
-    const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot), snapshot = state.snapshot;
-    const id = useId(), name = path.join("."), explicit = at(state.draft, path);
-    const inherited = controller.layer === "global" ? at(snapshot.defaults, path) : at(mergeLayer(mergeLayer(snapshot.defaults, snapshot.global), snapshot.nativeForm?.base ?? {}), path);
-    const disabled = state.busy || state.issue === "not-owned" || state.issue === "unavailable" || state.issue === "transport" || controller.layer === "profile" && !controller.canWriteProfile();
-    const choices = enumValues(schema);
-    const hint = name === "modelParameters.passthrough" ? "modelParametersHint" : name === "permissionControl.enabled" ? "permissionControlHint" : null;
-    if (schema.type === "object" && schema.fields !== undefined && path[0] !== "roleRouting")
-        return _jsxs("details", { className: "dsmm-deployment-group", children: [_jsxs("summary", { children: [label(path, t), " ", _jsx("code", { children: name })] }), _jsx("div", { children: Object.entries(schema.fields).filter(([key]) => visibleDeploymentPath([...path, key])).map(([key, node]) => _jsx(Field, { schema: node, path: [...path, key], controller: controller, invalid: invalid, t: t }, key)) })] });
-    if (!["boolean", "string", "number"].includes(schema.type) && choices === null)
-        return _jsx(AdvancedField, { schema: schema, path: path, value: explicit, inherited: inherited, upper: controller.layer === "global" ? at(snapshot.profile, path) : undefined, reset: snapshot, disabled: disabled, t: t, onChange: value => controller.edit(path, value), setInvalid: invalid });
-    return _jsxs("div", { className: "dsmm-field dsmm-deployment-field", children: [schema.type === "boolean" || choices !== null ? _jsxs(_Fragment, { children: [_jsxs("label", { htmlFor: id, children: [label(path, t), " ", _jsx("code", { children: name })] }), _jsxs("select", { id: id, disabled: disabled, "aria-describedby": hint === null ? undefined : `${id}-hint`, value: explicit === undefined ? "inherit" : JSON.stringify(explicit), onChange: event => controller.edit(path, event.currentTarget.value === "inherit" ? undefined : JSON.parse(event.currentTarget.value)), children: [_jsxs("option", { value: "inherit", children: [t("inherit"), " \u00B7 ", displayValue(inherited, t)] }), (choices ?? [true, false]).map(choice => _jsx("option", { value: JSON.stringify(choice), children: displayValue(choice, t) }, String(choice)))] })] }) : _jsx(ScalarField, { schema: schema, path: path, controller: controller, disabled: disabled, inherited: inherited, invalid: invalid, t: t }), hint !== null && _jsx("p", { id: `${id}-hint`, className: "dsmm-hint", children: t(hint) }), (explicit !== undefined || controller.layer === "profile" && at(snapshot.nativeForm?.base, path) !== undefined) && _jsxs("p", { className: "dsmm-hint", children: [explicit === undefined ? "" : equal(explicit, at(snapshot.defaults, path)) ? t("defaultPin") : t("explicit"), controller.layer === "profile" && at(snapshot.nativeForm?.base, path) !== undefined ? `${explicit === undefined ? "" : " · "}${t("hostPin")}` : ""] })] });
+export function NativeRuntimeState({ value, t }) {
+    return _jsxs("section", { className: "dsmm-availability", "aria-label": t("nativeRuntimeState"), children: [_jsx("h3", { children: t("nativeRuntimeState") }), _jsxs("p", { children: [t("nativeRuntimeBinding"), ": ", t(value?.binding === "stock" ? "nativeRuntimeStock" : value?.binding === "unavailable" ? "nativeRuntimeUnavailable" : "unknown")] }), _jsxs("p", { children: [t("nativeRuntimeFence"), ": ", value === undefined ? t("unknown") : t(value.deliveryFenceReady ? "on" : "off"), " \u00B7 ", t("nativeRuntimeRestart"), ": ", value === undefined ? t("unknown") : t(value.restartRequired ? "on" : "off")] }), value?.reason !== undefined && _jsx("p", { children: t(`nativeRuntimeReason-${value.reason}`) }), _jsx("p", { className: "dsmm-hint", children: t("nativeRuntimeReadinessHint") })] });
 }
-function Layer({ controller, t }) {
-    const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-    const [invalid, setInvalid] = useState(new Set());
-    const updateInvalid = (path, bad) => { controller.setInvalid(path, bad); setInvalid(previous => { if (previous.has(path) === bad)
-        return previous; const next = new Set(previous); if (bad)
-        next.add(path);
-    else
-        next.delete(path); return next; }); };
-    const title = controller.layer === "global" ? "global" : "profile";
-    const disabled = state.busy || state.snapshot === null || state.issue !== null || invalid.size > 0 || controller.layer === "profile" && !controller.canWriteProfile();
-    return _jsxs("div", { "data-dsmm-layer": controller.layer, "aria-busy": state.busy, children: [_jsxs("details", { className: "dsmm-deployment-card", children: [_jsxs("summary", { children: [t(title), _jsx("span", { role: "status", "aria-live": "polite", className: "dsmm-hint", children: state.busy ? t("saving") : state.dirty ? t("dirty") : state.saved ? t("saved") : "" })] }), _jsxs("fieldset", { children: [_jsx("legend", { children: t(title) }), _jsx("p", { className: "dsmm-hint", children: t(title === "global" ? "globalHint" : "profileHint") }), state.snapshot !== null && _jsxs(_Fragment, { children: [_jsxs("details", { className: "dsmm-deployment-group", children: [_jsx("summary", { children: t("core") }), _jsxs("div", { children: [_jsx("p", { className: "dsmm-hint", children: t("coreHint") }), Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => key === "modelParameters" || key === "permissionControl").map(([key, schema]) => _jsx(Field, { schema: schema, path: [key], controller: controller, invalid: updateInvalid, t: t }, key))] })] }), Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => visibleDeploymentPath([key]) && key !== "modelParameters" && key !== "permissionControl" && (controller.layer === "global" || key !== "modules")).sort(([a], [b]) => a === "modules" ? -1 : b === "modules" ? 1 : 0).map(([key, schema]) => _jsx(Field, { schema: schema, path: [key], controller: controller, invalid: updateInvalid, t: t }, key))] }), _jsxs("div", { className: "dsmm-actions", children: [_jsx(Button, { type: "button", variant: "primary", disabled: disabled || !state.dirty, onClick: () => { void controller.save(); }, children: t(state.busy ? "saving" : title === "global" ? "saveGlobal" : "saveProfile") }), _jsx(Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => { void controller.refresh(); }, children: t("refresh") }), _jsx(Button, { type: "button", variant: "outline", disabled: state.busy || !state.dirty && state.issue === null, onClick: () => { setInvalid(new Set()); void controller.refresh(true); }, children: t("discard") })] })] })] }), state.issue !== null && _jsx("p", { className: "dsmm-issue", role: "alert", children: t(state.issue) }), invalid.size > 0 && _jsx("p", { className: "dsmm-issue", role: "alert", children: t("invalid") }), controller.layer === "profile" && !controller.canWriteProfile() && _jsx("p", { className: "dsmm-hint", children: t("unavailableForm") })] });
-}
-function NativeProfileLayer({ namespace, forms, remote, form, core, t }) {
-    const shared = useMemo(() => forms.get(namespace), [forms, namespace]);
-    const snapshot = useSyncExternalStore(listener => shared.subscribe(listener), () => shared.getSnapshot());
-    const controller = useMemo(() => core.forProfile(namespace), [core, remote, namespace]);
-    const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-    const coreState = useSyncExternalStore(core.subscribe, core.getSnapshot);
-    controller.attachForm(form ?? { state: snapshot, mutate: (ops, revision) => shared.mutate(ops, revision) });
-    useEffect(() => { void controller.refresh(); return () => controller.dispose(); }, [controller]);
-    useEffect(() => { if (state.saved)
-        void core.refresh(); }, [state.saved, core]);
-    useEffect(() => { if (controller.getSnapshot().snapshot !== null)
-        void controller.refresh(); }, [coreState.snapshot?.globalRevision, snapshot.revision, controller]);
-    return _jsx(Layer, { controller: controller, t: t });
-}
-function StateInspector({ controller, session, t }) {
-    const { snapshot, dirty, issue } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+export function StateInspector({ controller, t }) {
+    const { snapshot, session, dirty, issue } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
     if (snapshot === null)
-        return null;
+        return _jsx("p", { children: t("unavailable") });
     const admitted = session?.configuration ?? null;
-    const restartRequired = (snapshot.nextRoot?.restartRequired ?? []).filter(path => visibleDeploymentPath(path.split(".")));
     const source = (value) => t(value === "profile" ? "profileSource" : value === "global" ? "globalSource" : value === "defaults" ? "defaultsSource" : value === "named-session" ? "namedSource" : value === "startup" ? "startupSource" : value === "deployment" ? "deploymentCapture" : value === "mixed" ? "mixedSource" : "unknown");
     const value = (layer, path) => layer === undefined ? t("unknown") : at(layer, path.split(".")) === undefined ? t("absent") : displayValue(at(layer, path.split(".")), t);
-    const metadata = (layer, path, entry) => layer !== undefined && at(layer, path.split(".")) === undefined && entry === undefined ? t("absent") : source(entry);
-    return _jsxs("details", { className: "dsmm-deployment-card", children: [_jsxs("summary", { children: [t("state"), _jsx("span", { className: "dsmm-hint", children: restartRequired.length > 0 ? t("pending") : dirty || issue !== null ? t("inspectorStale") : "" })] }), _jsxs("div", { children: [_jsx("p", { role: "status", "aria-live": "polite", children: session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : `${t("namedSource")}: ${admitted.named?.id ?? "—"}` }), session !== null && _jsxs("p", { children: [t("session"), ": ", _jsx("code", { children: session.sessionId }), " \u00B7 ", _jsx("code", { children: session.admissionEpoch }), " \u00B7 ", session.scope] }), (dirty || issue !== null) && _jsx("p", { className: "dsmm-hint", children: t("inspectorStale") }), _jsxs("p", { className: "dsmm-hint", children: ["Global CAS: ", _jsx("code", { children: snapshot.globalRevision }), " \u00B7 native CAS: ", _jsx("code", { children: snapshot.nativeRevision }), " \u00B7 Host form: ", snapshot.nativeFormRevision ?? "—"] }), inspectorPaths(snapshot, admitted).map(path => _jsxs("dl", { className: "dsmm-deployment-state", children: [_jsx("dt", { children: _jsx("code", { children: path }) }), _jsxs("dd", { children: [t("globalSource"), ": ", at(snapshot.global, path.split(".")) === undefined ? t("absent") : t("globalSource")] }), _jsxs("dd", { children: [t("desired"), ": ", value(snapshot.desired, path), " \u00B7 ", metadata(snapshot.desired, path, snapshot.sources[path])] }), _jsxs("dd", { children: [t("startup"), ": ", value(snapshot.startup, path), " \u00B7 ", metadata(snapshot.startup, path, snapshot.startupSources?.[path]), " / ", at(snapshot.startup, path.split(".")) === undefined ? t("absent") : t("startupSource")] }), _jsxs("dd", { children: [t("next"), ": ", value(snapshot.nextRoot?.settings, path), " \u00B7 ", metadata(snapshot.nextRoot?.settings, path, snapshot.nextRoot?.sources[path]), " / ", metadata(snapshot.nextRoot?.settings, path, snapshot.nextRoot?.captures[path])] }), _jsxs("dd", { children: [t("session"), ": ", value(admitted?.settings, path), " \u00B7 ", metadata(admitted?.settings, path, admitted?.sources[path]), " / ", metadata(admitted?.settings, path, admitted?.captures[path])] })] }, path)), restartRequired.length > 0 && _jsxs("p", { children: [t("pending"), ": ", restartRequired.join(", ")] })] })] });
+    const restart = (snapshot.nextRoot?.restartRequired ?? []).filter(path => visibleDeploymentPath(path.split(".")));
+    return _jsxs("div", { className: "dsmm-structured", children: [_jsx("p", { role: "status", children: session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : t("sessionObserved") }), (dirty || issue !== null) && _jsx("p", { className: "dsmm-hint", children: t("inspectorStale") }), _jsxs("p", { children: [t("globalSource"), ": ", t(configurationVersionState(snapshot.globalRevision)), " \u00B7 ", t("profileSource"), ": ", t(configurationVersionState(snapshot.nativeRevision))] }), snapshot.subagentRuntime !== undefined && _jsx(NativeRuntimeState, { value: snapshot.subagentRuntime, t: t }), snapshot.modules.map(module => _jsxs("section", { className: "dsmm-zone", children: [_jsx("h3", { children: module.descriptor.label }), _jsxs("p", { children: [t("desired"), ": ", t(module.desired.enabled ? "on" : "off"), " \u00B7 ", source(module.desired.source)] }), _jsxs("p", { children: [t("startup"), ": ", module.startupMounted == null ? t("unknown") : t(module.startupMounted ? "on" : "off")] }), _jsxs("p", { children: [t("next"), ": ", module.nextRoot.admitted == null ? t("unknown") : t(module.nextRoot.admitted ? "on" : "off")] }), module.pending && _jsx("p", { children: t("pending") })] }, module.descriptor.id)), inspectorPaths(snapshot, admitted).map(path => _jsxs("dl", { className: "dsmm-deployment-state", children: [_jsx("dt", { children: path }), _jsxs("dd", { children: [t("desired"), ": ", value(snapshot.desired, path), " \u00B7 ", source(snapshot.sources[path])] }), _jsxs("dd", { children: [t("startup"), ": ", value(snapshot.startup, path), " \u00B7 ", source(snapshot.startupSources?.[path])] }), _jsxs("dd", { children: [t("next"), ": ", value(snapshot.nextRoot?.settings, path), " \u00B7 ", source(snapshot.nextRoot?.sources[path])] }), _jsxs("dd", { children: [t("session"), ": ", value(admitted?.settings, path), " \u00B7 ", source(admitted?.sources[path])] })] }, path)), restart.length > 0 && _jsxs("p", { children: [t("pending"), ": ", restart.join(", ")] })] });
 }
 export function DeploymentPage(props) {
-    const state = useSyncExternalStore(props.core.subscribe, props.core.getSnapshot);
+    const workspace = props.workspace ?? deploymentWorkspace(props.core, props.permissions);
+    const navigation = useSyncExternalStore(workspace.subscribe, workspace.getSnapshot);
+    const core = useSyncExternalStore(props.core.subscribe, props.core.getSnapshot);
+    const controller = workspace.controller() ?? props.core;
+    const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+    const id = useId(), heading = useRef(null), triggers = useRef(new Map()), previous = useRef(null);
+    const scopeControl = useRef(null), confirmation = useRef(null);
+    const resume = useRef(null);
+    const { t } = props, snapshot = state.snapshot ?? core.snapshot, active = navigation.module;
     useEffect(() => { if (props.view === "page")
         void props.core.refresh(); }, [props.core, props.view]);
+    useEffect(() => { if (props.forms !== undefined)
+        workspace.bindForms(props.forms); }, [workspace, props.forms]);
+    useEffect(() => {
+        if (active !== null)
+            heading.current?.focus();
+        else if (previous.current !== null)
+            triggers.current.get(previous.current)?.focus();
+        previous.current = active;
+    }, [active]);
+    useEffect(() => {
+        if (navigation.pending !== null) {
+            resume.current = { element: document.activeElement, scope: navigation.scope, module: active };
+            confirmation.current?.focus();
+        }
+        else if (resume.current !== null) {
+            const from = resume.current;
+            resume.current = null;
+            if (from.scope === navigation.scope && from.module === active) {
+                if (from.element.isConnected)
+                    from.element.focus();
+            }
+            else if (active !== null)
+                heading.current?.focus();
+            else if (from.scope !== navigation.scope)
+                scopeControl.current?.focus();
+        }
+    }, [navigation.pending, navigation.scope, active]);
     if (props.view === "summary")
-        return _jsx("span", { children: props.t("summary") });
-    const { t } = props, snapshot = state.snapshot;
-    return _jsxs("section", { className: "dsmm-profiles dsmm-deployment", "data-dsmm-page": true, "aria-label": t("title"), children: [_jsx("p", { className: "dsmm-hint", children: t("description") }), _jsx("p", { className: "dsmm-hint", children: t("boundaries") }), snapshot?.modules.map(module => {
-                const admitted = state.session?.modules?.find(value => value.descriptor.id === module.descriptor.id)?.admitted;
-                return _jsxs("details", { className: "dsmm-deployment-card", children: [_jsxs("summary", { children: [module.descriptor.label, _jsx("span", { className: "dsmm-hint", children: module.pending ? t("pending") : t(module.desired.enabled ? "on" : "off") })] }), _jsxs("div", { children: [_jsx("p", { children: t("hostUnknown") }), _jsxs("p", { children: [t("desired"), ": ", t(module.desired.enabled ? "on" : "off"), " \u00B7 ", module.desired.source] }), _jsxs("p", { children: [t("startup"), ": ", module.startupMounted == null ? t("unknown") : t(module.startupMounted ? "on" : "off"), " \u00B7 ", t("next"), ": ", module.nextRoot.admitted == null ? t("unknown") : t(module.nextRoot.admitted ? "on" : "off")] }), _jsxs("p", { children: [t("session"), ": ", admitted == null ? t("unknown") : t(admitted ? "on" : "off")] }), _jsx("p", { className: "dsmm-hint", children: t(module.descriptor.id === "deepwork" ? "ceiling" : "permissionControlHint") })] })] }, module.descriptor.id);
-            }), _jsx(Layer, { controller: props.core, t: t }), props.profilePage && props.forms !== undefined && snapshot?.namespace !== null && snapshot?.namespace !== undefined && (props.rowNamespace === undefined || props.rowNamespace === snapshot.namespace)
-                ? _jsx(NativeProfileLayer, { namespace: snapshot.namespace, forms: props.forms, remote: props.remote, form: props.form, core: props.core, t: t }, `${snapshot.hostProfileKey}:${snapshot.entryId}`)
-                : _jsxs("div", { children: [_jsxs("details", { className: "dsmm-deployment-card", children: [_jsxs("summary", { children: [t("profile"), _jsx("span", { className: "dsmm-hint", children: t("profileUnavailable") })] }), _jsx("div", { children: _jsx("p", { children: t("profileHint") }) })] }), _jsx("p", { className: "dsmm-hint", children: t("unavailableForm") })] }), _jsx(StateInspector, { controller: props.core, session: state.session, t: t })] });
+        return _jsx("span", { children: t("summary") });
+    const fields = snapshot === null || active === null ? [] : moduleFields(scopeSchema(snapshot, controller.layer), active, controller.layer);
+    const modules = CONFIG_MODULES.filter(module => module === "state" || module === "permissions" || snapshot === null || moduleFields(snapshot.schema, module, "global").length + moduleFields(scopeSchema(snapshot, "profile"), module, "profile").length > 0);
+    const scopeActions = _jsx(ScopeSave, { controller: active === "state" ? props.core : controller, workspace: workspace, refreshOnly: active === "state" || workspace.controller() === null, t: t });
+    return _jsxs("section", { className: "dsmm-profiles dsmm-deployment", "data-dsmm-page": true, "aria-label": t("title"), children: [_jsx("p", { children: t("description") }), _jsx("p", { className: "dsmm-hint", children: t("boundaries") }), _jsxs("div", { className: "dsmm-field", children: [_jsx("label", { htmlFor: `${id}-scope`, children: t("scope") }), _jsxs("select", { ref: scopeControl, id: `${id}-scope`, value: navigation.scope, disabled: state.busy || navigation.pending !== null, onChange: event => {
+                            const scope = event.currentTarget.value;
+                            if (scope === "global" || scope === "profile")
+                                workspace.request({ scope, module: active });
+                        }, children: [_jsx("option", { value: "global", children: t("global") }), _jsx("option", { value: "profile", children: t("profile") })] })] }), _jsx("p", { className: "dsmm-hint", children: t(navigation.scope === "global" ? "globalHint" : "profileHint") }), navigation.scope === "profile" && (navigation.native === null || !navigation.native.canWriteProfile()) && _jsx("p", { className: "dsmm-hint", children: t("unavailableForm") }), _jsxs("div", { className: "dsmm-deployment-frame", "data-drawer-open": active !== null, children: [_jsx("nav", { className: "dsmm-module-list", "aria-label": t("modules"), children: modules.map(module => _jsx(Button, { ref: element => { if (element !== null)
+                                triggers.current.set(module, element); }, type: "button", variant: "outline", disabled: navigation.pending !== null, "aria-expanded": active === module, "aria-controls": `${id}-drawer`, onClick: () => workspace.request({ scope: navigation.scope, module }), children: t(moduleTitle(module)) }, module)) }), active !== null && _jsxs("aside", { id: `${id}-drawer`, className: "dsmm-module-drawer", "aria-labelledby": `${id}-heading`, "data-dsmm-module": active, onKeyDown: event => {
+                            if (event.key !== "Escape" || event.defaultPrevented)
+                                return;
+                            const target = event.target;
+                            if (target.tagName === "SELECT" && (!globalThis.CSS?.supports("selector(select:open)") || target.matches("select:open")))
+                                return;
+                            event.preventDefault();
+                            if (navigation.pending !== null)
+                                workspace.continueEditing();
+                            else
+                                workspace.request({ scope: navigation.scope, module: null });
+                        }, children: [_jsxs("div", { className: "dsmm-drawer-heading", children: [_jsx("h2", { id: `${id}-heading`, ref: heading, tabIndex: -1, children: t(moduleTitle(active)) }), _jsx(Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => workspace.request({ scope: navigation.scope, module: null }), children: t("close") })] }), active === "state" ? _jsxs(_Fragment, { children: [_jsx(StateInspector, { controller: props.core, t: t }), scopeActions] }) : _jsxs(_Fragment, { children: [navigation.scope === "profile" && navigation.native === null ? _jsx("p", { children: t("unavailableForm") }) : state.snapshot === null ? _jsx("p", { children: t(state.busy ? "loading" : "unavailable") }) : _jsxs("div", { "data-dsmm-layer": controller.layer, "aria-busy": state.busy, className: "dsmm-structured", children: [fields.length === 0 && _jsx("p", { className: "dsmm-hint", children: t("noModuleFields") }), fields.map(([key, schema]) => _jsx(Field, { schema: schema, path: [key], controller: controller, t: t }, key)), active === "run" && controller.layer === "profile" && _jsx(NativeRuntimeState, { value: state.snapshot.subagentRuntime, t: t })] }), scopeActions, active === "permissions" && _jsxs("section", { className: "dsmm-zone", children: [_jsx("h3", { children: t("rootRules") }), _jsx("p", { className: "dsmm-hint", children: t("rootRulesHint") }), workspace.permissions === undefined ? _jsx("p", { children: t("rootRulesUnavailable") }) : _jsx(PermissionsPanel, { controller: workspace.permissions, t: key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key) : key })] })] })] })] }), navigation.pending !== null && _jsxs("section", { className: "dsmm-confirm", role: "group", "aria-label": t("leaveDraft"), onKeyDown: event => { if (event.key === "Escape" && !event.defaultPrevented) {
+                    event.preventDefault();
+                    workspace.continueEditing();
+                } }, children: [_jsx("p", { children: t("leaveDraft") }), _jsxs("div", { className: "dsmm-actions", children: [_jsx(Button, { ref: confirmation, type: "button", variant: "primary", onClick: () => workspace.continueEditing(), children: t("continueEditing") }), _jsx(Button, { type: "button", variant: "outline", onClick: () => workspace.keepAndNavigate(), children: t("keepDraft") }), _jsx(Button, { type: "button", variant: "outline", disabled: state.busy, onClick: () => void workspace.discardAndNavigate(), children: t("discardDraft") })] })] })] });
 }
 //# sourceMappingURL=DeploymentPage.js.map

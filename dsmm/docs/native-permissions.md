@@ -1,6 +1,6 @@
 # Native permissions
 
-DSH owns approval. DSMM composes permission policy into the native tool pipeline; it doesn't add a separate approval queue, approval UI, TTL or session permit memory. This guide states the source contract, not verification of a published package, build or release.
+DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`. DSH owns approval; DSMM composes policy into the native tool pipeline without a second approval queue, UI, TTL or session permit memory.
 
 ## Full access and approval
 
@@ -8,7 +8,7 @@ Full access means actual native effective standing `danger-full-access`, not a m
 
 A captured read-only child or a live, composed DSMM read-only preset has an explicit blacklist covering `write`, `edit`, `bash` and `pwsh`. Standing Full access must not bypass that ceiling; useful native reads remain available. Missing ordinary DSMM policy or classification facts do not by themselves establish a read-only role.
 
-The permission contract requires an actual DSH manual approval to be final for the same call and approved scope. Older DSMM rules, a changed permission revision or epoch, and DSMM internal gates must not veto it afterward. A pending native approval isn't canceled merely because a permission source changes. The one-shot delegation exception below remains an unresolved defect.
+Actual DSH manual approval is final for the same call and approved scope. Older DSMM rules, a changed permission revision or epoch, and DSMM internal gates don't veto it afterward. A pending native approval isn't canceled merely because a permission source changes.
 
 A native once grant applies only to its actual call and scope. It doesn't change standing session permissions, authorize later calls or turn a narrower approval into full access. DSMM can't infer approval from model-supplied arguments or saved policy. DSH rejection and caller/native cancellation remain effective, and the original tool or OS can still fail. Permission to execute isn't a command-success guarantee.
 
@@ -22,6 +22,8 @@ The rules RPC writes Global. A native override of outside-read, web or rule poli
 
 Storage CAS and runtime adoption are separate from native call approval. Saves recheck authoritative storage and await notification before publishing synchronized policy. Notification failure leaves saved/runtime revisions visibly unsynchronized; recovery rereads storage, and conflicts preserve dirty drafts. These checks don't cancel pending native approval or override an actual approved call. New calls consume current policy, with no cross-call reuse of a once grant.
 
+Configuration writes require the real native operator, exact entry/form or Root authority and a live connection/owner through every await and immediately before commit. Serialized provenance, a client loopback claim or an old registration isn't authority. Only relevant effective permission changes coordinate revocation; unrelated model/locale/display edits aren't a second approval gate. A committed write stays committed when notification or observation fails, with refresh-required/unsynchronized status. An unconfirmed native result requires reread, not blind retry.
+
 ## Configuration drawer and exact native commands
 
 Use **Plugins → DSMM bundle config → Permissions**. The selected Global/native-profile scope edits its sparse deployment policy; a separate Root-rules transaction writes Global only under the existing live operator, exact open Root, registration and synchronized-policy authority. A child, stale connection, read-only Host or shadowing native policy doesn't acquire a fallback Global write. Named Profiles can't grant these permissions. No duplicate Settings permission page or Conversation permission tab is registered.
@@ -32,12 +34,12 @@ Observed `kind:shell` registration isn't proof of the actual executor, environme
 
 ## Capability limits
 
-### Deferred P1: admission changes during one-shot approval
+### Running overlay changes
 
-If a profile selection publishes a new parent admission epoch while a DSMM one-shot delegation awaits native approval, an ensuing Allow can still be rejected with `UNAUTHORIZED` before child dispatch, even when the physical Agent, owner and tool registration are unchanged. This is a known availability defect, not a successful approval or a permission grant to later calls. Avoid changing the parent profile while approval is pending; if the call is refused, issue a fresh invocation under the current profile.
+Live overlay Apply is unavailable. Save/select a future default and create a new session instead of rebinding an active parent or pending invocation. Ordinary mode controls and Use profile model retain independent capabilities; neither grants overlay authority.
 
-This case is excluded from temporary integration acceptance, not considered fixed. Its complete regression remains in `test/native-core-review-regressions.test.mjs` and is skipped with an explicit reason by default. Set `DSMM_TEST_DEFERRED_APPROVAL=1` to run it. Final unrestricted acceptance still requires this regression to pass without weakening cancellation, ownership or input isolation. The installed SDK and existing request-revocation protections remain unchanged.
+Same-call approval, cancellation, ownership and input isolation remain effective. Don't replay a whole parent task to work around a refused call; inspect the outcome and explicitly invoke fresh work only when appropriate.
 
-See the [accepted risk and reevaluation conditions](deferred-native-approval-risk.md) for the bounded deferral and future DSH compatibility requirements.
+See [running-overlay and approval boundaries](deferred-native-approval-risk.md).
 
-Permission coverage isn't proof of final inode identity or socket isolation. Colocation of `rg` with the intended execution environment isn't proven, and direct formal coverage remains partial. Native outside-read and web coverage, policy synchronization, and successful storage writes are distinct claims. None establishes complete shell filesystem/network isolation or published-artifact delivery.
+Outside-read and web policies apply to their native tool surfaces. They don't provide complete filesystem/network isolation for arbitrary shell commands or replace operating-system checks on the final inode and socket target.

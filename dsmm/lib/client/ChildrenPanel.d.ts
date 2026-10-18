@@ -1,5 +1,5 @@
 import type { InjectFace, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
-import type { ChildAdmissionEvidenceView, DsmmInvocationView, RoleControlAvailability, RoleControlChildView } from "../role-control-types.js";
+import type { DsmmInvocationView, RoleControlAvailability, RoleControlChildView } from "../role-control-types.js";
 import type { DsmmRoleRouteComparison } from "../profile-types.js";
 import type { ChildrenActions, ChildrenController, ChildrenSnapshot } from "./children-controller.js";
 import type { ChildrenLocaleKey } from "./children-locales.js";
@@ -22,9 +22,6 @@ export declare function RouteComparisonDetails({ value, t }: Locale & {
 export declare function InvocationDetails({ value, t, showComparison }: Locale & {
     value?: DsmmInvocationView;
     showComparison?: boolean;
-}): import("react").JSX.Element;
-export declare function EvidenceDetails({ value, t }: Locale & {
-    value?: ChildAdmissionEvidenceView;
 }): import("react").JSX.Element;
 export declare function ChildComposer({ child, state, actions, t }: Locale & {
     child: RoleControlChildView;

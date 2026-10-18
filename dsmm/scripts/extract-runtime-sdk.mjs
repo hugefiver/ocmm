@@ -27,6 +27,7 @@ export function validateSourceSdk(manifest, version) {
   return manifest;
 }
 export function extractRuntimeSdk({ image, destination, version }, execute = docker) {
+  dshPolicyForVersion(version);
   assert.match(image, /^sha256:[a-f0-9]{64}$/u, "source SDK must use the exact locally built image ID");
   assert.equal(isAbsolute(destination), true);
   assert.equal(lstatSync(dirname(destination)).isDirectory(), true);
@@ -42,7 +43,7 @@ export function extractRuntimeSdk({ image, destination, version }, execute = doc
     const manifest = join(destination, "dsh", "package.json");
     execute(["cp", `${container}:/usr/local/lib/node_modules/@deepseek-ai/dsh`, join(destination, "dsh")]);
     validateSourceSdk(manifest, version);
-    result = { outcome: "READY", image, manifest, sourceOnly: true };
+    result = { outcome: "READY", image, manifest, packageVersion: version, sourceOnly: true };
   } catch (error) { primary = error; }
   if (container !== undefined) {
     try { execute(["rm", container]); }

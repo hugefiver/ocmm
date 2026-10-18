@@ -1,7 +1,7 @@
 import { Context } from "@deepseek-ai/cordis";
 import type { DshContext } from "./dsh-types.js";
 import { FixedConfigFileStore } from "./config-file-store.js";
-import type { DsmmDeploymentSnapshot, DsmmPluginConfig } from "./settings.js";
+import type { DsmmDeploymentSnapshot, DsmmPluginConfig, DsmmNativeConfig } from "./settings.js";
 export type DeploymentPathEdit = {
     op: "set";
     path: string[];
@@ -17,6 +17,12 @@ export interface GlobalConfigSaveRequest {
 export interface GlobalConfigSnapshot {
     config: DsmmPluginConfig;
     revision: string;
+    refreshRequired?: true;
+}
+declare module "@deepseek-ai/cordis" {
+    interface Context {
+        dsmmDeploymentConfig: DsmmDeploymentConfig;
+    }
 }
 export interface DeploymentWriteCoordinator {
     global(request: GlobalConfigSaveRequest, config: DsmmPluginConfig, assertAuthority: () => void, write: (config: DsmmPluginConfig) => Promise<GlobalConfigSnapshot>): Promise<GlobalConfigSnapshot>;
@@ -29,6 +35,7 @@ export declare class DsmmDeploymentConfig {
     private readonly ctx;
     private readonly config;
     private writeCoordinator?;
+    private permissionObservation?;
     readonly home: string;
     readonly store: FixedConfigFileStore;
     readonly entryId: string;
@@ -51,7 +58,7 @@ export declare class DsmmDeploymentConfig {
             rules: readonly import("./permission-rules.js").PermissionRule[];
         };
     };
-    constructor(ctx: DshContext, config: DsmmPluginConfig);
+    constructor(ctx: DshContext, config: DsmmNativeConfig);
     private profile;
     readGlobal(): Promise<GlobalConfigSnapshot>;
     readDesired(): Promise<DsmmDeploymentSnapshot>;

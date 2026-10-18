@@ -3,7 +3,8 @@ import { isDsmmRoleId } from "./roles.js";
 import { roleFromProviderName } from "./role-providers.js";
 import { capturedRoleInvocation } from "./role-invocation.js";
 export function sessionEvents(session) {
-    return session?.snapshotEvents?.() ?? session?.events ?? [];
+    return (session?.snapshotEvents?.() ?? session?.events ?? []).map(event => event.type === "plugin:dsmm/mode"
+        ? { ...event, type: "deepwork/mode" } : event.type === "plugin:dsmm/role-policy" ? { ...event, type: "dsmm/role-policy" } : event);
 }
 export function resolveSelectedAgentPreset(session) {
     const events = sessionEvents(session);

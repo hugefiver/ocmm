@@ -3,6 +3,9 @@ import { copyRouteJson, normalizeModelRouteJson } from "../route-json.js";
 export function record(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+export function scopeSchema(snapshot, layer) {
+    return layer === "profile" ? snapshot.nativeSchema ?? snapshot.schema : snapshot.schema;
+}
 export function at(value, path) {
     return path.reduce((node, key) => record(node) && Object.hasOwn(node, key) ? node[key] : undefined, value);
 }
@@ -115,7 +118,7 @@ export function enumValues(schema) {
         ? schema.alternatives.map(node => node.value) : null;
 }
 export function visibleDeploymentPath(path) {
-    return path[0] !== "lsp" && (path[0] !== "permissionControl" || path.length === 1 || path.length === 2 && path[1] === "enabled");
+    return !["lsp", "modeName", "section"].includes(path[0]);
 }
 /** Only visible Host-projected inspector layers, never raw sparse editor input. */
 export function inspectorPaths(snapshot, admitted) {

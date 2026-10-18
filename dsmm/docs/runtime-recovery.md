@@ -1,12 +1,14 @@
 # Runtime recovery and route strategies
 
-## Two independent role strategies
+DSMM 0.3.1 targets exactly DSH `0.2.1-rc.2`.
 
-Every enabled DSMM role in each profile independently selects `startup-lock` (default) or `rate-limit-fallback`. Optional `runtimePolicy` supplies inherited defaults; a role's `strategy` / `rateLimit` overrides only explicit fields. Different profiles can assign different strategies to the same role. No profile contains native account/auth configuration.
+## Independent role strategies
 
-For child Agents, native preparation admits the primary or first resolvable ordered candidate without sending a sacrificial completion. Catalog listing is advisory, not account/network health. `startup-lock` then retains that exact route/effort across turns and bounded RATE_LIMIT retries. `rate-limit-fallback` may advance the ordered chain after its threshold of distinct safe RATE_LIMIT failures. Success resets consecutive counts; duplicate delivery does not count twice and exhausted chains never wrap.
+Each role may use `startup-lock` (default) or explicit `rate-limit-fallback`. `runtimePolicy` supplies inherited defaults; role `strategy` / `rateLimit` overrides only explicit fields. Profiles contain no native accounts or credentials.
 
-Ordinary top-level Agents always honor the native model tab's assembled provider/model/effort, even before a first explicit selection event. Their finite, positively no-output-safe RATE_LIMIT retries stay on that route; role/global primary and fallback chains don't replace it automatically. Switching a profile preserves the native model. Only the separate **Use profile model** action asks native model selection to use the current admitted immutable profile's main route.
+Child preparation admits the primary or first resolvable configured candidate in order without a sacrificial completion. A catalog isn't an authentication/network-health check. `startup-lock` retains the admitted route for bounded safe rate-limit retries. `rate-limit-fallback` may advance its ordered chain after the configured threshold. Success resets consecutive counts, duplicate failure delivery doesn't count twice, and exhausted chains don't wrap.
+
+Ordinary roots retain native assembled provider/model/effort, even before the first selection event. Role/global primary and fallback chains don't automatically replace that route. **Use profile model** is a separate explicit selection action against admitted immutable configuration, not a retry or overlay Apply.
 
 | Policy field | Default | Strict integer bound |
 | --- | --- | --- |
@@ -17,100 +19,34 @@ Ordinary top-level Agents always honor the native model tab's assembled provider
 | `switchAfterRateLimits` | 3 | 1 to 10 |
 | `maxSwitches` | 2 | 0 to 10 |
 
-`maxRetries` counts requests after the first on a route; the threshold includes that first distinct failed attempt. If retry budget runs out before threshold, stop. A switch starts fresh same-route counters but consumes the admission epoch's switch cap. Malformed, unknown, fractional or nonfinite values fail instead of becoming different defaults.
+`maxRetries` counts requests after the first on a route; the threshold includes the first distinct failure. Exhausted retry budget stops the attempt even before the switch threshold. Switches consume a finite scope budget. Invalid values refuse instead of becoming different defaults.
 
-## Legacy defaults and migration
+`roleRouting.<role>.fallbackRoutes` owns its full route/parameter sets. Explicit `[]` suppresses inherited alternatives; omission inherits the applicable chain. A fallback doesn't inherit primary-only parameters. Omitted effort clears stale explicit effort. `runtimeRecovery.enabled` isn't the role strategy selector, and retained generic status/code lists don't authorize arbitrary transport/server retries or channel hopping.
 
-The legacy continuation/configuration block remains parse-compatible, with this complete default:
+## Positive no-output proof and native execution
 
-```yaml
-runtimeRecovery:
-  enabled: false
-  retryOnStatusCodes: [429, 500, 502, 503, 504]
-  retryOnCodes: []
-  fallbackRoutes: []
-  maxFallbackAttempts: 2
-  idleContinuation:
-    enabled: false
-    maxContinuations: 3
-    prompt: "Continue the current task from the durable goal or unfinished todo list. Do not repeat completed work."
-```
+Every automatic retry or switch needs correlated positive no-output evidence from native `agent/request-error` and `agent/assistant-stream`. Missing, stale, ambiguous or mismatched Agent, admission, request, turn/step or generation evidence refuses replay. Partial text, reasoning or tool-call fragments forbid automatic replay, including same-route retries. Already executed tools aren't rerun.
 
-`maxFallbackAttempts` and `idleContinuation.maxContinuations` retain their legacy finite cap grammar. An empty `fallbackRoutes` list is valid and supplies no alternatives. The legacy `runtimeRecovery.enabled` flag is not the strategy selector and does not gate the new scoped finite RATE_LIMIT policy.
+Only public registration-directory proof of provider absence or adapter-proven `UNKNOWN_MODEL` may advance startup candidates without accepted output. A generic `NO_ADAPTER` from middleware or an unready registered adapter isn't absence proof. Authorization, payment/quota, context, cancellation and ambiguous transport/server failures don't authorize hopping; error wording isn't proof.
 
-0.1.4 documents remain loadable without rewriting drafts, deployment patches or history. The migration is behavioral: omitted strategy now means safer `startup-lock`, so retained generic `SERVER`, `TIMEOUT`, `TRANSPORT` or status-based retry lists do not imply later automatic channel hopping. Explicitly choose `rate-limit-fallback` only where rate-limit rollover is intended. This release supplies no inferred generic-behavior opt-in. Inspect normalized effective role policy before upgrading a deployment that depended on the old automatic behavior.
+Fallback decisions stay in the native request loop. DSMM doesn't create another request scheduler, invoke providers independently, synthesize retry prompts or restart turns. Native adapter retry and DSMM candidate policy must remain bounded together. Where native evidence can't establish a reliable no-output boundary, report automatic fallback unavailable and require explicit retry rather than guessing.
 
-## Role-specific chains
+An abortable middleware delay can honor valid `providerRetryAfterMs` only within per-delay and total budgets. Cancellation, owner/provider retirement, closed turn/step boundaries or superseded intent invalidate pending work before another dispatch. Duplicate errors can't reserve a second fallback.
 
-`roleRouting.<role>.fallbackRoutes` uses the same route shape, with optional exact native `reasoningEffort`. The resolved strategy/retry policy, not legacy enabled state, controls scoped RATE_LIMIT behavior. Configuring a chain does not enable idle continuation.
+Native model selection, including same-value reselection, is new intent. Assembly captures that intent for the request; a concurrently newer selection belongs to the next assembly, not a retrofit. Child initial routes are defaults, not every-turn overrides of accepted native intent or valid fallback. Existing Agents consume admitted policy, not later saved desired configuration. See [model routing](model-routing.md).
 
-For a known enabled role, an explicitly supplied chain takes precedence over the global list. `[]` suppresses global fallback for that role; an omitted chain inherits the applicable global list. Routes retain configured order and compare complete JSON parameter values, not provider/model alone; object key order doesn't create a different route. The finite retry/switch budget still bounds execution. Unrecognized children never inherit their parent's role chain.
+## Live continuation and activation
 
-To migrate explicit role chains, choose each role's strategy deliberately, keep inherited/global alternatives explicit where needed, and leave `idleContinuation.enabled:false`. Omission resolves to startup lock, not legacy generic recovery. Exact effort omission clears stale adapter-owned effort while preserving unrelated native parameters.
+Idle continuation is separately opt-in under `runtimeRecovery.idleContinuation`; it doesn't follow from a fallback chain. It requires an eligible active live Agent and unfinished durable goal/todo evidence, with a finite per-Agent/turn cap. Steering failure consumes an attempt and doesn't reject turn shutdown. It grants no extra tool or role authority.
 
-## Universal no-output fence and one retry owner
+Role delegation uses official activation. Waiting uses `delivery:'caller'`; only native `completed` is normal completion. Failure, partial output and cancellation remain visible. After publication, cancellation uses the receipt's `dispose()` and awaits cleanup. Background must be selected before start with `delivery:'parent'`; an accepted child/message receipt isn't completion. Running waiting calls can't be transferred to background.
 
-Every DSMM retry or switch requires positive no-output proof, even when staying on the same model. Exact Agent/admission epoch/lock generation, live attempt ID, turn/step, accepted header and committed assistant settlement must match. Dense live chunks must agree with the validated durable compact stream and its exact terminal failure. Missing, stale, mismatched, ambiguous, abandoned or duplicate evidence refuses before spending budget or waiting.
+Supported exact live children may receive Queue/Steer or interrupt through native controls, subject to current direct-parent/operator authority and actual capabilities. Inbox acceptance and interrupt acknowledgment aren't completion. Unknown sends aren't automatically retried. Read-only descendant inspection grants no control.
 
-Any accepted text, reasoning, tool-call fragment, block start/end or executed tool forbids replay. A partial-output RATE_LIMIT failure refuses retry or rollover under either strategy. Already completed earlier tools stay unchanged. Same-route retries aren't exempt.
+## Cold resume and lifetime
 
-Inside the scoped DSMM RATE_LIMIT/unavailable branch, DSMM owns the native `agent/request-error` decision. Refusal is terminal and never falls through to native `mode:always` or another competing retry handler. Outside that branch, native host-first behavior and exact downstream result identity remain unchanged. All provider calls and step retries stay inside the native loop; DSMM neither calls a provider directly nor synthesizes a prompt, restarts a turn or replays tools.
+DSMM cold resume without trusted live admission is unsupported. Old headers, configuration sidecars, role labels or PluginRecord display data don't revive retry state, policy or execution authority. Preserve history instead of copying current settings into it. DSMM read-only history queries don't call resume. Native factory load/repair may occur before the created guard rejects execution, so refusal isn't a guarantee that the log was never opened.
 
-Only provider absence established through the public registration directory or adapter-proven `UNKNOWN_MODEL` may advance a remaining startup candidate before accepted output. Generic `NO_ADAPTER` from middleware, preparation or an unready registered adapter isn't absence proof. Contradictory 401/403/402/429 facts, authorization, quota/payment, context, cancellation, transport/server ambiguity and error-message text don't authorize hopping. Later generic failures cannot hop.
+Official Registry, Runtime and JSONL plugins own lifecycle and storage. DSMM scoped guards retain retirement checks; hot unload/reinstall doesn't promise uninterrupted live-session replacement. No custom owner, companion, cold migration or cross-process automatic retry is provided.
 
-One finite abortable middleware delay may honor valid `providerRetryAfterMs` only within per-delay and total budgets. Invalid or too-large values refuse instead of causing infinite waiting or uncontrolled retry. Abort/disposal/epoch/header/provider replacement and closed/superseded boundaries cancel or invalidate pending work. No independent timer-driven request exists.
-
-Fresh native `model/selection` intent also invalidates old reservations, even when provider/model/effort is unchanged. DSMM captures the exact typed user intent at native prompt-assembly start and correlates it with the native-selected request; a concurrently newer choice is for the next assembly, never a retrofit of the current frame. Explicit user provider/model/effort outranks profile primary/defaults on later turns and cold resume. Profile apply advances the admission epoch and policy without silently clearing native user intent. A parent's manual choice is not authority to overwrite a configured child's own role route.
-
-## Request ordering
-
-The recovery request path applies a matching pending fallback route after native request selection. A named fallback effort is preserved exactly; omission clears stale adapter-owned `reasoningEffort`. All unrelated downstream fields are preserved. Explicit role primary policy must not replace the admitted fallback on that or a later request in the same recovery scope.
-
-Model routing evaluates the final route through generic native capabilities and the captured parameter policy. Omitted effort remains native-owned; no provider-brand calibration or replacement effort is applied. The final adapter remains responsible for supported call parameters.
-
-Route locks and pending recovery bind to the live Agent/admission lifecycle and explicitly compared routing/retry policy fields. Relevant policy or epoch changes invalidate them; unrelated settings do not. The v1 `dsmm/role-policy` event keeps its existing wire shape; its policy value is a random 32-byte hex identity, not a content digest, and must match the current identity held by that same Agent. Historical content-digest markers cannot authorize a current lock and remain in history without rewriting.
-
-Duplicate failure delivery cannot select a second pending route. Closed/superseded turn/step boundaries and aborted signals cannot commit a late route. HTTP 402 never authorizes strategy rollover. No real billing/rate-limit error is manufactured for testing.
-
-## Durable continuation
-
-Idle continuation is separately opt-in. It is eligible only for an active deepwork session or selected DSMM preset when the signal is not aborted and the durable state shows either a latest current-turn todo with `pending` or `in_progress` status, or a latest active goal. The cap is per live agent and turn, so each live agent/turn pair gets at most `maxContinuations` steering attempts.
-
-The continuation uses this exact user message:
-
-> Continue the current task from the durable goal or unfinished todo list. Do not repeat completed work.
-
-Steering failure consumes an attempt and produces a sanitized warn/fail-open result: it never rejects turn shutdown. DSMM emits only fixed sanitized warnings: `dsmm runtime recovery could not evaluate fallback; preserving the host request-error decision` and `dsmm runtime recovery continuation steering failed for turn <turn>`.
-
-## Cold restart
-
-An explicit session sidecar pins its exact immutable profile/baseline on cold resume; absent sidecars retain the historical global-current contract. Process-local attempts, waits, counters and locks do not resurrect from old headers alone. New admission epochs fence old reservations and route folds while the audited `dsmm/role-policy` event retains its exact grammar. There is no continuation until the user/native host resumes activity. See [profiles](profiles.md).
-
-## Subagent recovery
-
-Continuable child sessions differ from one-shot children: a continuable child has a known session that can be resumed deliberately, while a one-shot child has no safe automatic follow-up contract. `subagent/end` is live-only diagnostic information, not a durable recovery trigger.
-
-To investigate an interrupted child, use the native durable descriptor and child control/session surfaces. Explicitly continue a known continuable child only when the host/user has the required context; one-shot role tools are not continuable sessions. DSMM never synthesizes a parent prompt, parent session, or task ID, and it does not automatically follow up a child or parent. Native delegation depth and permission restrictions remain authoritative; DSMM does not raise the host's default depth.
-
-## Non-goals and logging
-
-- No fake or extended `llm/retry` events.
-- No independent retry timer/request engine, session aborts, or background polling; only finite abortable delay in the existing native error middleware.
-- No cross-process automatic retry.
-- No provider discovery or heuristic fallback chain.
-- No provider-message parsing or classification, and no provider calls outside the host request loop.
-- No automatic child followup. No automatic parent followup.
-
-Warnings are fixed and sanitized; they omit request bodies, provider error bodies, credentials, todo text, goal text, and arbitrary exception details.
-
-## Native admission consumption
-
-Consumers use `getSettings(agent)`/admission epoch, not desired disk values. Saving
-desired recovery off does not cancel an old admitted parent or its future children;
-new ordinary roots capture the new policy. Exact live registry membership rejects
-late disposed assistant/error/turn-stopping evidence before it can reserve retry
-or steer. Native generation/turn/step/no-output ownership and finite budgets remain
-the same controller; no parallel scheduler, queue, retry prompt or OCMM event-name
-translation is added. Generic native retry ownership is unchanged. Continuable
-message/interrupt/cold resume and native jobs cancellation are public native control
-paths, not runtime-recovery retries or a fake one-shot task-id continuation.
+Diagnostics omit request/provider bodies, credentials and goal/todo text.

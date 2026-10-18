@@ -1,189 +1,139 @@
-import { useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
-import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
+import { useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ConfigForms } from "@deepseek-ai/dsh-client-ui-settings/client";
-import type { DeploymentSchemaNode, SessionProfileSnapshot } from "../profile-types.js";
-import { DeploymentController } from "./deployment-controller.js";
-import type { NativePageForm } from "./deployment-controller.js";
 import type { DsmmConfigRemote } from "../profile-remote.js";
-import { at, enumValues, equal, inspectorPaths, mergeLayer, parseAdvanced, validateEditorValue, visibleDeploymentPath } from "./deployment-data.js";
-import { deploymentFieldLabels } from "./deployment-locales.js";
+import type { SubagentRuntimeAdmissionView } from "../profile-types.js";
+import type { DeploymentController } from "./deployment-controller.js";
+import type { PermissionController } from "./permission-controller.js";
+import { deploymentWorkspace } from "./deployment-workspace.js";
+import type { ConfigScope, DeploymentWorkspace } from "./deployment-workspace.js";
+import { CONFIG_MODULES, moduleFields, moduleFor, moduleTitle } from "./deployment-modules.js";
+import type { ConfigModule } from "./deployment-modules.js";
+import { at, inspectorPaths, scopeSchema, visibleDeploymentPath } from "./deployment-data.js";
+import { Field, displayValue, permissionText } from "./DeploymentFields.js";
+import { configurationVersionState } from "./configuration-display.js";
+import { PermissionsPanel } from "./PermissionsPanel.js";
+import { permissionEn } from "./permission-locales.js";
+import type { PermissionLocaleKey } from "./permission-locales.js";
 
 type Locale = PropsLocale<"plugins.dsmm">;
 export interface DeploymentPageProps extends Locale {
   view: "summary" | "page";
-  form?: NativePageForm;
   core: DeploymentController;
   remote: DsmmConfigRemote;
+  workspace?: DeploymentWorkspace;
+  permissions?: PermissionController;
   forms?: ConfigForms;
-  rowNamespace?: string;
-  profilePage?: boolean;
 }
-function label(path: readonly string[], t: Locale["t"]): string {
-  const key = path.at(-1)!;
-  const item = deploymentFieldLabels[key];
-  return item === undefined ? key.replace(/^dsmm-/u, "").replace(/([a-z])([A-Z])/gu, "$1 $2") : item[t("global") === "DSMM 全局配置" ? 1 : 0];
-}
-function displayValue(value: unknown, t: Locale["t"]): string {
-  if (value === undefined) return t("unknown");
-  if (typeof value === "boolean") return t(value ? "on" : "off");
-  const text = JSON.stringify(value); return text.length > 120 ? `${text.slice(0, 120)}…` : text;
-}
-
-function AdvancedField({ schema, path, value, inherited, upper, reset, disabled, onChange, setInvalid, t }: Locale & {
-  schema: DeploymentSchemaNode; path: string[]; value: unknown; disabled: boolean;
-  reset: unknown; inherited: unknown; upper: unknown;
-  onChange(value: unknown): void; setInvalid(path: string, invalid: boolean): void;
-}) {
-  const id = useId(), name = path.join(".");
-  const serialized = value === undefined ? "" : JSON.stringify(value, null, 2);
-  const [text, setText] = useState(serialized);
-  const [invalid, setLocalInvalid] = useState(false);
-  useEffect(() => { setText(serialized); setLocalInvalid(false); setInvalid(name, false); }, [serialized, reset]);
-  return <details className="dsmm-deployment-group"><summary>{label(path, t)} · {t("advanced")} <code>{name}</code></summary><div className="dsmm-field">
-    <label htmlFor={id}>{label(path, t)} · {t("advanced")} <code>{name}</code></label>
-    <p className="dsmm-hint" id={`${id}-hint`}>{t("advancedHint")}</p>
-    <textarea id={id} rows={6} maxLength={32768} value={text} disabled={disabled} aria-invalid={invalid} aria-describedby={`${id}-hint ${id}-error`} onChange={event => {
-      const next = event.currentTarget.value; setText(next);
-      let parsed: unknown, valid = true;
-      try {
-        parsed = parseAdvanced(next);
-        const candidate = parsed === undefined ? inherited : mergeLayer(inherited, parsed);
-        valid = parsed === undefined || validateEditorValue(parsed, schema, true) && validateEditorValue(upper === undefined ? candidate : mergeLayer(candidate, upper), schema);
-      } catch { valid = false; }
-      setLocalInvalid(!valid); setInvalid(name, !valid); if (valid) onChange(parsed);
-    }} />
-    <p id={`${id}-error`} className="dsmm-hint">{invalid ? t("invalid") : ""}</p>
-    <details><summary>{t("advanced")} · schema</summary><pre>{JSON.stringify(schema, null, 2)}</pre></details>
-  </div></details>;
-}
-
-function ScalarField({ schema, path, controller, disabled, inherited, invalid, t }: Locale & {
-  schema: DeploymentSchemaNode; path: string[]; controller: DeploymentController; disabled: boolean; inherited: unknown;
-  invalid(path: string, value: boolean): void;
-}) {
+export function ScopeSave({ controller, workspace, refreshOnly = false, t }: Locale & { controller: DeploymentController; workspace?: DeploymentWorkspace; refreshOnly?: boolean }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const value = at(state.draft, path), name = path.join("."), id = useId();
-  const [text, setText] = useState(String(value ?? inherited ?? ""));
-  const [bad, setBad] = useState(false);
-  useEffect(() => { setText(String(value ?? inherited ?? "")); setBad(false); invalid(name, false); }, [value, inherited, state.snapshot]);
-  return <><label htmlFor={id}>{label(path, t)} <code>{name}</code></label><div className="dsmm-actions">
-    <Input className="dsmm-input" id={id} type="text" inputMode={schema.type === "number" ? "decimal" : undefined} value={text} disabled={disabled} aria-invalid={bad} aria-describedby={`${id}-error`} onChange={event => {
-      const raw = event.currentTarget.value; setText(raw);
-      const candidate = schema.type === "number" ? Number(raw) : raw;
-      const valid = (schema.type !== "number" || raw.trim() !== "") && validateEditorValue(candidate, schema);
-      setBad(!valid); invalid(name, !valid); if (valid) controller.edit(path, candidate);
-    }} /><Button type="button" variant="outline" disabled={disabled || value === undefined && !bad} onClick={() => { setText(String(inherited ?? "")); setBad(false); invalid(name, false); controller.edit(path, undefined); }}>{t("inherit")}</Button>
-  </div><p id={`${id}-error`} className="dsmm-hint">{bad ? t("invalid") : ""}{schema.type === "number" && (schema.min !== undefined || schema.max !== undefined) ? ` ${schema.min ?? "—"} – ${schema.max ?? "—"}` : ""}</p></>;
-}
-
-function Field({ schema, path, controller, invalid, t }: Locale & {
-  schema: DeploymentSchemaNode; path: string[]; controller: DeploymentController; invalid(path: string, value: boolean): void;
-}) {
-  if (schema.type === "transform" && schema.inner !== undefined) schema = schema.inner;
-  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot), snapshot = state.snapshot!;
-  const id = useId(), name = path.join("."), explicit = at(state.draft, path);
-  const inherited = controller.layer === "global" ? at(snapshot.defaults, path) : at(mergeLayer(mergeLayer(snapshot.defaults, snapshot.global), snapshot.nativeForm?.base ?? {}), path);
-  const disabled = state.busy || state.issue === "not-owned" || state.issue === "unavailable" || state.issue === "transport" || controller.layer === "profile" && !controller.canWriteProfile();
-  const choices = enumValues(schema);
-  const hint = name === "modelParameters.passthrough" ? "modelParametersHint" : name === "permissionControl.enabled" ? "permissionControlHint" : null;
-  if (schema.type === "object" && schema.fields !== undefined && path[0] !== "roleRouting") return <details className="dsmm-deployment-group">
-    <summary>{label(path, t)} <code>{name}</code></summary>
-    <div>{Object.entries(schema.fields).filter(([key]) => visibleDeploymentPath([...path, key])).map(([key, node]) => <Field key={key} schema={node} path={[...path, key]} controller={controller} invalid={invalid} t={t} />)}</div>
-  </details>;
-  if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return <AdvancedField schema={schema} path={path} value={explicit} inherited={inherited} upper={controller.layer === "global" ? at(snapshot.profile, path) : undefined} reset={snapshot} disabled={disabled} t={t} onChange={value => controller.edit(path, value)} setInvalid={invalid} />;
-  return <div className="dsmm-field dsmm-deployment-field">
-    {schema.type === "boolean" || choices !== null ? <><label htmlFor={id}>{label(path, t)} <code>{name}</code></label><select id={id} disabled={disabled} aria-describedby={hint === null ? undefined : `${id}-hint`} value={explicit === undefined ? "inherit" : JSON.stringify(explicit)} onChange={event => controller.edit(path, event.currentTarget.value === "inherit" ? undefined : JSON.parse(event.currentTarget.value))}>
-      <option value="inherit">{t("inherit")} · {displayValue(inherited, t)}</option>
-      {(choices ?? [true, false]).map(choice => <option key={String(choice)} value={JSON.stringify(choice)}>{displayValue(choice, t)}</option>)}
-    </select></> : <ScalarField schema={schema} path={path} controller={controller} disabled={disabled} inherited={inherited} invalid={invalid} t={t} />}
-    {hint !== null && <p id={`${id}-hint`} className="dsmm-hint">{t(hint)}</p>}
-    {(explicit !== undefined || controller.layer === "profile" && at(snapshot.nativeForm?.base, path) !== undefined) && <p className="dsmm-hint">{explicit === undefined ? "" : equal(explicit, at(snapshot.defaults, path)) ? t("defaultPin") : t("explicit")}
-      {controller.layer === "profile" && at(snapshot.nativeForm?.base, path) !== undefined ? `${explicit === undefined ? "" : " · "}${t("hostPin")}` : ""}</p>}
-  </div>;
-}
-
-function Layer({ controller, t }: Locale & { controller: DeploymentController }) {
-  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const [invalid, setInvalid] = useState<Set<string>>(new Set());
-  const updateInvalid = (path: string, bad: boolean) => { controller.setInvalid(path, bad); setInvalid(previous => { if (previous.has(path) === bad) return previous; const next = new Set(previous); if (bad) next.add(path); else next.delete(path); return next; }); };
-  const title = controller.layer === "global" ? "global" : "profile";
-  const disabled = state.busy || state.snapshot === null || state.issue !== null || invalid.size > 0 || controller.layer === "profile" && !controller.canWriteProfile();
-  return <div data-dsmm-layer={controller.layer} aria-busy={state.busy}>
-    <details className="dsmm-deployment-card"><summary>{t(title)}<span role="status" aria-live="polite" className="dsmm-hint">{state.busy ? t("saving") : state.dirty ? t("dirty") : state.saved ? t("saved") : ""}</span></summary>
-    <fieldset><legend>{t(title)}</legend><p className="dsmm-hint">{t(title === "global" ? "globalHint" : "profileHint")}</p>
-    {state.snapshot !== null && <>
-      <details className="dsmm-deployment-group"><summary>{t("core")}</summary><div>
-        <p className="dsmm-hint">{t("coreHint")}</p>
-        {Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => key === "modelParameters" || key === "permissionControl").map(([key, schema]) => <Field key={key} schema={schema} path={[key]} controller={controller} invalid={updateInvalid} t={t} />)}
-      </div></details>
-      {Object.entries(state.snapshot.schema.fields ?? {}).filter(([key]) => visibleDeploymentPath([key]) && key !== "modelParameters" && key !== "permissionControl" && (controller.layer === "global" || key !== "modules")).sort(([a], [b]) => a === "modules" ? -1 : b === "modules" ? 1 : 0).map(([key, schema]) => <Field key={key} schema={schema} path={[key]} controller={controller} invalid={updateInvalid} t={t} />)}
-    </>}
-    <div className="dsmm-actions"><Button type="button" variant="primary" disabled={disabled || !state.dirty} onClick={() => { void controller.save(); }}>{t(state.busy ? "saving" : title === "global" ? "saveGlobal" : "saveProfile")}</Button>
-      <Button type="button" variant="outline" disabled={state.busy} onClick={() => { void controller.refresh(); }}>{t("refresh")}</Button>
-      <Button type="button" variant="outline" disabled={state.busy || !state.dirty && state.issue === null} onClick={() => { setInvalid(new Set()); void controller.refresh(true); }}>{t("discard")}</Button></div>
-    </fieldset></details>
+  const pending = [...new Set(controller.pendingPaths().map(moduleFor))];
+  return <section className="dsmm-scope-save" aria-label={t(refreshOnly ? "refresh" : "saveScope")}>
+    <p className="dsmm-status" role="status" aria-live="polite">{refreshOnly ? state.busy ? t("loading") : "" : state.busy ? t("saving") : state.refreshRequired ? t("savedRefreshRequired") : state.saved ? t("saved") : state.dirty ? t("dirty") : ""}</p>
+    {!refreshOnly && pending.length > 0 && <p>{t("pendingModules")}: {pending.map(module => t(moduleTitle(module))).join(" · ")}</p>}
     {state.issue !== null && <p className="dsmm-issue" role="alert">{t(state.issue)}</p>}
-    {invalid.size > 0 && <p className="dsmm-issue" role="alert">{t("invalid")}</p>}
+    {!refreshOnly && state.invalidFields.length > 0 && <p className="dsmm-issue" role="alert">{t("invalid")}</p>}
     {controller.layer === "profile" && !controller.canWriteProfile() && <p className="dsmm-hint">{t("unavailableForm")}</p>}
+    <div className="dsmm-actions">{!refreshOnly && <Button type="button" variant="primary" disabled={!controller.canSave()} onClick={() => void (workspace?.save() ?? controller.save())}>{t(controller.layer === "global" ? "saveGlobal" : "saveProfile")}</Button>}
+      <Button type="button" variant="outline" disabled={state.busy} onClick={() => void controller.refresh()}>{t("refresh")}</Button>
+      {!refreshOnly && <Button type="button" variant="outline" disabled={state.busy || !state.dirty && state.issue === null && !state.refreshRequired} onClick={() => void controller.refresh(true)}>{t("discard")}</Button>}</div>
+  </section>;
+}
+export function NativeRuntimeState({ value, t }: Locale & { value?: SubagentRuntimeAdmissionView }) {
+  return <section className="dsmm-availability" aria-label={t("nativeRuntimeState")}>
+    <h3>{t("nativeRuntimeState")}</h3>
+    <p>{t("nativeRuntimeBinding")}: {t(value?.binding === "stock" ? "nativeRuntimeStock" : value?.binding === "unavailable" ? "nativeRuntimeUnavailable" : "unknown")}</p>
+    <p>{t("nativeRuntimeFence")}: {value === undefined ? t("unknown") : t(value.deliveryFenceReady ? "on" : "off")} · {t("nativeRuntimeRestart")}: {value === undefined ? t("unknown") : t(value.restartRequired ? "on" : "off")}</p>
+    {value?.reason !== undefined && <p>{t(`nativeRuntimeReason-${value.reason}`)}</p>}
+    <p className="dsmm-hint">{t("nativeRuntimeReadinessHint")}</p>
+  </section>;
+}
+export function StateInspector({ controller, t }: Locale & { controller: DeploymentController }) {
+  const { snapshot, session, dirty, issue } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  if (snapshot === null) return <p>{t("unavailable")}</p>;
+  const admitted = session?.configuration ?? null;
+  const source = (value: string | undefined): string => t(value === "profile" ? "profileSource" : value === "global" ? "globalSource" : value === "defaults" ? "defaultsSource" : value === "named-session" ? "namedSource" : value === "startup" ? "startupSource" : value === "deployment" ? "deploymentCapture" : value === "mixed" ? "mixedSource" : "unknown");
+  const value = (layer: Record<string, unknown> | undefined, path: string) => layer === undefined ? t("unknown") : at(layer, path.split(".")) === undefined ? t("absent") : displayValue(at(layer, path.split(".")), t);
+  const restart = (snapshot.nextRoot?.restartRequired ?? []).filter(path => visibleDeploymentPath(path.split(".")));
+  return <div className="dsmm-structured"><p role="status">{session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : t("sessionObserved")}</p>
+    {(dirty || issue !== null) && <p className="dsmm-hint">{t("inspectorStale")}</p>}
+    <p>{t("globalSource")}: {t(configurationVersionState(snapshot.globalRevision))} · {t("profileSource")}: {t(configurationVersionState(snapshot.nativeRevision))}</p>
+    {snapshot.subagentRuntime !== undefined && <NativeRuntimeState value={snapshot.subagentRuntime} t={t} />}
+    {snapshot.modules.map(module => <section className="dsmm-zone" key={module.descriptor.id}><h3>{module.descriptor.label}</h3>
+      <p>{t("desired")}: {t(module.desired.enabled ? "on" : "off")} · {source(module.desired.source)}</p>
+      <p>{t("startup")}: {module.startupMounted == null ? t("unknown") : t(module.startupMounted ? "on" : "off")}</p>
+      <p>{t("next")}: {module.nextRoot.admitted == null ? t("unknown") : t(module.nextRoot.admitted ? "on" : "off")}</p>{module.pending && <p>{t("pending")}</p>}</section>)}
+    {inspectorPaths(snapshot, admitted).map(path => <dl key={path} className="dsmm-deployment-state"><dt>{path}</dt>
+      <dd>{t("desired")}: {value(snapshot.desired, path)} · {source(snapshot.sources[path])}</dd>
+      <dd>{t("startup")}: {value(snapshot.startup, path)} · {source(snapshot.startupSources?.[path])}</dd>
+      <dd>{t("next")}: {value(snapshot.nextRoot?.settings, path)} · {source(snapshot.nextRoot?.sources[path])}</dd>
+      <dd>{t("session")}: {value(admitted?.settings, path)} · {source(admitted?.sources[path])}</dd>
+    </dl>)}{restart.length > 0 && <p>{t("pending")}: {restart.join(", ")}</p>}
   </div>;
 }
-
-function NativeProfileLayer({ namespace, forms, remote, form, core, t }: Locale & { namespace: string; forms: ConfigForms; remote: DsmmConfigRemote; form?: NativePageForm; core: DeploymentController }) {
-  const shared = useMemo(() => forms.get<Record<string, unknown>>(namespace), [forms, namespace]);
-  const snapshot = useSyncExternalStore(listener => shared.subscribe(listener), () => shared.getSnapshot());
-  const controller = useMemo(() => core.forProfile(namespace), [core, remote, namespace]);
-  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const coreState = useSyncExternalStore(core.subscribe, core.getSnapshot);
-  controller.attachForm(form ?? { state: snapshot, mutate: (ops, revision) => shared.mutate(ops, revision) });
-  useEffect(() => { void controller.refresh(); return () => controller.dispose(); }, [controller]);
-  useEffect(() => { if (state.saved) void core.refresh(); }, [state.saved, core]);
-  useEffect(() => { if (controller.getSnapshot().snapshot !== null) void controller.refresh(); }, [coreState.snapshot?.globalRevision, snapshot.revision, controller]);
-  return <Layer controller={controller} t={t} />;
-}
-
-function StateInspector({ controller, session, t }: Locale & { controller: DeploymentController; session: SessionProfileSnapshot | null }) {
-  const { snapshot, dirty, issue } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  if (snapshot === null) return null;
-  const admitted = session?.configuration ?? null;
-  const restartRequired = (snapshot.nextRoot?.restartRequired ?? []).filter(path => visibleDeploymentPath(path.split(".")));
-  const source = (value: string | undefined): string => t(value === "profile" ? "profileSource" : value === "global" ? "globalSource" : value === "defaults" ? "defaultsSource" : value === "named-session" ? "namedSource" : value === "startup" ? "startupSource" : value === "deployment" ? "deploymentCapture" : value === "mixed" ? "mixedSource" : "unknown");
-  const value = (layer: Record<string, unknown> | undefined, path: string): string => layer === undefined ? t("unknown") : at(layer, path.split(".")) === undefined ? t("absent") : displayValue(at(layer, path.split(".")), t);
-  const metadata = (layer: Record<string, unknown> | undefined, path: string, entry: string | undefined): string => layer !== undefined && at(layer, path.split(".")) === undefined && entry === undefined ? t("absent") : source(entry);
-  return <details className="dsmm-deployment-card"><summary>{t("state")}<span className="dsmm-hint">{restartRequired.length > 0 ? t("pending") : dirty || issue !== null ? t("inspectorStale") : ""}</span></summary><div>
-    <p role="status" aria-live="polite">{session === null ? t("noSession") : admitted === null ? t("sessionUnavailable") : `${t("namedSource")}: ${admitted.named?.id ?? "—"}`}</p>
-    {session !== null && <p>{t("session")}: <code>{session.sessionId}</code> · <code>{session.admissionEpoch}</code> · {session.scope}</p>}
-    {(dirty || issue !== null) && <p className="dsmm-hint">{t("inspectorStale")}</p>}
-    <p className="dsmm-hint">Global CAS: <code>{snapshot.globalRevision}</code> · native CAS: <code>{snapshot.nativeRevision}</code> · Host form: {snapshot.nativeFormRevision ?? "—"}</p>
-    {inspectorPaths(snapshot, admitted).map(path => <dl key={path} className="dsmm-deployment-state"><dt><code>{path}</code></dt>
-      <dd>{t("globalSource")}: {at(snapshot.global, path.split(".")) === undefined ? t("absent") : t("globalSource")}</dd>
-      <dd>{t("desired")}: {value(snapshot.desired, path)} · {metadata(snapshot.desired, path, snapshot.sources[path])}</dd>
-      <dd>{t("startup")}: {value(snapshot.startup, path)} · {metadata(snapshot.startup, path, snapshot.startupSources?.[path])} / {at(snapshot.startup, path.split(".")) === undefined ? t("absent") : t("startupSource")}</dd>
-      <dd>{t("next")}: {value(snapshot.nextRoot?.settings, path)} · {metadata(snapshot.nextRoot?.settings, path, snapshot.nextRoot?.sources[path])} / {metadata(snapshot.nextRoot?.settings, path, snapshot.nextRoot?.captures[path])}</dd>
-      <dd>{t("session")}: {value(admitted?.settings, path)} · {metadata(admitted?.settings, path, admitted?.sources[path])} / {metadata(admitted?.settings, path, admitted?.captures[path])}</dd>
-    </dl>)}
-    {restartRequired.length > 0 && <p>{t("pending")}: {restartRequired.join(", ")}</p>}
-  </div></details>;
-}
-
 export function DeploymentPage(props: DeploymentPageProps) {
-  const state = useSyncExternalStore(props.core.subscribe, props.core.getSnapshot);
+  const workspace = props.workspace ?? deploymentWorkspace(props.core, props.permissions);
+  const navigation = useSyncExternalStore(workspace.subscribe, workspace.getSnapshot);
+  const core = useSyncExternalStore(props.core.subscribe, props.core.getSnapshot);
+  const controller = workspace.controller() ?? props.core;
+  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const id = useId(), heading = useRef<HTMLHeadingElement>(null), triggers = useRef(new Map<ConfigModule, HTMLButtonElement>()), previous = useRef<ConfigModule | null>(null);
+  const scopeControl = useRef<HTMLSelectElement>(null), confirmation = useRef<HTMLButtonElement>(null);
+  const resume = useRef<{ element: HTMLElement; scope: ConfigScope; module: ConfigModule | null } | null>(null);
+  const { t } = props, snapshot = state.snapshot ?? core.snapshot, active = navigation.module;
   useEffect(() => { if (props.view === "page") void props.core.refresh(); }, [props.core, props.view]);
-  if (props.view === "summary") return <span>{props.t("summary")}</span>;
-  const { t } = props, snapshot = state.snapshot;
+  useEffect(() => { if (props.forms !== undefined) workspace.bindForms(props.forms); }, [workspace, props.forms]);
+  useEffect(() => {
+    if (active !== null) heading.current?.focus(); else if (previous.current !== null) triggers.current.get(previous.current)?.focus();
+    previous.current = active;
+  }, [active]);
+  useEffect(() => {
+    if (navigation.pending !== null) { resume.current = { element: document.activeElement as HTMLElement, scope: navigation.scope, module: active }; confirmation.current?.focus(); }
+    else if (resume.current !== null) {
+      const from = resume.current; resume.current = null;
+      if (from.scope === navigation.scope && from.module === active) { if (from.element.isConnected) from.element.focus(); }
+      else if (active !== null) heading.current?.focus();
+      else if (from.scope !== navigation.scope) scopeControl.current?.focus();
+    }
+  }, [navigation.pending, navigation.scope, active]);
+  if (props.view === "summary") return <span>{t("summary")}</span>;
+  const fields = snapshot === null || active === null ? [] : moduleFields(scopeSchema(snapshot, controller.layer), active, controller.layer);
+  const modules = CONFIG_MODULES.filter(module => module === "state" || module === "permissions" || snapshot === null || moduleFields(snapshot.schema, module, "global").length + moduleFields(scopeSchema(snapshot, "profile"), module, "profile").length > 0);
+  const scopeActions = <ScopeSave controller={active === "state" ? props.core : controller} workspace={workspace} refreshOnly={active === "state" || workspace.controller() === null} t={t} />;
   return <section className="dsmm-profiles dsmm-deployment" data-dsmm-page aria-label={t("title")}>
-    <p className="dsmm-hint">{t("description")}</p><p className="dsmm-hint">{t("boundaries")}</p>
-    {snapshot?.modules.map(module => {
-      const admitted = state.session?.modules?.find(value => value.descriptor.id === module.descriptor.id)?.admitted;
-      return <details key={module.descriptor.id} className="dsmm-deployment-card"><summary>{module.descriptor.label}<span className="dsmm-hint">{module.pending ? t("pending") : t(module.desired.enabled ? "on" : "off")}</span></summary><div><p>{t("hostUnknown")}</p><p>{t("desired")}: {t(module.desired.enabled ? "on" : "off")} · {module.desired.source}</p>
-        <p>{t("startup")}: {module.startupMounted == null ? t("unknown") : t(module.startupMounted ? "on" : "off")} · {t("next")}: {module.nextRoot.admitted == null ? t("unknown") : t(module.nextRoot.admitted ? "on" : "off")}</p>
-        <p>{t("session")}: {admitted == null ? t("unknown") : t(admitted ? "on" : "off")}</p>
-        <p className="dsmm-hint">{t(module.descriptor.id === "deepwork" ? "ceiling" : "permissionControlHint")}</p></div></details>;
-    })}
-    <Layer controller={props.core} t={t} />
-    {props.profilePage && props.forms !== undefined && snapshot?.namespace !== null && snapshot?.namespace !== undefined && (props.rowNamespace === undefined || props.rowNamespace === snapshot.namespace)
-      ? <NativeProfileLayer key={`${snapshot.hostProfileKey}:${snapshot.entryId}`} namespace={snapshot.namespace} forms={props.forms} remote={props.remote} form={props.form} core={props.core} t={t} />
-      : <div><details className="dsmm-deployment-card"><summary>{t("profile")}<span className="dsmm-hint">{t("profileUnavailable")}</span></summary><div><p>{t("profileHint")}</p></div></details><p className="dsmm-hint">{t("unavailableForm")}</p></div>}
-    <StateInspector controller={props.core} session={state.session} t={t} />
+    <p>{t("description")}</p><p className="dsmm-hint">{t("boundaries")}</p>
+    <div className="dsmm-field"><label htmlFor={`${id}-scope`}>{t("scope")}</label><select ref={scopeControl} id={`${id}-scope`} value={navigation.scope} disabled={state.busy || navigation.pending !== null} onChange={event => {
+      const scope = event.currentTarget.value; if (scope === "global" || scope === "profile") workspace.request({ scope, module: active });
+    }}><option value="global">{t("global")}</option><option value="profile">{t("profile")}</option></select></div>
+    <p className="dsmm-hint">{t(navigation.scope === "global" ? "globalHint" : "profileHint")}</p>
+    {navigation.scope === "profile" && (navigation.native === null || !navigation.native.canWriteProfile()) && <p className="dsmm-hint">{t("unavailableForm")}</p>}
+    <div className="dsmm-deployment-frame" data-drawer-open={active !== null}>
+      <nav className="dsmm-module-list" aria-label={t("modules")}>
+        {modules.map(module => <Button key={module} ref={element => { if (element !== null) triggers.current.set(module, element); }} type="button" variant="outline" disabled={navigation.pending !== null} aria-expanded={active === module} aria-controls={`${id}-drawer`} onClick={() => workspace.request({ scope: navigation.scope, module })}>{t(moduleTitle(module))}</Button>)}
+      </nav>
+      {active !== null && <aside id={`${id}-drawer`} className="dsmm-module-drawer" aria-labelledby={`${id}-heading`} data-dsmm-module={active} onKeyDown={event => {
+        if (event.key !== "Escape" || event.defaultPrevented) return;
+        const target = event.target as HTMLElement;
+        if (target.tagName === "SELECT" && (!globalThis.CSS?.supports("selector(select:open)") || target.matches("select:open"))) return;
+        event.preventDefault(); if (navigation.pending !== null) workspace.continueEditing(); else workspace.request({ scope: navigation.scope, module: null });
+      }}>
+        <div className="dsmm-drawer-heading"><h2 id={`${id}-heading`} ref={heading} tabIndex={-1}>{t(moduleTitle(active))}</h2><Button type="button" variant="outline" disabled={state.busy} onClick={() => workspace.request({ scope: navigation.scope, module: null })}>{t("close")}</Button></div>
+        {active === "state" ? <><StateInspector controller={props.core} t={t} />{scopeActions}</> : <>
+          {navigation.scope === "profile" && navigation.native === null ? <p>{t("unavailableForm")}</p> : state.snapshot === null ? <p>{t(state.busy ? "loading" : "unavailable")}</p> : <div data-dsmm-layer={controller.layer} aria-busy={state.busy} className="dsmm-structured">
+            {fields.length === 0 && <p className="dsmm-hint">{t("noModuleFields")}</p>}
+            {fields.map(([key, schema]) => <Field key={key} schema={schema} path={[key]} controller={controller} t={t} />)}
+            {active === "run" && controller.layer === "profile" && <NativeRuntimeState value={state.snapshot.subagentRuntime} t={t} />}
+          </div>}
+          {scopeActions}
+          {active === "permissions" && <section className="dsmm-zone"><h3>{t("rootRules")}</h3><p className="dsmm-hint">{t("rootRulesHint")}</p>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionsPanel controller={workspace.permissions} t={key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key} />}</section>}
+        </>}
+      </aside>}
+    </div>
+    {navigation.pending !== null && <section className="dsmm-confirm" role="group" aria-label={t("leaveDraft")} onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); workspace.continueEditing(); } }}><p>{t("leaveDraft")}</p><div className="dsmm-actions">
+      <Button ref={confirmation} type="button" variant="primary" onClick={() => workspace.continueEditing()}>{t("continueEditing")}</Button>
+      <Button type="button" variant="outline" onClick={() => workspace.keepAndNavigate()}>{t("keepDraft")}</Button>
+      <Button type="button" variant="outline" disabled={state.busy} onClick={() => void workspace.discardAndNavigate()}>{t("discardDraft")}</Button>
+    </div></section>}
   </section>;
 }

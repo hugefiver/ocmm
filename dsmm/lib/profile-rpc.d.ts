@@ -10,8 +10,8 @@ import type { DsmmProfileRuntime } from "./profile-runtime.js";
 export interface ProfilesBackend {
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;
-    save(request: ProfileSaveRequest): Promise<ProfileReadResult>;
-    select(request: ProfileSelectRequest): Promise<ProfileSnapshot>;
+    save(request: ProfileSaveRequest, assertAuthority?: () => void): Promise<ProfileReadResult>;
+    select(request: ProfileSelectRequest, assertAuthority?: () => void): Promise<ProfileSnapshot>;
     getSession(agent: DshAgent): Promise<SessionProfileSnapshot>;
     selectSession(request: SessionProfileSelectRequest, capturedAgent: DshAgent, signal?: AbortSignal, assertAuthority?: () => void): Promise<SessionProfileSnapshot>;
     selectMode?(request: SessionModeSelectRequest, capturedAgent: DshAgent, signal?: AbortSignal, assertAuthority?: () => void): Promise<SessionProfileSnapshot>;
@@ -22,11 +22,12 @@ export declare class DsmmProfilesHost extends TypertRemoteService {
     private readonly lifetime;
     constructor(ctx: Context, backend: ProfilesBackend);
     private invoke;
+    private captureAuthority;
     describe(): Promise<ProfileSnapshot>;
     read(id: string): Promise<ProfileReadResult>;
     save(request: ProfileSaveRequest): Promise<ProfileReadResult>;
     select(request: ProfileSelectRequest): Promise<ProfileSnapshot>;
-    /** Native Connection's exact operator is authority, not a claimed Peer ID. */
+    /** Native Connection's exact browser Peer is authority, not a claimed Peer ID. */
     private invokeSession;
     describeSession(sessionId: string): Promise<SessionProfileSnapshot>;
     selectSession(sessionId: string, request: SessionProfileSelectRequest): Promise<SessionProfileSnapshot>;

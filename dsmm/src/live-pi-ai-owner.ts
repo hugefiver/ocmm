@@ -2,7 +2,7 @@ import { symbols } from "@deepseek-ai/cordis";
 import type { Context } from "@deepseek-ai/cordis";
 import { LlmError } from "@deepseek-ai/dsh-llm";
 import type { LlmAdapter, LlmRuntime } from "@deepseek-ai/dsh-llm";
-import { Config } from "@deepseek-ai/dsh-llm-pi-ai";
+import { Config, PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import type { Options } from "@deepseek-ai/dsh-llm-pi-ai";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { brandString } from "@deepseek-ai/dsh-brand";
@@ -30,9 +30,13 @@ export class LivePiAiOwner implements DsmmLlmRouteResolver {
   private readonly registrations = new Map<string, Registration>();
   constructor(private readonly ctx: Context, private readonly native: LlmRuntime) {}
 
+  supportsNativeStop(provider: string): boolean {
+    const registration = this.registrations.get(provider);
+    return registration !== undefined && !(registration.adapter instanceof PiAiAdapter);
+  }
+
   requiresRaw(config: DsmmLlmCallConfig): boolean {
-    return config.customParameters !== undefined || config.stop !== undefined
-      && this.registrations.get(config.provider)?.scope.fiber.entry?.options.name === "@deepseek-ai/dsh-llm-pi-ai";
+    return config.customParameters !== undefined || config.stop !== undefined && !this.supportsNativeStop(config.provider);
   }
 
   register(scope: Context, providers: readonly string[], adapter: LlmAdapter, handle: RegistrationHandle): RegistrationHandle {
@@ -66,7 +70,7 @@ export class LivePiAiOwner implements DsmmLlmRouteResolver {
     const record = this.registrations.get(provider);
     if (record === undefined) throw new LlmError("Provider registration is not ready", "DSMM_PROVIDER_NOT_READY");
     const { scope, adapter } = record;
-    if (scope.fiber.entry?.options.name !== "@deepseek-ai/dsh-llm-pi-ai") throw new LlmError("This provider has no raw executor", "UNSUPPORTED_ROUTE_PARAMETERS");
+    if (!(adapter instanceof PiAiAdapter) || scope.fiber.entry?.options.name !== "@deepseek-ai/dsh-llm-pi-ai") throw new LlmError("This provider has no raw executor", "UNSUPPORTED_ROUTE_PARAMETERS");
     const config: unknown = scope.fiber.config;
     if (config === null || typeof config !== "object" || !("providers" in config) || config.providers === null || typeof config.providers !== "object"
       || !("get" in config.providers) || typeof config.providers.get !== "function") throw new LlmError("Pi-AI live configuration is unavailable", "DSMM_PROVIDER_NOT_READY");
@@ -116,7 +120,7 @@ export class LivePiAiOwner implements DsmmLlmRouteResolver {
     signal?.throwIfAborted();
     if (!this.native.listProviders().some(row => row.id === route.provider)) throw new DsmmMissingProviderError();
     if (!this.requiresRaw(call)) {
-      try { await this.native.resolveCallConfig(call, signal); return route; }
+      try { await this.native.resolveCallConfig(call, signal); signal?.throwIfAborted(); return route; }
       catch (error) { if (!(error instanceof LlmError) || !["UNSUPPORTED_REASONING_EFFORT", "UNSUPPORTED_OPTION"].includes(error.code)) throw error; }
     }
     const generation = this.generation(route.provider);

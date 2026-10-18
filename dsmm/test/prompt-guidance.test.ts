@@ -9,7 +9,7 @@ import type { DsmmRoleAvailabilityState } from "../src/profile-types.js";
 import "./prompt-source-loader.mjs";
 
 // Register source resolution before loading the prompt's source graph in memory.
-const { buildDsmmAgentGuidance, buildRolePersona, SOURCE_ROLE_CATALOG, buildDeepworkPrompt } = await import("../src/prompts.ts");
+const { buildDsmmAgentGuidance, buildRolePersona, SOURCE_ROLE_CATALOG } = await import("../src/prompts.ts");
 const { DSMM_LOCALES, resolveConfig, freezeSettings } = await import("../src/settings.ts");
 const { callableRoleInventory } = await import("../src/role-subagents.ts");
 
@@ -107,23 +107,22 @@ test("lifecycle guidance separates observed SDK controls from managed startup bi
       parameters: { child_id: { type: "string" } }, output: { schema: { type: "json" }, render() { return []; } }, async execute() { return null; } }));
     const settings = resolveConfig({ subagents: { enableRunInBackground: true, backgroundMode: "continuable" } });
     let observed: DsmmPromptObservation = { scope: "root", delegation: [], tools: ctx.tools.schemas(),
-      runtimeAdmission: { binding: "stock", deliveryFenceReady: false, restartRequired: true, reason: "explicit-composition-required" },
-      capabilities: { nativeJobs: true, continuable: true, managedChildDelivery: true } };
+      runtimeAdmission: { binding: "stock", deliveryFenceReady: false, restartRequired: true, reason: "authority-not-ready" },
+      capabilities: { continuable: true, nativeChildDelivery: true } };
     ctx.systemPrompt.section({ name: "fixture:lifecycle", order: 49, interpolate: false, text: () => buildDsmmAgentGuidance(settings, observed) });
     const assemble = () => ctx.systemPrompt.assemble().then(renderPrompt);
     let state = block(await assemble(), "dsmm-child-lifecycle-state") as Record<string, unknown>;
     assert.equal(state.continuable, false); assert.equal(state.sendMessage, false);
-    assert.equal(state.foregroundHandoffSurface, null); assert.equal(state.browserPromptSurface, null);
-    observed = { ...observed, runtimeAdmission: { binding: "dsmm", deliveryFenceReady: true, restartRequired: false } };
+    assert.equal(state.browserPromptSurface, null);
+    observed = { ...observed, runtimeAdmission: { binding: "stock", deliveryFenceReady: true, restartRequired: false } };
     state = block(await assemble(), "dsmm-child-lifecycle-state") as Record<string, unknown>;
     assert.equal(state.continuable, true); assert.equal(state.sendMessage, true);
-    assert.equal(state.foregroundHandoffSurface, null, "runtime readiness alone does not prove user RPC wiring");
-    observed = { ...observed, capabilities: { ...observed.capabilities, foregroundHandoff: { surface: "fixture.operator.background" }, nativeBrowserPrompt: { surface: "subagents.prompt" } } };
+    assert.equal(state.browserPromptSurface, null, "runtime readiness alone does not prove user RPC wiring");
+    observed = { ...observed, capabilities: { ...observed.capabilities, nativeBrowserPrompt: { surface: "subagents.prompt" } } };
     state = block(await assemble(), "dsmm-child-lifecycle-state") as Record<string, unknown>;
-    assert.equal(state.foregroundHandoffSurface, "fixture.operator.background"); assert.equal(state.browserPromptSurface, "subagents.prompt");
+    assert.equal(state.browserPromptSurface, "subagents.prompt");
     const disabled = block(buildDsmmAgentGuidance(resolveConfig(), observed), "dsmm-child-lifecycle-state") as Record<string, unknown>;
-    assert.equal(disabled.backgroundEnabled, false); assert.equal(disabled.nativeJobs, false); assert.equal(disabled.continuable, false);
-    assert.equal(disabled.foregroundHandoffSurface, null);
+    assert.equal(disabled.backgroundEnabled, false); assert.equal(disabled.continuable, true);
     observed = { ...observed, tools: [] };
     state = block(await assemble(), "dsmm-child-lifecycle-state") as Record<string, unknown>;
     assert.equal(state.sendMessage, false, "a public SDK method is not a model tool");
@@ -131,17 +130,13 @@ test("lifecycle guidance separates observed SDK controls from managed startup bi
   } finally { await ctx.fiber.dispose(); }
 });
 
-test("observed invocation and conservative legacy limitations survive assembly without draft or parent-policy synthesis", () => {
+test("observed invocation survives assembly without draft or parent-policy synthesis", () => {
   const settings = freezeSettings(resolveConfig({ locale: "ko", roleRouting: { "dsmm-reviewer": { primary: { provider: "draft", model: "not-observed" } } } }));
   const view = Object.freeze({ role: "dsmm-reviewer" as const, label: 'Review `src/검토.ts`', level: "max" as const, routeSource: "level" as const,
     route: Object.freeze({ provider: "fixture", model: "actual-fallback", reasoningEffort: "high" }), mode: "continuable" as const, childId: "durable-child" });
-  const evidence = { mode: "legacy-conservative" as const, parentAdmissionEpoch: "a".repeat(64), provenFields: ["lineage", "role", "route", "tool-filter"] as const,
-    limitations: [{ field: "git-write" as const, code: "missing-evidence" as const, effect: "capability-denied" as const }] };
-  const observed: DsmmPromptObservation = { scope: "child", delegation: [], tools: [], invocation: { view, routeKind: "actual" },
-    childEvidence: { ...evidence, provenFields: [...evidence.provenFields] } };
+  const observed: DsmmPromptObservation = { scope: "child", delegation: [], tools: [], invocation: { view, routeKind: "actual" } };
   const prompt = buildDsmmAgentGuidance(settings, observed);
   assert.deepEqual(block(prompt, "dsmm-observed-invocation"), observed.invocation);
-  assert.deepEqual(block(prompt, "dsmm-child-evidence"), observed.childEvidence);
   assert.equal(language(prompt).capturedLocale, "ko");
   assert.deepEqual(block(buildDsmmAgentGuidance(settings, { ...observed, invocation: { view, routeKind: "initial" } }), "dsmm-observed-invocation"), { view, routeKind: "initial" });
   assert.equal(view.childId, "durable-child"); assert.equal(settings.roleRouting["dsmm-reviewer"]?.primary?.provider, "draft");
@@ -153,26 +148,19 @@ test("model-facing DTO projection removes extra secret fields at every nested ob
   try {
     await ctx.plugin(SystemPrompt, {}).await();
     const settings = resolveConfig();
-    const runtime = { binding: "dsmm" as const, deliveryFenceReady: true, restartRequired: false, reason: "authority-not-ready" as const };
+    const runtime = { binding: "stock" as const, deliveryFenceReady: true, restartRequired: false };
     const invocation = { routeKind: "actual" as const, view: { role: "dsmm-reviewer" as const, label: "Useful review", level: "high" as const,
       routeSource: "level" as const, route: { provider: "fixture", model: "observed-route", reasoningEffort: "high" }, mode: "continuable" as const,
       childId: "same-durable-child", runId: "observed-run", jobId: "observed-job" } };
-    const limitation = { field: "git-write" as const, code: "missing-evidence" as const, effect: "capability-denied" as const };
     let observed: DsmmPromptObservation;
     ctx.systemPrompt.section({ name: "fixture:projected-observations", order: 49, interpolate: false, text: () => buildDsmmAgentGuidance(settings, observed) });
-    for (const mode of ["captured", "legacy-conservative"] as const) {
-      const evidence = { mode, parentAdmissionEpoch: "a".repeat(64), ...(mode === "captured" ? { originalAdmissionEpoch: "b".repeat(64) } : {}),
-        provenFields: ["lineage", "route", "tool-filter"] as const, limitations: [limitation] };
       const pollutedInvocation = { ...invocation, apiKey: secret, view: { ...invocation.view, credentials: { apiKey: secret }, route: { ...invocation.view.route, apiKey: secret } } };
       const pollutedRuntime = { ...runtime, apiKey: secret, credentials: { token: secret } };
-      const pollutedEvidence = { ...evidence, apiKey: secret, provenFields: [...evidence.provenFields], limitations: [{ ...limitation, apiKey: secret, credentials: { token: secret } }] };
-      observed = { scope: "child", delegation: [], tools: [], runtimeAdmission: pollutedRuntime, invocation: pollutedInvocation, childEvidence: pollutedEvidence };
+      observed = { scope: "child", delegation: [], tools: [], runtimeAdmission: pollutedRuntime, invocation: pollutedInvocation };
       const prompt = renderPrompt(await ctx.systemPrompt.assemble());
       assert.equal(prompt.includes(secret), false, "extra DTO fields must not enter actual model context");
       assert.deepEqual((block(prompt, "dsmm-child-lifecycle-state") as Record<string, unknown>).runtimeAdmission, runtime);
       assert.deepEqual(block(prompt, "dsmm-observed-invocation"), invocation);
-      assert.deepEqual(block(prompt, "dsmm-child-evidence"), evidence);
-    }
   } finally { await ctx.fiber.dispose(); }
 });
 
@@ -184,7 +172,7 @@ test("existing child delivery needs its own observation even with native send_me
       output: { schema: { type: "json" }, render() { return []; } }, async execute() { return null; } }));
     const settings = resolveConfig({ subagents: { enableRunInBackground: true, backgroundMode: "continuable" } });
     let observed: DsmmPromptObservation = { scope: "child", delegation: [], tools: ctx.tools.schemas(),
-      runtimeAdmission: { binding: "dsmm", deliveryFenceReady: true, restartRequired: false },
+      runtimeAdmission: { binding: "stock", deliveryFenceReady: true, restartRequired: false },
       capabilities: { continuable: false, nativeBrowserPrompt: { surface: "subagents.prompt" } } };
     ctx.systemPrompt.section({ name: "fixture:existing-delivery", order: 49, interpolate: false, text: () => buildDsmmAgentGuidance(settings, observed) });
     const state = async () => block(renderPrompt(await ctx.systemPrompt.assemble()), "dsmm-child-lifecycle-state") as Record<string, unknown>;
@@ -193,34 +181,22 @@ test("existing child delivery needs its own observation even with native send_me
     observed = { ...observed, capabilities: { ...observed.capabilities, continuable: true } };
     const creationOnly = await state();
     assert.equal(creationOnly.continuable, true); assert.equal(creationOnly.sendMessage, false); assert.equal(creationOnly.browserPromptSurface, null);
-    observed = { ...observed, capabilities: { ...observed.capabilities, managedChildDelivery: false } };
+    observed = { ...observed, capabilities: { ...observed.capabilities, nativeChildDelivery: false } };
     assert.equal((await state()).sendMessage, false);
-    observed = { ...observed, capabilities: { ...observed.capabilities, continuable: false, managedChildDelivery: true } };
+    observed = { ...observed, capabilities: { ...observed.capabilities, continuable: false, nativeChildDelivery: true } };
     const existingOnly = await state();
     assert.equal(existingOnly.continuable, false); assert.equal(existingOnly.sendMessage, true);
     assert.equal(existingOnly.browserPromptSurface, "subagents.prompt"); assert.equal(existingOnly.childToParentReporting, true);
     const noCreation = block(buildDsmmAgentGuidance(resolveConfig(), observed), "dsmm-child-lifecycle-state") as Record<string, unknown>;
     assert.equal(noCreation.continuable, false); assert.equal(noCreation.sendMessage, true);
-    observed = { ...observed, capabilities: { ...observed.capabilities, managedChildDelivery: false } };
+    observed = { ...observed, capabilities: { ...observed.capabilities, nativeChildDelivery: false } };
     const denied = await state();
     assert.equal(denied.sendMessage, false); assert.equal(denied.browserPromptSurface, null); assert.equal(denied.childToParentReporting, true);
-    observed = { ...observed, capabilities: { ...observed.capabilities, managedChildDelivery: true }, runtimeAdmission: { binding: "stock", deliveryFenceReady: false, restartRequired: true } };
+    observed = { ...observed, capabilities: { ...observed.capabilities, nativeChildDelivery: true }, runtimeAdmission: { binding: "stock", deliveryFenceReady: false, restartRequired: true } };
     const stock = await state();
     assert.equal(stock.sendMessage, false); assert.equal(stock.browserPromptSurface, null); assert.equal(stock.childToParentReporting, true);
-    observed = { ...observed, runtimeAdmission: { binding: "dsmm", deliveryFenceReady: true, restartRequired: false }, tools: [] };
+    observed = { ...observed, runtimeAdmission: { binding: "stock", deliveryFenceReady: true, restartRequired: false }, tools: [] };
     const browserOnly = await state();
     assert.equal(browserOnly.sendMessage, false); assert.equal(browserOnly.browserPromptSurface, "subagents.prompt"); assert.equal(browserOnly.childToParentReporting, false);
   } finally { await ctx.fiber.dispose(); }
-});
-
-test("common calibration still follows exact native routes and never mutates the selected root route", () => {
-  const settings = resolveConfig({ deepseekV4ProCalibration: "strict", deepseekFlashCalibration: "strict" });
-  for (const route of [Object.freeze({ provider: "deepseek-official", model: "deepseek-v4-pro" }), Object.freeze({ provider: "deepseek-account", model: "deepseek-flash" })]) {
-    const before = { ...route };
-    const prompt = buildDeepworkPrompt(settings, { route });
-    assert.ok(prompt.includes(route.model === "deepseek-flash" ? "<dsmm-deepseek-flash-calibration>" : "<dsmm-deepseek-v4-pro-calibration>"));
-    assert.deepEqual(route, before);
-  }
-  const unverified = Object.freeze({ provider: "other", model: "deepseek-flash" });
-  assert.equal(buildDeepworkPrompt(settings, { route: unverified }).includes("<dsmm-deepseek-flash-calibration>"), false);
 });

@@ -6,9 +6,9 @@ import type { RolePluginRow } from "../lib/roles.js";
 import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
 import type { DshContext } from "../lib/dsh-types.js";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
-import { nativeRoutingFixture, headerRoutes } from "./native-routing-fixture.ts";
+import { nativeRoutingFixture, headerRoutes, runFixtureTurn } from "./native-routing-fixture.ts";
 
-test("native DSH registration declares enabled root roles and keeps auxiliary child tools", async () => {
+test("native DSH registration makes every enabled role discoverable while root admission remains qualified", async () => {
   const definitions: Array<{ id: string; name: string; plugins: RolePluginRow[] }> = [];
   const registry = {
     async register(definition: typeof definitions[number]) {
@@ -28,15 +28,17 @@ test("native DSH registration declares enabled root roles and keeps auxiliary ch
   assert.ok(installer);
   await installer({ get: (name) => (name === "agentPresets" ? registry : name === "agents" ? { list: () => [], get: () => undefined } : { guard: () => () => {} }) as never, on() {} });
 
-  assert.deepEqual(definitions.map((item) => item.id), ["dsmm-orchestrator", "dsmm-builder"]);
-  assert.deepEqual(definitions.map((item) => item.name), ["DW Orchestrator", "DW Builder"]);
-  assert.equal(definitions.some((item) => DSMM_ROLES.some((role) => role.id === item.id && !isRootRole(role))), false);
-  const orchestrator = definitions[0];
+  const enabledDefinitions = DSMM_ROLES.filter((role) => DEFAULT_DSMM_SETTINGS.roles[role.id]);
+  assert.deepEqual(definitions.map((item) => item.id), enabledDefinitions.map((role) => role.id));
+  assert.deepEqual(definitions.map((item) => item.name), enabledDefinitions.map((role) => role.name));
+  assert.ok(definitions.some((item) => DSMM_ROLES.some((role) => role.id === item.id && !isRootRole(role))));
+  const orchestrator = definitions.find((item) => item.id === "dsmm-orchestrator");
   assert.ok(orchestrator);
   assert.equal(orchestrator.plugins.some((item) => item.name === "@dsmm/dsmm/permission-fs"), true);
   assert.equal("roots" in orchestrator, false);
   const f = await nativeRoutingFixture();
   try {
+    await assert.rejects(f.create({ agentPreset: "dsmm-reviewer" }), /not eligible.*root/iu);
     const root = await f.create({ agentPreset: "dsmm-orchestrator" });
     const enabled = DSMM_ROLES.filter(role => role.id !== "dsmm-orchestrator" && DEFAULT_DSMM_SETTINGS.roles[role.id]);
     const schemas = root.ctx.tools.schemas(root).filter(row => row.name.startsWith("dsmm_"));
@@ -52,17 +54,13 @@ test("native DSH registration declares enabled root roles and keeps auxiliary ch
       assert.equal(Object.hasOwn(parameters.properties, "route"), false);
       assert.equal(Object.hasOwn(parameters.properties, "run_in_background"), false);
     }
-    const plan = await f.subagents.startActivation({ provider: "dsmm-role-plan-critic", label: "Readonly critic", delivery: "caller", signal: new AbortController().signal,
-      request: { parent: root, prompt: [] } });
+    const child = await f.createAuxiliary("dsmm-plan-critic", undefined, "one-shot", root);
     try {
-      const child = f.agents.get(plan.childId)!;
-      assert.ok(child);
       const names = child.ctx.tools.schemas(child).map(schema => schema.name);
       assert.ok(names.includes("read") && names.includes("dsmm_code_search"));
       assert.equal((await child.ctx.tools.execute({ agent: child, name: "write", arguments: {}, callId: ToolCallId("registry-readonly"), signal: new AbortController().signal })).isError, true);
-      assert.equal((await child.ctx.tools.execute({ agent: child, name: "read", arguments: {}, callId: ToolCallId("registry-read"), signal: new AbortController().signal })).value, "read");
-      assert.equal((await plan.result).stopReason, "completed");
-    } finally { await plan.dispose(); }
+      await runFixtureTurn(child);
+    } finally { await f.releaseAuxiliary(child); }
   } finally { await f.dispose(); }
 });
 
@@ -82,27 +80,32 @@ test("disabled roles have neither native preset declarations nor callable child 
     on() {}
   });
   assert.equal(definitions.some((item) => item.id === "dsmm-builder" || item.id === "dsmm-oracle"), false);
-  assert.deepEqual(definitions.map((item) => item.id), ["dsmm-orchestrator"]);
+  assert.deepEqual(definitions.map((item) => item.id), DSMM_ROLES.filter((role) => role.id !== "dsmm-builder" && role.id !== "dsmm-oracle"
+    && DEFAULT_DSMM_SETTINGS.roles[role.id]).map((role) => role.id));
   const orchestrator = definitions.find((item) => item.id === "dsmm-orchestrator");
   assert.ok(orchestrator);
   assert.equal(orchestrator.plugins.some((item) => !Array.isArray(item.config) && (item.config?.toolName === "dsmm_builder" || item.config?.toolName === "dsmm_oracle")), false);
 });
 
-test("enabled auxiliary roles alone do not create native root presets", async () => {
-  const definitions: unknown[] = [];
+test("enabled auxiliary roles remain discoverable without becoming root-eligible", async () => {
+  const definitions: Array<{ id: string }> = [];
   let installer: ((ctx: DshContext) => unknown) | undefined;
-  registerRolePresets({ inject(_deps, callback) { installer = callback; } }, () => resolveConfig({
+  const settings = resolveConfig({
     roles: { "dsmm-orchestrator": false, "dsmm-planner": false, "dsmm-builder": false }
-  }));
+  });
+  registerRolePresets({ inject(_deps, callback) { installer = callback; } }, () => settings);
   assert.ok(installer);
   await installer({
     get: (name) => (name === "agentPresets" ? {
-      async register(definition: unknown) { definitions.push(definition); return async () => {}; },
+      async register(definition: { id: string }) { definitions.push(definition); return async () => {}; },
       composedPreset() { return undefined; }
     } : name === "agents" ? { list: () => [], get: () => undefined } : undefined) as never,
     on() {}
   });
-  assert.deepEqual(definitions, []);
+  const expected = DSMM_ROLES.filter((role) => settings.roles[role.id]);
+  assert.deepEqual(definitions.map((definition) => definition.id), expected.map((role) => role.id));
+  assert.ok(expected.length > 0);
+  assert.equal(expected.some(isRootRole), false);
 });
 
 test("read-only restriction follows native blank preset switches without sticking to a write role", async () => {

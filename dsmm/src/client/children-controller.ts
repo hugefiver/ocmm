@@ -1,12 +1,12 @@
 import type { RemoteResult } from "@deepseek-ai/dsh-typert-protocol";
 import { ROLE_CONTROL_REMOTE, parseChildSessionSnapshot, parseRoleControlDescendants, parseRoleControlErrorInfo, parseRoleControlPromptRequest } from "../role-control-remote.js";
 import type { DsmmChildrenRemote } from "../role-control-remote.js";
-import type { BackgroundTransitionResult, ChildSessionSnapshot, RoleControlAvailability, RoleControlChildView, RoleControlDescendantsSnapshot, RoleControlErrorInfo, SubagentInterruptReceipt, SubagentPromptReceipt, SubagentPromptRequest } from "../role-control-types.js";
+import type { ChildSessionSnapshot, RoleControlAvailability, RoleControlChildView, RoleControlDescendantsSnapshot, RoleControlErrorInfo, SubagentInterruptReceipt, SubagentPromptReceipt, SubagentPromptRequest } from "../role-control-types.js";
 
 export interface ChildrenIssue extends Partial<RoleControlErrorInfo> { kind: "domain" | "transport" | "protocol" | "local"; code: RoleControlErrorInfo["code"]; unknown?: boolean }
 export type ChildImage = Extract<SubagentPromptRequest["content"][number], { type: "image" }>;
 export interface ChildDraft { text: string; delivery: "queue" | "steer"; images: readonly ChildImage[]; imageBusy: boolean; uncertain: boolean }
-export type ChildOutcome = { kind: "background"; receipt: BackgroundTransitionResult } | { kind: "prompt"; receipt: SubagentPromptReceipt } | { kind: "interrupt"; receipt: SubagentInterruptReceipt };
+export type ChildOutcome = { kind: "prompt"; receipt: SubagentPromptReceipt } | { kind: "interrupt"; receipt: SubagentInterruptReceipt };
 export interface ChildrenSnapshot {
   sessionId: string | null;
   generation: number;
@@ -17,13 +17,12 @@ export interface ChildrenSnapshot {
   issue: ChildrenIssue | null;
   descendantIssue: ChildrenIssue | null;
   drafts: ReadonlyMap<string, ChildDraft>;
-  pending: ReadonlyMap<string, "background" | "prompt" | "interrupt">;
+  pending: ReadonlyMap<string, "prompt" | "interrupt">;
   issues: ReadonlyMap<string, ChildrenIssue>;
   outcomes: ReadonlyMap<string, ChildOutcome>;
 }
 export interface ChildrenActions {
   refresh(generation: number): Promise<void>;
-  background(generation: number, toolCallId: string, runId: string): Promise<void>;
   prompt(generation: number, childId: string): Promise<void>;
   interrupt(generation: number, childId: string): Promise<void>;
   editText(generation: number, childId: string, text: string): void;
@@ -34,7 +33,6 @@ export interface ChildrenActions {
 }
 export const EMPTY_CHILD_DRAFT: ChildDraft = { text: "", delivery: "queue", images: [], imageBusy: false, uncertain: false };
 export const childActionKey = (childId: string): string => `child:${childId}`;
-export const runActionKey = (toolCallId: string, runId: string): string => `run:${JSON.stringify([toolCallId, runId])}`;
 export function enabled(availability: RoleControlAvailability | undefined): boolean { return availability?.enabled === true; }
 class ControlFailure extends Error { constructor(readonly safe: ChildrenIssue) { super("Child control refused."); } }
 
@@ -53,7 +51,7 @@ export class ChildrenController {
     subscribe: (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; },
   };
   readonly actions: ChildrenActions = {
-    refresh: generation => this.refresh(generation), background: (generation, call, run) => this.background(generation, call, run),
+    refresh: generation => this.refresh(generation),
     prompt: (generation, child) => this.prompt(generation, child), interrupt: (generation, child) => this.interrupt(generation, child),
     editText: (generation, child, text) => this.editDraft(generation, child, { text }),
     setDelivery: (generation, child, delivery) => this.editDraft(generation, child, { delivery }),
@@ -142,27 +140,13 @@ export class ChildrenController {
     }
     this.publish({ snapshot, descendants: tree, descendantIssue, fresh: true, reading: false, generation: generation + 1 });
   }
-  private begin(key: string, kind: "background" | "prompt" | "interrupt"): void {
+  private begin(key: string, kind: "prompt" | "interrupt"): void {
     const pending = new Map(this.current.pending), issues = new Map(this.current.issues), outcomes = new Map(this.current.outcomes);
     pending.set(key, kind); issues.delete(key); outcomes.delete(key); this.publish({ pending, issues, outcomes });
   }
   private finish(key: string): void { const pending = new Map(this.current.pending); pending.delete(key); this.publish({ pending }); }
   private refuse(key: string, error: unknown): void { const issues = new Map(this.current.issues); issues.set(key, this.issue(error)); this.publish({ issues }); }
   private accepted(key: string, outcome: ChildOutcome): void { const outcomes = new Map(this.current.outcomes); outcomes.set(key, outcome); this.publish({ outcomes }); }
-  async background(generation: number, toolCallId: string, runId: string): Promise<void> {
-    const key = runActionKey(toolCallId, runId), snapshot = this.current.snapshot;
-    const run = snapshot?.runs.find(row => row.toolCallId === toolCallId && row.invocation?.runId === runId);
-    if (!this.available(generation) || this.current.pending.has(key) || this.current.outcomes.get(key)?.kind === "background"
-      || run?.state !== "running" || !enabled(run.background) || !enabled(snapshot?.capabilities.background)) return;
-    this.begin(key, "background");
-    try {
-      const receipt = await this.unwrap("background", () => this.remote.background(snapshot!.sessionId, { sessionId: snapshot!.sessionId, toolCallId, runId, expectedAdmissionEpoch: snapshot!.admissionEpoch }));
-      if (!this.live(generation)) return;
-      if (receipt.runId !== runId) throw new ControlFailure({ kind: "protocol", code: "conflict", unknown: true });
-      this.accepted(key, { kind: "background", receipt });
-    } catch (error) { if (this.live(generation)) this.refuse(key, error); }
-    finally { if (this.live(generation)) this.finish(key); }
-  }
   private canControl(generation: number, id: string, action: "prompt" | "interrupt"): boolean {
     const child = this.child(id);
     return this.available(generation) && !this.current.pending.has(childActionKey(id)) && child?.mode === "continuable" && !child.readonly

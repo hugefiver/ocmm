@@ -5,11 +5,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import { SPLIT_RELEASE_JOBS } from "../scripts/release-recovery-policy.mjs";
+import { PUBLICATION_JOBS } from "../scripts/release-recovery-policy.mjs";
 
 assert.equal(process.env.DSMM_RELEASE_CLI_TEST, "fixture-only");
 const fixture = JSON.parse(readFileSync(process.env.DSMM_RELEASE_CLI_FIXTURE, "utf8"));
 const { identity, root } = fixture;
+if (process.env.DSMM_RELEASE_CLI_PUBLISH_RUNTIME === "fixture-only") Object.defineProperty(process.versions, "node", { value: "24.0.0" });
 assert.ok(resolve(process.env.DSMM_RELEASE_CLI_FIXTURE).startsWith(`${resolve(root)}\\`) || resolve(process.env.DSMM_RELEASE_CLI_FIXTURE).startsWith(`${resolve(root)}/`));
 const statePath = join(root, "state.json");
 const state = () => JSON.parse(readFileSync(statePath, "utf8"));
@@ -17,6 +18,7 @@ const save = (value) => writeFileSync(statePath, JSON.stringify(value));
 const bytes = (name) => Buffer.from(fixture.accepted[name], "base64");
 const result = (stdout = "") => ({ status: 0, stdout, stderr: "" });
 const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
+const nativeSpawnSync = childProcess.spawnSync;
 function tarball() { return bytes(identity.filename); }
 childProcess.spawnSync = (command, args) => {
   const name = basename(command).replace(/\.exe$/u, "");
@@ -39,7 +41,10 @@ childProcess.spawnSync = (command, args) => {
     if (args[0] === "publish") {
       assert.equal(hash(readFileSync(args[1])), identity.sha256);
       assert.ok(args.includes("--provenance") && args.includes("--ignore-scripts") && args.includes("--config.fetch-retries=0"));
-      const current = state(); current.publishes++; current.published = true; save(current); return result();
+       const current = state(); current.publishes++; current.published = true; save(current);
+       return current.publishExit ? nativeSpawnSync(process.execPath,
+         ["-e", 'process.stdout.write("submitted before nonzero exit"); process.exitCode = Number(process.argv[1]);', String(current.publishExit)],
+         { encoding: "utf8", timeout: 5_000, windowsHide: true }) : result();
     }
     throw Error("fixture refuses installation or unknown pnpm operation");
   }
@@ -50,27 +55,34 @@ childProcess.spawnSync = (command, args) => {
   throw Error("fixture refuses every other subprocess");
 };
 function github(route) {
-  const run = { id: Number(identity.runId), run_attempt: Number(identity.runAttempt), workflow_id: 123,
+  const run = { id: Number(identity.runId), run_attempt: Number(identity.runAttempt), workflow_id: 374825007,
     repository: { full_name: identity.repository }, head_repository: { full_name: identity.repository },
-    status: "completed", conclusion: "success", head_sha: identity.controlSha, head_branch: identity.tag, event: "push" };
+    status: "completed", conclusion: "success", head_sha: identity.controlSha, head_branch: identity.tag, event: "push", ...state().run };
   if (route === `actions/runs/${identity.runId}/attempts/${identity.runAttempt}`) return run;
-  if (route === "actions/workflows/123") return { id: 123, path: identity.workflow.file };
+  if (route === "actions/workflows/374825007") return { id: 374825007, path: identity.workflow.file };
+  if (route === `compare/${identity.controlSha}...master`) return { status: "identical", merge_base_commit: { sha: identity.controlSha } };
   if (route === `actions/runs/${identity.runId}/attempts/${identity.runAttempt}/jobs?per_page=100`) {
-    const jobs = SPLIT_RELEASE_JOBS.map((name, index) => ({ id: index + 1, name, run_id: Number(identity.runId), run_attempt: Number(identity.runAttempt), status: "completed", conclusion: ["import-bootstrap", "prepare-recovery-022", "publish-recovery-022"].includes(name) ? "skipped" : "success" }));
+    const jobs = PUBLICATION_JOBS.map((name, index) => ({ id: index + 1, name, run_id: Number(identity.runId), run_attempt: Number(identity.runAttempt), status: "completed", conclusion: name === "import-bootstrap" || name.includes("recovery") ? "skipped" : "success", ...state().jobs?.[name] }));
     return { total_count: jobs.length, jobs };
   }
   if (route === `actions/runs/${identity.runId}/artifacts?per_page=100`) {
-    const artifacts = ["accepted", "registry-verification"].map((kind, index) => ({ id: index + 1, name: `dsmm-${kind}-${identity.runId}-${identity.runAttempt}`, expired: false,
+    const artifacts = ["accepted"].map((kind, index) => ({ id: index + 1, name: `dsmm-${kind}-${identity.runId}-${identity.runAttempt}`, expired: false,
       digest: `sha256:${hash(Buffer.from(`fixture-zip-${index + 1}`))}`, size_in_bytes: Buffer.byteLength(`fixture-zip-${index + 1}`),
       workflow_run: { id: Number(identity.runId), head_sha: identity.controlSha, head_branch: identity.tag } }));
-    return { total_count: 2, artifacts };
+    return { total_count: artifacts.length, artifacts };
   }
   if (route === `git/ref/tags/${identity.tag}`) return { ref: `refs/tags/${identity.tag}`, object: { type: "commit", sha: identity.releaseSha } };
   if (route === `releases/tags/${identity.tag}`) return state().release;
   throw Error("unknown fixture GitHub read");
 }
 childProcess.execFileSync = (command, args) => {
-  if (command === "git" && args.length === 4 && args[0] === "-C" && args[2] === "rev-parse" && args[3] === "HEAD") return `${identity.controlSha}\n`;
+  if (command === "git") {
+    assert.equal(args[0], "-C");
+    if (args.length === 4 && args[2] === "rev-parse" && args[3] === "HEAD") return `${state().checkoutSha ?? identity.controlSha}\n`;
+    if (args[2] === "cat-file") return "";
+    if (args[2] === "show") return JSON.stringify({ name: identity.packageName, version: identity.version });
+    throw Error("fixture refuses unknown Git read or write");
+  }
   if (command === "gh") {
     assert.equal(args[0], "api"); const route = args[1].replace(`repos/${identity.repository}/`, "");
     if (/^actions\/artifacts\/[12]\/zip$/u.test(route)) return Buffer.from(`fixture-zip-${route.split("/")[2]}`);
@@ -96,6 +108,7 @@ const statement = { _type: "https://in-toto.io/Statement/v1", predicateType: "ht
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(input), current = state();
   if (url.hostname === "registry.npmjs.org") {
+    assert.ok(!current.forbidRegistry, "no post-publication registry read is permitted");
     if (!current.published) return new Response(null, { status: 404 });
     if (url.pathname.endsWith(".tgz")) return new Response(tarball());
     if (url.pathname.startsWith("/-/npm/v1/attestations/")) return Response.json({ attestations: [{ predicateType: statement.predicateType, bundle: { dsseEnvelope: { payloadType: "application/vnd.in-toto+json", signatures: [{ sig: "synthetic-test-signature" }], payload: Buffer.from(JSON.stringify(statement)).toString("base64") } } }] });

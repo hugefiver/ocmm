@@ -1,5 +1,7 @@
 import { isProfileId } from "../profile-remote.js";
 import { safeIssue } from "./diagnostics.js";
+import { isConfigRevision } from "../config-revision.js";
+import { writableSelectionVersion } from "./configuration-display.js";
 import { editStructuredPath, moveFallback } from "./structured.js";
 function modelSelectionWatermark(window) {
     let watermark = -1;
@@ -19,7 +21,7 @@ const NEW_EDITOR = "";
 export const NEW_PROFILE_CONTENT = '{\n  "version": 1,\n  "id": "new-profile",\n  "label": "New profile",\n  "settings": {\n    // Runtime overlay only. Omitted fields inherit the deployment baseline.\n    "defaultActive": true\n  }\n}\n';
 /** A valid external CAS conflict is reconcilable; corruption is never reset implicitly. */
 export function canReconcileSelection(snapshot) {
-    return snapshot !== null && (snapshot.selectionRevision === "absent" || /^[a-f0-9]{64}$/u.test(snapshot.selectionRevision))
+    return snapshot !== null && !snapshot.refreshRequired && writableSelectionVersion(snapshot.selectionRevision)
         && (snapshot.selectionError === undefined || snapshot.selectionError.code === "conflict");
 }
 /** Stable native Store seat, with no filesystem or transport authority. */
@@ -219,7 +221,7 @@ export class ProfilesController {
     }
     async setDeepwork(active) {
         const { currentSessionId: id, session } = this.current;
-        if (this.disposed || id === null || session?.deepwork === undefined || session.deepwork.locked || !session.switchAllowed
+        if (this.disposed || id === null || session?.deepwork === undefined || session.refreshRequired || session.selection.refreshRequired || session.deepwork.locked || session.canToggleMode !== true
             || this.current.sessionBusy !== null || this.current.busy !== null || this.remote.selectMode === undefined)
             return;
         const generation = ++this.sessionGeneration;
@@ -246,12 +248,13 @@ export class ProfilesController {
     }
     async selectSession(reset, options, modelOnly = false) {
         const { currentSessionId: id, session, sessionChoice, snapshot } = this.current;
-        if (this.disposed || id === null || session === null || !session.switchAllowed || this.current.sessionBusy !== null
-            || this.current.busy !== null || this.current.dirty || this.current.pendingEditor !== null)
+        if (this.disposed || id === null || session === null || session.refreshRequired || session.selection.refreshRequired || !writableSelectionVersion(session.selection.selectionRevision)
+            || (modelOnly ? session.canSelectModel !== true : session.canApplyOverlay !== true || session.applyOverlayUnavailableReason === "new-session-required") || this.current.sessionBusy !== null
+            || this.current.busy !== null || this.current.dirty || this.current.invalidFields.length > 0 || this.current.pendingEditor !== null)
             return;
         const selectedId = reset ? null : sessionChoice;
         const revision = snapshot?.profiles.find((profile) => profile.id === selectedId)?.revision;
-        if (!modelOnly && selectedId !== null && revision == null)
+        if (!modelOnly && selectedId !== null && !isConfigRevision(revision))
             return;
         const generation = ++this.sessionGeneration;
         const useProfileModel = !reset && options?.useProfileModel === true;
@@ -273,13 +276,17 @@ export class ProfilesController {
             }));
             if (accepted.sessionId !== id)
                 throw { kind: "assembly", code: "unavailable" };
-            if (modelOnly && (accepted.admissionEpoch !== session.admissionEpoch || accepted.deepwork?.revision !== session.deepwork?.revision || !accepted.switchAllowed))
+            if (modelOnly && (accepted.admissionEpoch !== session.admissionEpoch || accepted.deepwork?.revision !== session.deepwork?.revision))
                 throw { kind: "domain", code: "conflict" };
             if (!live())
                 return;
             this.publish({ session: accepted, sessionChoice: accepted.selection.selectedId, sessionNotice: useProfileModel ? null : reset ? "reset" : "applied" });
-            if (!useProfileModel || !live())
+            if (!useProfileModel || accepted.refreshRequired || accepted.selection.refreshRequired || !live())
                 return;
+            if (accepted.canSelectModel !== true || !writableSelectionVersion(accepted.selection.selectionRevision)) {
+                this.publish({ sessionIssue: { kind: "assembly", code: accepted.selectModelUnavailableReason ?? "unavailable", source: "profile-model" } });
+                return;
+            }
             if (accepted.profileModel === undefined) {
                 this.publish({ sessionIssue: { kind: "assembly", code: "model-unconfigured", source: "profile-model" } });
                 return;
@@ -452,13 +459,13 @@ export class ProfilesController {
     }
     editContent(content) {
         const editor = this.current.editor;
-        if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null)
+        if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null)
             return;
         this.publish({ editor: { ...editor, content }, dirty: this.accepted === null || this.accepted.content !== content || this.accepted.id !== editor.id, issue: null, notice: null });
     }
     editPath(path, value) {
         const editor = this.current.editor;
-        if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null)
+        if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null)
             return;
         const content = editStructuredPath(editor.content, path, value);
         if (content === null) {
@@ -469,7 +476,7 @@ export class ProfilesController {
     }
     editRoute(path, provider, model) {
         const editor = this.current.editor;
-        if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null)
+        if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null)
             return;
         let content = editor.content;
         for (const [key, value] of [["provider", provider], ["model", model], ["reasoningEffort", undefined]]) {
@@ -483,7 +490,7 @@ export class ProfilesController {
     }
     editFallbackOrder(role, from, to) {
         const editor = this.current.editor;
-        if (editor === null || this.current.busy !== null || this.current.pendingEditor !== null)
+        if (editor === null || editor.refreshRequired || this.current.busy !== null || this.current.pendingEditor !== null)
             return;
         const content = moveFallback(editor.content, role, from, to);
         if (content !== null)
@@ -491,7 +498,7 @@ export class ProfilesController {
     }
     async save() {
         const editor = this.current.editor;
-        if (editor === null || !this.current.dirty || this.current.snapshot === null || this.current.busy !== null || this.current.pendingEditor !== null || this.current.invalidFields.length > 0)
+        if (editor === null || editor.refreshRequired || editor.revision !== null && !isConfigRevision(editor.revision) || !this.current.dirty || this.current.snapshot === null || this.current.busy !== null || this.current.pendingEditor !== null || this.current.invalidFields.length > 0)
             return;
         if (!isProfileId(editor.id)) {
             this.publish({ issue: { kind: "domain", code: "validation", field: "id" }, notice: null, validationEpoch: this.current.validationEpoch + 1 });
@@ -512,7 +519,7 @@ export class ProfilesController {
     }
     async apply() {
         const { editor, snapshot, dirty } = this.current;
-        if (editor?.revision == null || !canReconcileSelection(snapshot) || dirty)
+        if (editor?.refreshRequired || !isConfigRevision(editor?.revision) || !canReconcileSelection(snapshot) || dirty)
             return;
         await this.perform("apply", async (live) => {
             const accepted = await this.unwrap(this.remote.select({ id: editor.id, expectedRevision: editor.revision, expectedSelectionRevision: snapshot.selectionRevision }));

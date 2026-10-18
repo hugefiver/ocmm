@@ -7,7 +7,7 @@ import type { Agent } from "@deepseek-ai/dsh-agent";
 import { symbols } from "@deepseek-ai/cordis";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import { DSMM_ROLES, rolePluginRows, renderAgentCordis } from "../lib/roles.js";
-import { nativeFixturePlugin, nativeRoutingFixture } from "./native-routing-fixture.ts";
+import { nativeFixturePlugin, nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
 test("native entry-list YAML parses nested role groups and agrees with the installed SDK's exported standard defaults", async () => {
   const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? import.meta.url);
@@ -117,20 +117,17 @@ test("first real DW compositions expose scoped native compact/plan/interaction w
     assert.equal(denied.isError, true);
     assert.equal(existsSync(sentinel), false);
     assert.equal(f.adapter.calls.length, 0, "human commands/pruning/todo do not invoke an LLM");
-    const quick = await f.subagents.startActivation({ provider: "dsmm-role-quick", label: "Quick native write", delivery: "caller", signal: new AbortController().signal,
-      request: { parent: builder, prompt: [] } });
+    const quick = await f.createAuxiliary("dsmm-quick", undefined, "one-shot", builder);
     try {
-      const child = f.agents.get(quick.childId)!;
-      assert.ok(child);
-      const inherited = presets.serviceFor(child, "compaction")!;
-      assert.equal(implementation(inherited), implementation(compactions[1] as object), "a short native child joins its parent's retained composition, not a fresh quick template");
+      assert.equal(presets.composedPreset(quick.ctx), "dsmm-quick");
+      assert.equal(presets.serviceFor(quick, "compaction"), undefined, "the short child uses its registered target preset rather than inheriting root-only compaction");
       const path = join(f.profileDir, "quick-write-proof");
-      const written = await child.ctx.get("tools")!.execute({ agent: child, name: "write", arguments: { file_path: path, content: "QUICK_WRITE_PROOF" }, callId: ToolCallId("native-default-quick-write"), signal: new AbortController().signal });
+      const written = await quick.ctx.get("tools")!.execute({ agent: quick, name: "write", arguments: { file_path: path, content: "QUICK_WRITE_PROOF" }, callId: ToolCallId("native-default-quick-write"), signal: new AbortController().signal });
       assert.equal(written.isError, false, JSON.stringify(written));
       assert.equal(readFileSync(path, "utf8"), "QUICK_WRITE_PROOF");
-      assert.equal((await quick.result).stopReason, "completed");
+      await runFixtureTurn(quick);
       assert.equal(f.adapter.calls.length, 1, "only the explicitly invoked local mock child turn calls the adapter");
-    } finally { await quick.dispose(); }
+    } finally { await f.releaseAuxiliary(quick); }
   } finally { await f.dispose(); }
 });
 

@@ -5,19 +5,17 @@ import type { Agent } from "@deepseek-ai/dsh-agent";
 import { HarnessError } from "@deepseek-ai/dsh-llm";
 import { TOOL_ABORTED } from "@deepseek-ai/dsh-tools";
 import type { PreToolDecision, ToolDefinition, ToolExecution, ToolRunContext } from "@deepseek-ai/dsh-tools";
-import type { RoleRunHolder } from "./role-runs.js";
 import type { NativeCommandEntry } from "./permission-settings.js";
 import { PermissionRefusal, permissionOutcome } from "./permission-errors.js";
 import { nativeStandingFullAccess } from "./permission-native-access.js";
 import type { NativePermissionMode } from "./permission-native-access.js";
 export { PermissionRefusal } from "./permission-errors.js";
 
-export type PermissionRunHolder = Pick<RoleRunHolder, "state" | "owner" | "invocation" | "holderSignal" | "drained">;
 export interface PermissionExecutionAuthority {
   readonly agent: Agent; readonly root: Agent; readonly realm: object;
   readonly admissionRevision: string; readonly permissionRevision: string;
   readonly owner: object; readonly ownerGeneration: string | number;
-  readonly signal: AbortSignal; readonly run?: PermissionRunHolder;
+  readonly signal: AbortSignal;
 }
 export type PermissionRootApprovalAuthority = Pick<PermissionExecutionAuthority, "root" | "realm" | "admissionRevision" | "permissionRevision" | "owner" | "ownerGeneration" | "signal">;
 export interface PermissionExecutionIntegrity {

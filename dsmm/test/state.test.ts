@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { DshAgent, DshSessionEvent } from "../lib/dsh-types.js";
+import { Session, SessionId } from "@deepseek-ai/dsh-session";
+import type { DshAgent } from "../lib/dsh-types.js";
 import { DEEPWORK_MODE_EVENT, DeepworkModeController, hasOpenTurn, isDeepworkActive } from "../lib/state.js";
 
 test("activation folds last valid intent, role default on, minimal default off", () => {
@@ -11,23 +12,25 @@ test("activation folds last valid intent, role default on, minimal default off",
   assert.equal(isDeepworkActive([{ type: DEEPWORK_MODE_EVENT, data: { active: true } }, { type: "other/event", data: { active: false } }, { type: DEEPWORK_MODE_EVENT, data: { active: false } }], true), false);
 });
 
+let fixtureSequence = 0;
 function fixture(preset = "minimal") {
-  const events: DshSessionEvent[] = [];
-  const agent: DshAgent = {
-    session: { header: { agentPreset: preset }, events, append(type, data) { events.push({ type, data }); } },
+  const initial = Session.create(SessionId(`dsmm-state-${++fixtureSequence}`));
+  const session = Session.create(initial.id, [], { ...initial.header, agentPreset: preset });
+  const agent: DshAgent & { session: Session } = {
+    session,
     async runMaintenance(task) { return task(new AbortController().signal); }
   };
-  return { events, agent, controller: new DeepworkModeController({}) };
+  return { agent, controller: new DeepworkModeController({}) };
 }
 
 test("same-default explicit choices persist across preset/profile changes and reopen", async () => {
-  const { agent, events, controller } = fixture();
+  const { agent, controller } = fixture();
   assert.equal(controller.active(agent, true), false);
   assert.equal(await controller.select(agent, false, true), "committed");
-  events.push({ type: "agent-preset/selected", data: { agentPreset: "dsmm-reviewer" } });
+  agent.session.append("agent-preset/selected", { agentPreset: "dsmm-reviewer" });
   assert.equal(controller.active(agent, true), false); assert.equal(controller.describe(agent, true).locked, false);
   await controller.select(agent, true, false);
-  events.push({ type: "agent-preset/selected", data: { agentPreset: "minimal" } });
+  agent.session.append("agent-preset/selected", { agentPreset: "minimal" });
   assert.equal(new DeepworkModeController({}).active(agent, false), true);
   assert.equal(await controller.select(agent, true), "unchanged");
   const disabled = new DeepworkModeController({}, () => false);
@@ -41,21 +44,21 @@ test("same-default explicit choices persist across preset/profile changes and re
 });
 
 test("busy mode requests are rejected, not staged into current prompt or future pre-step", async () => {
-  const { agent, events, controller } = fixture("standard");
-  events.push({ type: "turn/start" });
+  const { agent, controller } = fixture("standard");
+  agent.session.append("turn/start", { turn: 1 });
   const before = controller.describe(agent, false);
   await assert.rejects(controller.select(agent, true), /idle/);
   await assert.rejects(controller.selectIdle(agent, true, false), /idle/);
   assert.deepEqual(controller.describe(agent, false), before);
-  events.push({ type: "turn/end" });
+  agent.session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
   assert.equal(controller.active(agent, false), false);
   await controller.select(agent, true); assert.equal(controller.active(agent, false), true);
 });
 
-test("failed writes change neither intent nor revision and do not notify providers", async () => {
+test("failed record commits change neither intent nor revision and do not notify providers", async () => {
   const { agent, controller } = fixture(); let changes = 0;
   controller.watch(() => { changes++; });
-  agent.session.append = () => { throw new Error("disk failed"); };
+  Object.defineProperty(agent.session, "publicationEntry", { value() { throw new Error("record commit failed"); } });
   const before = controller.describe(agent, false);
   const outcomes = await Promise.allSettled([controller.select(agent, true), controller.select(agent, false)]);
   assert.deepEqual(outcomes.map((value) => value.status), ["rejected", "rejected"]);
@@ -64,10 +67,13 @@ test("failed writes change neither intent nor revision and do not notify provide
 });
 
 test("revision fences preset ABA but ignores unrelated events; native maintenance is mandatory", async () => {
-  const { agent, events, controller } = fixture("standard");
+  const { agent, controller } = fixture("standard");
   const before = controller.describe(agent, false).revision;
-  events.push({ type: "unrelated/event" }); assert.equal(controller.describe(agent, false).revision, before);
-  events.push({ type: "agent-preset/selected", data: { agentPreset: "minimal" } }, { type: "agent-preset/selected", data: { agentPreset: "standard" } });
+  agent.session.append("turn/start", { turn: 1 });
+  agent.session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
+  assert.equal(controller.describe(agent, false).revision, before);
+  agent.session.append("agent-preset/selected", { agentPreset: "minimal" });
+  agent.session.append("agent-preset/selected", { agentPreset: "standard" });
   assert.notEqual(controller.describe(agent, false).revision, before);
   agent.runMaintenance = undefined;
   await assert.rejects(controller.select(agent, true), /maintenance/);

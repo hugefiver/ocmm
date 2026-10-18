@@ -8,14 +8,14 @@ import { gunzipSync } from "node:zlib";
 import { DW_PRESET_NAMES, LOCALE_EXPORTS, LOCALE_FILES, compiledFilesForVersion, requiresDeepworkMetadata, validateInstallReceipt, validateLocaleResources } from "./dsmm-registry-install-probe.mjs";
 import { UI_CHECKS_015, sessionProfileChecksForVersion, requiresSessionProfileProof, validateSessionProfileProof } from "./profile-ui-harness-native.mjs";
 import { requiresNativePickerProof, validateNativePickerProof } from "./native-picker-proof.mjs";
-import { dshPolicyForVersion, isSource020, isSource022, isSource030, isStableNativeSource, isReviewedSource, assertReviewedReleaseVersion, nativePickerCheckForVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion, publicRuntimeExportsForVersion, stableUiChecksForVersion, stableUiKindForVersion, skillExecutablesForVersion, COLD_PROFILE_SCRIPTS_022, validateCoreProof, validateStableBootstrap } from "./release-contract.mjs";
-import { assertPackSource, CONTROL_FILES, RECOVERY_CONTROL_FILES } from "./release-source.mjs";
-import { RECOVERY_022, RELEASE_TOPOLOGY, dispatchSelector, selectAcceptedArtifact, validateRecoveryBinding } from "./release-recovery-policy.mjs";
+import { dshPolicyForVersion, isSource020, isSource022, isSource030, isSource031, isBuildOnlyRelease, isStableNativeSource, isReviewedSource, assertReviewedReleaseVersion, nativePickerCheckForVersion, pluginTitleForVersion, presetNamesForVersion, roleToolsForVersion, publicRuntimeExportsForVersion, stableUiChecksForVersion, stableUiKindForVersion, skillExecutablesForVersion, COLD_PROFILE_SCRIPTS_022, OFFICIAL_RUNTIME_PACKAGES_031, validatePublicExports031, validateCoreProof, validateStableBootstrap } from "./release-contract.mjs";
+import { assertPackSource, RECOVERY_CONTROL_FILES, controlFilesForVersion } from "./release-source.mjs";
+import { RECOVERY_022, PUBLICATION_TOPOLOGY, isSplitTopology, dispatchSelector, selectAcceptedArtifact, validateRecoveryBinding } from "./release-recovery-policy.mjs";
 
 export const POLICY = Object.freeze({
   repository: "hugefiver/ocmm", packageName: "@dsmm/dsmm", defaultBranch: "master",
   workflowFile: ".github/workflows/dsmm-release.yml", registry: "https://registry.npmjs.org/",
-  pnpmVersion: "11.9.0", nodeMajor: 24, dshVersion: "0.2.0-rc.2",
+  pnpmVersion: "11.9.0", nodeMajor: 24,
   receiptFilename: "docker-receipt-native-session-control.json", checksumsFilename: "SHA256SUMS.txt",
 });
 export const BOOTSTRAP = Object.freeze({
@@ -93,7 +93,7 @@ export function resolveReleaseContext(input) {
   equal(input.workflowRef, `${POLICY.repository}/${POLICY.workflowFile}@${input.ref}`, "workflow identity");
   equal(input.packageVersion, version, "source package version");
   return { schemaVersion: 1, repository: POLICY.repository, packageName: POLICY.packageName, mode,
-    releaseTopology: RELEASE_TOPOLOGY, recoveryPolicy: mode === "recovery-022" ? RECOVERY_022.selector : null,
+    releaseTopology: PUBLICATION_TOPOLOGY, recoveryPolicy: mode === "recovery-022" ? RECOVERY_022.selector : null,
     version, tag, releaseSha: input.peeledSha, controlSha: input.controlSha,
     workflow: { file: POLICY.workflowFile, ref: input.workflowRef, sha: input.workflowSha },
     eventName: input.eventName, eventSha: input.eventSha, ref: input.ref,
@@ -102,7 +102,7 @@ export function resolveReleaseContext(input) {
     bootstrapImport: mode === "bootstrap" ? { job: "import-bootstrap", artifactName: `dsmm-bootstrap-${input.runId}-${input.runAttempt}`,
       runId: String(input.runId), runAttempt: String(input.runAttempt) } : null,
     origin: mode === "bootstrap" ? "frozen-local-bootstrap" : "ci-built",
-    provenance: mode !== "bootstrap", sourceChecks: mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : isSource030(version) ? "NOT_RUN_RELEASE_POLICY" : "REQUIRED_BEFORE_FREEZE" };
+    provenance: mode !== "bootstrap", sourceChecks: mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : isBuildOnlyRelease(version) ? "NOT_RUN_RELEASE_POLICY" : "REQUIRED_BEFORE_FREEZE" };
 }
 
 export const UI_CHECKS = Object.freeze([
@@ -190,6 +190,14 @@ export function validateStableUiProof(ui, { sha256: artifactSha256, version }) {
   invariant(sha256.test(ui.safety.childEventsBeforeSha256) && Number.isSafeInteger(ui.safety.nativeModelCallsBefore), "stable cutoff baseline evidence required");
   equal(ui.safety.childEventsAfterSha256, ui.safety.childEventsBeforeSha256, "stable cutoff unchanged child events");
   equal(ui.safety.nativeModelCallsAfter, ui.safety.nativeModelCallsBefore, "stable cutoff no native request");
+  if (isSource030(version)) {
+    equal(ui.currentSurfaces?.deploymentPage, { slot: "plugins.bundle.config", entryKey: "@dsmm/dsmm", configCas: true }, "030 DeploymentPage proof");
+    equal(ui.currentSurfaces?.permissions, { connectedRootOnly: true, describeRules: true, saveRulesCas: true, readonlyRefused: true }, "030 permissions proof");
+    equal(ui.currentSurfaces?.roleToolView, { slot: "tool.call.toolview", requestedIdentity: true, actualIdentityFromValidatedResult: true, rawArgsPreserved: true, rawOutputPreserved: true }, "030 RoleToolView proof");
+    equal(ui.currentSurfaces?.childCapture, { version: 3, pathVersion: "v1" }, "030 child capture proof");
+    invariant(["save", "describeSettings"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmConfig/${method}` && call.strictGateway === true && call.result === "accepted")), "030 native config Gateway calls required");
+    invariant(["describeRules", "saveRules"].every((method) => ui.nativeCalls.some((call) => call.endpoint === `dsmmPermissions/${method}` && call.strictGateway === true && call.result === "accepted")), "030 native permissions Gateway calls required");
+  }
   return ui;
 }
 
@@ -198,7 +206,7 @@ export function validateDockerReceipt(receipt, identity) {
   assertSanitizedReceipt(receipt);
   invariant(sha256.test(identity.sha256) && stableVersion.test(identity.version), "invalid receipt identity");
   assertReviewedReleaseVersion(identity.version);
-  if (isSource030(identity.version)) {
+  if (isBuildOnlyRelease(identity.version)) {
     complete(receipt, "artifact integrity receipt");
     equal(receipt.acceptanceScope, "artifact-integrity-only", "acceptance scope");
     equal(receipt.tests, "NOT_RUN_RELEASE_POLICY", "release test policy");
@@ -340,21 +348,56 @@ const PUBLIC_EXPORTS = Object.freeze({
   "./session-persistence": { types: "./lib/session-persistence.d.ts", default: "./lib/session-persistence.js" },
   "./client": { types: "./lib/client/index.d.ts", default: "./lib/client.js" }, "./package.json": "./package.json",
 });
-export function manifestExportsForVersion(version) {
+export function manifestExportsForVersion(version, exports, hasFile) {
   assertReviewedReleaseVersion(version);
+  if (isSource031(version)) {
+    validatePublicExports031(exports, hasFile);
+    return exports;
+  }
   if (isStableNativeSource(version)) return { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])),
     ...Object.fromEntries(Object.entries(publicRuntimeExportsForVersion(version)).map(([name, path]) => [name, { types: `./${path.replace(/\.js$/u, ".d.ts")}`, default: `./${path}` }])) };
   return requiresDeepworkMetadata(version) ? { ...PUBLIC_EXPORTS, ...Object.fromEntries(Object.entries(LOCALE_EXPORTS).map(([name, path]) => [name, `./${path}`])) } : { ...PUBLIC_EXPORTS };
 }
 const operatorScripts = ["scripts/repair-session-log.mjs", "scripts/session-repair-native-verifier.mjs"];
-const operatorScriptsForVersion = version => isSource030(version) ? [] : operatorScripts;
+const operatorScriptsForVersion = version => isBuildOnlyRelease(version) ? [] : operatorScripts;
 const retiredCompatibilityFiles030 = new Set(["legacy-read-host", "legacy-read-contracts", "legacy-read-composition", "legacy-read-integration", "legacy-read-proxy", "legacy-child-policy"]
   .flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]));
 const requiredFiles = ["LICENSE", "README.md", "package.json", "cordis.patch.yml",
   "lib/index.js", "lib/index.d.ts", "lib/preset-skills.js", "lib/preset-skills.d.ts", "lib/client.js", "lib/client/index.js", "lib/client/index.d.ts",
   ...["profiles", "profile-types", "profile-store", "profile-runtime", "profile-rpc", "profile-remote", "session-metadata", "session-persistence"].flatMap((name) => [`lib/${name}.js`, `lib/${name}.d.ts`]),
   ...["agent-presets", "compatibility", "design", "lsp", "migration-from-ocmm", "model-routing", "profiles", "releasing", "roadmap", "runtime-recovery", "safety-guards", "settings-status", "skill-sync"].map((name) => `docs/${name}.md`)];
+const requiredFiles031 = ["LICENSE", "README.md", "package.json", "cordis.patch.yml",
+  "lib/index.js", "lib/index.d.ts", "lib/client.js", "lib/client/index.d.ts", "docs/releasing.md"];
 const requiredDocs022 = ["docs/native-permissions.md", "docs/deferred-native-approval-risk.md"];
+
+function validatePackedModuleClosure(files) {
+  const patterns = [
+    /\b(?:import|export)\s+(?:type\s+)?(?:[^"'()]*?\s+from\s*)?["'](\.[^"']+)["']/gu,
+    /\bimport\s*\(\s*["'](\.[^"']+)["']\s*\)/gu,
+  ];
+  for (const [path, bytes] of files) {
+    if (!/^lib\/.+\.(?:js|d\.ts)$/u.test(path)) continue;
+    const source = bytes.toString("utf8");
+    for (const pattern of patterns) for (const match of source.matchAll(pattern)) {
+      const specifier = match[1].replace(/[?#].*$/u, "");
+      const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));
+      const target = path.endsWith(".d.ts") && resolved.endsWith(".js") ? `${resolved.slice(0, -3)}.d.ts` : resolved;
+      invariant(!target.startsWith("../") && files.has(target), `packed module closure missing target: ${path} -> ${target}`);
+    }
+  }
+}
+
+function validateOfficialRuntime031(manifest) {
+  const policy = dshPolicyForVersion("0.3.1");
+  for (const field of ["dependencies", "peerDependencies", "devDependencies"]) {
+    invariant(object(manifest[field]), `031 ${field} must be an object`);
+    invariant(Object.entries(manifest[field]).filter(([name]) => name.startsWith("@deepseek-ai/dsh-")).every(([, version]) => version === policy.sdkVersion), `031 ${field} DSH packages must be exactly ${policy.sdkVersion}`);
+  }
+  for (const name of Object.values(OFFICIAL_RUNTIME_PACKAGES_031)) {
+    equal(manifest.peerDependencies[name], policy.peerVersion, `031 official runtime peer ${name}`);
+    equal(manifest.devDependencies[name], policy.sdkVersion, `031 official runtime SDK ${name}`);
+  }
+}
 
 function safeArchivePath(value) {
   invariant(typeof value === "string" && value.startsWith("package/") && !/[\\\x00-\x1f\x7f:]/u.test(value), "unsafe archive path");
@@ -372,7 +415,7 @@ export function isForbiddenPackagePath(path, version) {
   }
   const forbiddenScript = segments.includes("scripts") && !operatorScriptsForVersion(version).includes(path)
     && !(isSource022(version) && COLD_PROFILE_SCRIPTS_022.includes(path)) && path !== "skills/debugging/references/scripts/dap.mjs";
-  return isSource030(version) && retiredCompatibilityFiles030.has(path)
+  return (isSource030(version) || isSource031(version)) && retiredCompatibilityFiles030.has(path)
     || segments.some((part) => ["src", "test", "tests", "build", "tmp", "temp", "test-home", "test-homes", "node_modules", ".git", ".github", ".codex", "superpowers", "output_test"].includes(part))
     || forbiddenScript || /\.(?:test|spec)\.[^/]+$/iu.test(path) || /\.(?:map|tgz|tar|gz|zip|pem|key|p12|pfx)$/iu.test(name)
     || /^docs\/implementation-plan-[^/]+\.md$/u.test(path) || name === ".npmrc" || name === ".env" || name.startsWith(".env.") || /^(?:credentials|secrets)/u.test(name);
@@ -423,7 +466,8 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
     offset += 512 + Math.ceil(size / 512) * 512;
   }
   invariant(terminated, "tar archive has no terminator");
-  for (const file of [...requiredFiles, ...operatorScriptsForVersion(version)]) invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
+  const versionRequiredFiles = isSource031(version) ? requiredFiles031 : requiredFiles;
+  for (const file of [...versionRequiredFiles, ...operatorScriptsForVersion(version)]) invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
   if (isSource022(version) || isSource030(version)) for (const file of requiredDocs022) {
     invariant(files.has(file) && files.get(file).length > 0, `missing required package surface: ${file}`);
   }
@@ -433,12 +477,14 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   if (isReviewedSource(version)) for (const file of skillExecutablesForVersion(version)) {
     invariant(files.has(file) && files.get(file).length > 0, `missing required skill resource: ${file}`);
   }
-  if (requiresSessionProfileProof(version)) for (const file of compiledFilesForVersion(version)) {
+  if (requiresSessionProfileProof(version) && !isSource031(version)) for (const file of compiledFilesForVersion(version)) {
     invariant(files.has(file) && files.get(file).length > 0, `missing required successor compiled surface: ${file}`);
   }
-  for (const tree of ["agent-presets", "docs/research", "patches", "prompts", "skills"]) invariant([...files.keys()].some((path) => path.startsWith(`${tree}/`)), `missing package tree: ${tree}`);
-  for (const path of files.keys()) invariant(requiredFiles.includes(path) || operatorScriptsForVersion(version).includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|docs\/research|patches|prompts|skills)\/.+/u.test(path)
-    || ((isSource022(version) && COLD_PROFILE_SCRIPTS_022.includes(path)) || ((isSource022(version) || isSource030(version)) && requiredDocs022.includes(path)))
+  const requiredTrees = ["agent-presets", ...(isBuildOnlyRelease(version) ? [] : ["docs/research"]), "patches", "prompts", "skills"];
+  for (const tree of requiredTrees) invariant([...files.keys()].some((path) => path.startsWith(`${tree}/`)), `missing package tree: ${tree}`);
+  for (const path of files.keys()) invariant(versionRequiredFiles.includes(path) || operatorScriptsForVersion(version).includes(path) || /^lib\/.+\.(?:js|d\.ts)$/u.test(path) || /^(?:agent-presets|patches|prompts|skills)\/.+/u.test(path)
+    || (!isBuildOnlyRelease(version) && path.startsWith("docs/research/")) || (isSource031(version) && /^docs\/[a-z0-9-]+\.md$/u.test(path))
+    || (isSource022(version) && COLD_PROFILE_SCRIPTS_022.includes(path)) || ((isSource022(version) || isSource030(version) || isSource031(version)) && requiredDocs022.includes(path))
     || (requiresDeepworkMetadata(version) && LOCALE_FILES.includes(path)), `unexpected package surface: ${path}`);
   validateLocaleResources(new Map([...files].filter(([path]) => path.startsWith("locale/"))), version);
   if (isReviewedSource(version)) {
@@ -454,13 +500,14 @@ export function validateTarballBuffer(buffer, { version, expectedDigests } = {})
   equal(manifest.name, POLICY.packageName, "package name"); equal(manifest.version, version, "package version");
   invariant(!Object.hasOwn(manifest, "private"), "private manifest field forbidden");
   equal(manifest.type, "module", "module type"); equal(manifest.main, "./lib/index.js", "main export"); equal(manifest.types, "./lib/index.d.ts", "types export");
-  equal(manifest.exports, manifestExportsForVersion(version), "public exports");
+  equal(manifest.exports, manifestExportsForVersion(version, manifest.exports, (path) => files.has(path) && files.get(path).length > 0), "public exports");
   equal(manifest.publishConfig, { registry: POLICY.registry, access: "public" }, "publish configuration");
   const dshPolicy = dshPolicyForVersion(version);
   equal(manifest.engines, dshPolicy.engines, "runtime engine contract");
   invariant(object(manifest.peerDependencies) && Object.entries(manifest.peerDependencies).filter(([name]) => name.startsWith("@deepseek-ai/dsh-")).every(([, range]) => range === dshPolicy.peerVersion), "native DSH peers must remain exactly pinned");
   invariant(object(manifest.devDependencies) && Object.entries(manifest.devDependencies).filter(([name]) => name.startsWith("@deepseek-ai/dsh-")).every(([, range]) => range === dshPolicy.sdkVersion), "native DSH SDK dependencies must remain exactly pinned");
   for (const name of ["@deepseek-ai/dsh-typert-protocol", "@deepseek-ai/dsh-session", "@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-agent-preset-registry"]) equal(manifest.peerDependencies[name], dshPolicy.peerVersion, `peer ${name}`);
+  if (isSource031(version)) { validateOfficialRuntime031(manifest); validatePackedModuleClosure(files); }
   for (const name of ["prepublish", "prepublishOnly", "publish", "postpublish", "prepack", "postpack", "prepare", "preinstall", "install", "postinstall"]) invariant(!Object.hasOwn(manifest.scripts ?? {}, name), `package lifecycle ${name} forbidden`);
   const client = files.get("lib/client.js").toString("utf8");
   invariant(!/(?:["']node:|[A-Za-z]:[\\/](?:Users|home)[\\/]|\/Users\/|\/home\/|react-grab|react-scan|react-doctor|localhost:\d+|127\.0\.0\.1:\d+)/iu.test(client), "client bundle leaks host or development code");
@@ -498,7 +545,7 @@ export function validateArtifactIdentity(identity, { context } = {}) {
   const dispatch = identity.mode !== "future";
   if (identity.mode === "recovery-022") validateRecoveryBinding(identity);
   else {
-    invariant(identity.releaseTopology === undefined || identity.releaseTopology === RELEASE_TOPOLOGY, "invalid release topology");
+    invariant(identity.releaseTopology === undefined || isSplitTopology(identity.releaseTopology), "invalid release topology");
     invariant(identity.recoveryPolicy === undefined || identity.recoveryPolicy === null, "unexpected recovery policy");
   }
   equal(identity.origin, identity.mode === "bootstrap" ? "frozen-local-bootstrap" : "ci-built", "artifact origin");
@@ -508,15 +555,15 @@ export function validateArtifactIdentity(identity, { context } = {}) {
   equal(identity.eventSha, dispatch ? identity.controlSha : identity.releaseSha, "identity event SHA");
   equal(identity.workflow.ref, `${POLICY.repository}/${POLICY.workflowFile}@${identity.ref}`, "identity workflow ref");
   if (identity.mode === "future") equal(identity.controlSha, identity.releaseSha, "future source/control identity");
-  equal(identity.dockerAcceptance?.outcome, isSource030(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "COMPLETED", "artifact Docker acceptance");
-  if (isSource030(identity.version)) {
+  equal(identity.dockerAcceptance?.outcome, isBuildOnlyRelease(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "COMPLETED", "artifact Docker acceptance");
+  if (isBuildOnlyRelease(identity.version)) {
     equal(identity.dockerAcceptance.sourceContract, identity.version, "release acceptance identity");
   } else if (isStableNativeSource(identity.version)) {
     equal(identity.dockerAcceptance.sourceContract, identity.version, "explicit stable acceptance identity");
     equal(identity.dockerAcceptance.uiCheckCount, stableUiChecksForVersion(identity.version).length, "stable acceptance scope");
   }
-  equal(identity.dockerAcceptance?.origin, isSource030(identity.version) ? "not-run" : identity.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact", "Docker evidence origin");
-  equal(identity.sourceChecks, identity.mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : isSource030(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "COMPLETED", "source-check policy");
+  equal(identity.dockerAcceptance?.origin, isBuildOnlyRelease(identity.version) ? "not-run" : identity.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact", "Docker evidence origin");
+  equal(identity.sourceChecks, identity.mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : isBuildOnlyRelease(identity.version) ? "NOT_RUN_RELEASE_POLICY" : "COMPLETED", "source-check policy");
   if (identity.mode === "bootstrap") {
     invariant(identity.controlSha !== BOOTSTRAP.releaseSha, "bootstrap identity requires distinct new trusted controls");
     for (const key of ["version", "tag", "releaseSha", "filename", "size", "sha256", "sha1", "integrity", "receiptSha256"]) equal(identity[key], BOOTSTRAP[key], `frozen bootstrap ${key}`);
@@ -539,7 +586,7 @@ export function createArtifactIdentity(context, tarballBuffer, receiptBuffer, { 
   const identity = { ...context, filename: `dsmm-dsmm-${context.version}.tgz`, size: artifact.size, sha256: artifact.sha256,
     sha1: artifact.sha1, integrity: artifact.integrity, receiptFilename: POLICY.receiptFilename, receiptSha256,
     receiptSize: receiptBuffer.length, sourceChecks: context.mode === "bootstrap" ? "NOT_RUN_FROZEN_BOOTSTRAP" : sourceChecks,
-    dockerAcceptance: { ...acceptance, origin: isSource030(context.version) ? "not-run" : context.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact" } };
+    dockerAcceptance: { ...acceptance, origin: isBuildOnlyRelease(context.version) ? "not-run" : context.mode === "bootstrap" ? "imported-local-receipt" : "fresh-ci-artifact" } };
   return validateArtifactIdentity(identity, { context });
 }
 
@@ -597,9 +644,9 @@ function emptyOwnedDirectory(path) {
 
 export function prepareTransport(directory, context, { tarballPath, receiptPath, sourceChecks } = {}) {
   const tarballBuffer = readFileSync(tarballPath);
-  if (isSource030(context.version)) invariant(receiptPath === undefined, "artifact-only releases do not import test receipts");
+  if (isBuildOnlyRelease(context.version)) invariant(receiptPath === undefined, "artifact-only releases do not import test receipts");
   else invariant(receiptPath !== undefined, "native acceptance receipt required");
-  const receiptBuffer = isSource030(context.version)
+  const receiptBuffer = isBuildOnlyRelease(context.version)
     ? jsonBytes({ outcome: "COMPLETED", acceptanceScope: "artifact-integrity-only", tests: "NOT_RUN_RELEASE_POLICY",
       artifact: { package: { name: POLICY.packageName, version: context.version }, sha256: computeDigests(tarballBuffer).sha256 } })
     : readFileSync(receiptPath);
@@ -614,7 +661,7 @@ export function prepareTransport(directory, context, { tarballPath, receiptPath,
 }
 
 export function validateArtifactDirectory(directory, context) {
-  if (context.releaseTopology === RELEASE_TOPOLOGY) {
+  if (isSplitTopology(context.releaseTopology)) {
     const keys = ["schemaVersion", "repository", "packageName", "mode", "releaseTopology", "recoveryPolicy", "version", "tag", "releaseSha", "controlSha",
       "workflow", "eventName", "eventSha", "ref", "runId", "runAttempt", "bootstrapTransport", "bootstrapImport", "origin", "provenance", "sourceChecks"];
     equal(Object.keys(context).sort(byteOrder), keys.sort(byteOrder), "stable cross-job context fields");
@@ -656,16 +703,17 @@ export function resolveContextFromEnvironment(controlRoot, env = process.env) {
     equal(git(controlRoot, ["rev-parse", "--verify", `${event.after}^{commit}`]), peeledSha, "push event peeled object");
     equal(event.deleted, false, "deleted tag forbidden");
   }
-  invariant(CONTROL_FILES.every((path) => hasGitPath(controlRoot, controlSha, path)), "checkout is missing trusted local controls");
-  if (selector) invariant(RECOVERY_CONTROL_FILES.every(path => hasGitPath(controlRoot, controlSha, path)), "recovery controls missing");
   const manifest = JSON.parse(git(controlRoot, ["show", `${peeledSha}:dsmm/package.json`]));
   equal(manifest.name, POLICY.packageName, "source package name");
+  const requiredControls = controlFilesForVersion(manifest.version);
+  invariant(requiredControls.every((path) => hasGitPath(controlRoot, controlSha, path)), "checkout is missing trusted local controls");
+  if (selector) invariant(RECOVERY_CONTROL_FILES.every(path => hasGitPath(controlRoot, controlSha, path)), "recovery controls missing");
   return resolveReleaseContext({ repository: env.GITHUB_REPOSITORY, defaultBranch: event.repository.default_branch,
     eventName: env.GITHUB_EVENT_NAME, inputs: event.inputs, ref: env.GITHUB_REF, eventSha: env.GITHUB_SHA,
     workflowRef: env.GITHUB_WORKFLOW_REF, workflowSha: env.GITHUB_WORKFLOW_SHA, controlSha, peeledSha,
     runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT, packageVersion: manifest.version,
     controlInDefaultHistory: isAncestor(controlRoot, controlSha), sourceInDefaultHistory: isAncestor(controlRoot, peeledSha),
-    sourceHasControls: isReviewedSource(manifest.version) ? CONTROL_FILES.every((path) => hasGitPath(controlRoot, peeledSha, path))
+    sourceHasControls: isReviewedSource(manifest.version) ? requiredControls.every((path) => hasGitPath(controlRoot, peeledSha, path))
       : hasGitPath(controlRoot, peeledSha, POLICY.workflowFile) && hasGitPath(controlRoot, peeledSha, "scripts/dsmm-release.mjs") });
 }
 
@@ -951,7 +999,7 @@ export async function publishArtifact(directory, context, workDirectory, { env =
 }
 
 function releaseNotes(identity) {
-  if (isSource030(identity.version)) return `@dsmm/dsmm ${identity.version}\n\nPackage source: ${identity.releaseSha}\nTrusted workflow control: ${identity.controlSha}\nArtifact SHA256: ${identity.sha256}\nArtifact integrity receipt SHA256: ${identity.receiptSha256}\n\nBuilt and packed once from tagged source in CI; published through OIDC with CI provenance. Release test suites, native/browser acceptance and fresh-install tests were not run.\n`;
+  if (isBuildOnlyRelease(identity.version)) return `@dsmm/dsmm ${identity.version}\n\nPackage source: ${identity.releaseSha}\nTrusted workflow control: ${identity.controlSha}\nArtifact SHA256: ${identity.sha256}\nArtifact integrity receipt SHA256: ${identity.receiptSha256}\n\nBuilt and packed once from tagged source in CI; published through OIDC with CI provenance. Release test suites, native/browser acceptance and fresh-install tests were not run.\n`;
   return `@dsmm/dsmm ${identity.version}\n\nPackage source: ${identity.releaseSha}\nTrusted workflow control: ${identity.controlSha}\nArtifact SHA256: ${identity.sha256}\nDocker acceptance receipt SHA256: ${identity.receiptSha256}\n\n${identity.mode === "bootstrap" ? "Frozen local bootstrap: imported prior native final-artifact Docker acceptance; no source rebuild, repack or fresh CI Docker claim. OIDC-authenticated exact-byte publication with build provenance explicitly disabled." : "Built and packed once from the tagged source in CI; fresh independent native final-artifact Docker acceptance; OIDC-authenticated exact-byte publication with genuine CI provenance."}\nReal authentication and Desktop integration were not exercised.\n`;
 }
 
@@ -983,7 +1031,9 @@ export async function stageDraftTransport(directory, context, request = githubRe
   }
   const staged = await request(`/repos/${POLICY.repository}/releases/${release.id}`);
   equal(String(staged?.id), String(release.id), "staged Release ID");
-  return validateTransportAssets(staged, await downloadReleaseAssets(staged, identity.version, request), identity);
+  const transport = validateTransportAssets(staged, await downloadReleaseAssets(staged, identity.version, request), identity);
+  return identity.releaseTopology === PUBLICATION_TOPOLOGY
+    ? { ...transport, identity: Object.fromEntries(["releaseTopology", "tag", "version", "releaseSha", "controlSha", "runId", "runAttempt", "sha256", "receiptSha256"].map(key => [key, identity[key]])) } : transport;
 }
 
 export function validateFinalizationEvidence(evidence, identity) {
@@ -992,7 +1042,7 @@ export function validateFinalizationEvidence(evidence, identity) {
   complete(evidence.registry, "registry verification");
   for (const field of ["size", "sha256", "sha1", "integrity"]) equal(evidence.registry[field], identity[field], `verified registry ${field}`);
   equal(evidence.registry.name, POLICY.packageName, "verified registry package"); equal(evidence.registry.version, identity.version, "verified registry version");
-  if (isSource030(identity.version)) equal(evidence.freshInstall, { outcome: "NOT_RUN_RELEASE_POLICY" }, "native installation policy");
+  if (isBuildOnlyRelease(identity.version)) equal(evidence.freshInstall, { outcome: "NOT_RUN_RELEASE_POLICY" }, "native installation policy");
   else {
     validateInstallReceipt(evidence.freshInstall, { version: identity.version, sha256: identity.sha256 });
     for (const field of ["size", "sha1", "integrity"]) equal(evidence.freshInstall.registry[field], identity[field], `installed registry ${field}`);
@@ -1000,16 +1050,27 @@ export function validateFinalizationEvidence(evidence, identity) {
   return evidence;
 }
 
-export async function finalizeRelease(directory, context, verification, request = githubRequest, { registryCheck = verifyRegistryArtifact } = {}) {
+export async function finalizeRelease(directory, context, verification, request = githubRequest, { registryCheck = verifyRegistryArtifact, transport } = {}) {
   const identity = validateArtifactDirectory(directory, context);
-  validateFinalizationEvidence(verification, identity);
-  // Recheck registry bytes at the public-Release boundary, not only prior job status.
-  await registryCheck(identity);
+  const publication = identity.releaseTopology === PUBLICATION_TOPOLOGY;
+  if (!publication) {
+    validateFinalizationEvidence(verification, identity);
+    await registryCheck(identity);
+  } else if (identity.mode !== "bootstrap") {
+    for (const key of ["releaseTopology", "tag", "version", "releaseSha", "controlSha", "runId", "runAttempt", "sha256", "receiptSha256"]) equal(transport?.identity?.[key], identity[key], `created transport ${key}`);
+    invariant(positiveId.test(transport?.releaseId ?? ""), "created transport Release ID missing");
+  }
   const release = await findReleaseByTag(identity.tag, request);
   invariant(release, "accepted draft transport is absent before finalization");
+  if (publication && identity.mode !== "bootstrap") {
+    equal(String(release.id), transport.releaseId, "created draft Release ID");
+    const assetOrder = (a, b) => byteOrder(a.name, b.name);
+    equal(release.assets.map(({ id, name }) => ({ id: String(id), name })).sort(assetOrder), [...transport.assets].sort(assetOrder), "created draft asset identities");
+  }
   validateTransportAssets(release, await downloadReleaseAssets(release, identity.version, request), identity);
   await verifyRemoteReleaseTag(identity, request);
   const result = await request(`/repos/${POLICY.repository}/releases/${release.id}`, { method: "PATCH", body: { draft: false, body: releaseNotes(identity) } });
+  equal(String(result?.id), String(release.id), "finalized Release ID");
   validateTransportAssets(result, await downloadReleaseAssets(result, identity.version, request), identity, { requireDraft: false });
   return { outcome: "PUBLIC_NOT_TERMINALLY_VERIFIED", releaseId: String(result.id), tag: identity.tag, sha256: identity.sha256 };
 }
@@ -1037,9 +1098,9 @@ function parseCli(args) {
   const allowed = { resolve: ["control-root", "output"], "select-artifact": ["control-root"], "assert-source": ["control-root", "context"], bootstrap: ["control-root", "context", "output-dir"], pack: ["control-root", "context", "output-dir"],
     freeze: ["control-root", "context", "tarball", "receipt", "output-dir", "source-checks"],
     validate: ["control-root", "context", "artifact-dir"], publish: ["control-root", "context", "artifact-dir", "work-dir"],
-    transport: ["control-root", "context", "artifact-dir"], finalize: ["control-root", "context", "artifact-dir", "verification"] };
+    transport: ["control-root", "context", "artifact-dir", "output"], finalize: ["control-root", "context", "artifact-dir", "verification", "transport"] };
   for (const key of Object.keys(options)) invariant(allowed[command].includes(key) || (key === "source-root" && ["assert-source", "pack", "freeze"].includes(command)), `unrecognized ${command} option`);
-  for (const key of allowed[command].filter((key) => key !== "source-checks" && !(command === "freeze" && key === "receipt"))) invariant(options[key], `missing --${key}`);
+  for (const key of allowed[command].filter((key) => (!["source-checks", "verification", "transport", "output"].includes(key) || command === "resolve") && !(command === "freeze" && key === "receipt"))) invariant(options[key], `missing --${key}`);
   return { command, options };
 }
 
@@ -1064,8 +1125,17 @@ export async function main(args = process.argv.slice(2)) {
   }
   if (command === "validate") return validateArtifactDirectory(directory, context);
   if (command === "publish") return publishArtifact(directory, context, resolve(options["work-dir"]));
-  if (command === "transport") return stageDraftTransport(directory, context);
-  return finalizeRelease(directory, context, JSON.parse(readFileSync(resolve(options.verification), "utf8")));
+  if (command === "transport") {
+    if (context.releaseTopology === PUBLICATION_TOPOLOGY && context.mode !== "bootstrap") invariant(options.output, "missing --output for created transport identity");
+    if (options.output) invariant(!existsSync(resolve(options.output)), "transport output already exists");
+    const transport = await stageDraftTransport(directory, context);
+    if (options.output) exclusivelyWrite(resolve(options.output), jsonBytes(transport));
+    return transport;
+  }
+  if (context.releaseTopology !== PUBLICATION_TOPOLOGY) invariant(options.verification, "missing --verification");
+  const verification = options.verification && JSON.parse(readFileSync(resolve(options.verification), "utf8"));
+  const transport = options.transport && JSON.parse(readFileSync(resolve(options.transport), "utf8"));
+  return finalizeRelease(directory, context, verification, undefined, { transport });
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {

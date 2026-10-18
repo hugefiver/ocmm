@@ -16,8 +16,7 @@ export const MAX_PROFILE_REVISIONS = 1024;
 
 export type DsmmProfileOverlay = Pick<DsmmPluginConfig,
   "modelParameters" | "defaultActive" | "roleRouting" | "runtimePolicy" | "workflow" | "guards" | "runtimeRecovery"
-  | "roles" | "locale" | "deepseekV4ProCalibration" | "deepseekV4ProDefaultReasoningEffort"
-  | "deepseekFlashCalibration" | "deepseekFlashDefaultReasoningEffort"> & { subagents?: Pick<NonNullable<DsmmPluginConfig["subagents"]>, "toolTopology"> };
+  | "roles" | "locale"> & { subagents?: Pick<NonNullable<DsmmPluginConfig["subagents"]>, "toolTopology"> };
 
 export interface DsmmProfileDocument {
   version: 1;
@@ -58,10 +57,16 @@ export function validateProfileId(id: unknown): asserts id is string {
 }
 
 export function validateProfileRevision(revision: unknown, field = "expectedRevision"): asserts revision is string {
-  if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision)) invalid(field, "must be a SHA256 file revision");
+  if (!isConfigRevision(revision)) invalid(field, "must be a configuration version");
 }
 
-const OVERLAY_FIELDS = ["modelParameters", "defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "roles", "locale", "subagents", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
+export { isConfigRevision, isProfileReference } from "./config-revision.js";
+import { isConfigRevision } from "./config-revision.js";
+export function validateAdmissionEpoch(value: unknown, field = "admissionEpoch"): asserts value is string {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) invalid(field, "must be an admission identity");
+}
+
+const OVERLAY_FIELDS = ["modelParameters", "defaultActive", "roleRouting", "runtimePolicy", "workflow", "guards", "runtimeRecovery", "roles", "locale", "subagents"];
 
 export function parseProfileDocument(content: string, expectedId?: string): DsmmProfileDocument {
   const result = validateProfileDocument(content, expectedId);
@@ -116,10 +121,6 @@ export function validateProfileOverlay(input: unknown): asserts input is DsmmPro
     keys(parameters, ["passthrough"], field);
     optional(parameters, "passthrough", bool, field);
   }, "settings");
-  for (const prefix of ["deepseekV4Pro", "deepseekFlash"]) {
-    optional(overlay, `${prefix}Calibration`, (value, field) => enumeration(value, ["off", "auto", "strict"], field), "settings");
-    optional(overlay, `${prefix}DefaultReasoningEffort`, (value, field) => enumeration(value, ["off", "low", "high"], field), "settings");
-  }
   optional(overlay, "roleRouting", roleRouting, "settings");
   optional(overlay, "runtimePolicy", runtimePolicy, "settings");
   optional(overlay, "workflow", workflow, "settings");

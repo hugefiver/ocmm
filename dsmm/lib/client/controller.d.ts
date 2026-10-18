@@ -12,6 +12,7 @@ export interface ProfileEditor {
     content: string;
     revision: string | null;
     warnings?: ProfileDiagnostic[];
+    refreshRequired?: true;
 }
 export interface ProfilesNotice {
     key: "saved" | "applied" | "reset";

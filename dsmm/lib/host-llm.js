@@ -5,6 +5,17 @@ import { isDeepStrictEqual } from "node:util";
 import { copyRouteJson } from "./route-json.js";
 import { modelRouteFromCall } from "./role-llm.js";
 import { classifyDsmmAgent } from "./runtime-integration.js";
+import { latestNativeModelSelection } from "./role-routing.js";
+import { resolveSelectedAgentPreset } from "./session-scope.js";
+import { capturedRoleInvocation } from "./role-invocation.js";
+export function captureDsmmEffortSource(agent) {
+    const current = agent;
+    const invocation = capturedRoleInvocation(current);
+    if (latestNativeModelSelection(current) !== undefined
+        || agent.session.header.origin !== "subagent" && !resolveSelectedAgentPreset(current.session)?.startsWith("dsmm-"))
+        return "native";
+    return invocation?.effortSource ?? (invocation?.routeSource === "inherited" ? "native" : "dsmm-config");
+}
 /** Use the live provider owner and this call's complete frozen parameters, not envelope presence alone. */
 export function requiresDsmmCallAdmission(config, classifier, uncapturedAgent) {
     return uncapturedAgent !== undefined && classifyDsmmAgent(uncapturedAgent) === "dsmm"
@@ -107,7 +118,7 @@ export class DsmmAwareLlmRuntime extends LlmRuntime {
             if (result.admission.agent !== frame.agent)
                 throw new LlmError("LLM admission belongs to another Agent", "INVALID_PREPARED_CALL");
             this.active.get(frame.agent)?.revocation.abort();
-            const captured = { frame: Object.freeze({ ...frame }), admission: result.admission,
+            const captured = { frame: Object.freeze({ ...frame }), admission: result.admission, effortSource: result.effortSource ?? captureDsmmEffortSource(frame.agent),
                 ...(result.kind === "dsmm" ? { generation: result.generation } : {}), revocation: new AbortController() };
             this.active.set(frame.agent, captured);
             const retire = () => {
@@ -167,7 +178,7 @@ export class DsmmAwareLlmRuntime extends LlmRuntime {
             throw new LlmError("Enhanced requests require their exact Host proposal", "INVALID_PREPARED_CALL");
         return config;
     }
-    async prepareCall(proposal, signal) {
+    async prepareCall(proposal, signal, configure) {
         const initiator = this.ctx.get("agents")?.currentInitiator();
         if (initiator !== undefined && this.pending.has(initiator) && this.pending.get(initiator) !== proposal)
             throw new LlmError("DSMM request lost its exact proposal identity", "INVALID_PREPARED_CALL");
@@ -176,14 +187,17 @@ export class DsmmAwareLlmRuntime extends LlmRuntime {
             if (this.admitted.has(proposal))
                 throw new LlmError("DSMM proposal was already consumed", "INVALID_PREPARED_CALL");
             const config = this.uncapturedNativeConfig(proposal, initiator, signal);
-            return this.stock === undefined ? super.prepareCall(config, signal) : this.stock.prepareCall(config, signal);
+            const prepared = await this.prepareNativeCall(config, signal, configure);
+            this.lifetime.signal.throwIfAborted();
+            signal?.throwIfAborted();
+            return prepared;
         }
         this.calls.delete(proposal);
         this.pending.delete(captured.frame.agent);
         try {
             if (signal !== captured.frame.signal)
                 throw new LlmError("LLM request signal does not match admission", "INVALID_PREPARED_CALL");
-            return await this.prepareAdmittedCall(proposal, signal, captured);
+            return await this.prepareAdmittedCall(proposal, signal, captured, configure);
         }
         catch (error) {
             // NO_ADAPTER is the official loop's signal to dispatch without a prepared call.
@@ -192,18 +206,39 @@ export class DsmmAwareLlmRuntime extends LlmRuntime {
             throw error;
         }
     }
-    async prepareAdmittedCall(proposal, signal, captured) {
+    prepareNativeCall(config, signal, configure) {
+        const classifier = this.ctx.get("dsmmLlmRoutes");
+        const supportsStop = classifier?.supportsNativeStop?.(config.provider) ?? true;
+        const select = (controls, model) => {
+            const selected = configure === undefined ? controls : configure(controls, model);
+            const final = snapshotDsmmCall({ ...selected, provider: config.provider, model: config.model });
+            if (final.customParameters !== undefined || !supportsStop && final.stop !== undefined) {
+                throw new LlmError("Final controls require raw parameter admission before preparation", "UNSUPPORTED_ROUTE_PARAMETERS");
+            }
+            return selected;
+        };
+        return this.stock === undefined ? super.prepareCall(config, signal, select) : this.stock.prepareCall(config, signal, select);
+    }
+    async prepareAdmittedCall(proposal, signal, captured, configure) {
         this.assertCaptured(captured);
         if (captured.generation === undefined) {
             const preparationSignal = AbortSignal.any([signal, captured.admission.signal, captured.revocation.signal, this.lifetime.signal]);
-            const prepared = await (this.stock === undefined ? super.prepareCall(proposal, preparationSignal) : this.stock.prepareCall(proposal, preparationSignal));
+            const prepared = await this.prepareNativeCall(proposal, preparationSignal, configure);
             this.assertCaptured(captured);
-            return this.bindPrepared(captured, signal, prepared, request => prepared.stream(request));
+            return this.bindPrepared(captured, signal, prepared, (request, providerSignal) => prepared.stream(Object.freeze({ ...request, signal: providerSignal })));
         }
-        const bound = await captured.generation.prepareCall(proposal.provider, proposal.model, signal, () => this.assertCaptured(captured));
+        let streamEffortSource = captured.effortSource;
+        const preparationSignal = AbortSignal.any([signal, captured.admission.signal, captured.generation.signal, captured.revocation.signal, this.lifetime.signal]);
+        const bound = await captured.generation.prepareCall(proposal.provider, proposal.model, preparationSignal, () => this.assertCaptured(captured), () => streamEffortSource);
         this.assertCaptured(captured);
         if (bound.model.provider !== proposal.provider || bound.model.id !== proposal.model)
             throw new LlmError("Provider resolved another model", "INVALID_ADAPTER");
+        if (configure !== undefined) {
+            const { provider, model, customParameters, ...controls } = proposal;
+            const selected = configure(freezeDsmmJson(controls), freezeDsmmJson(bound.model));
+            proposal = snapshotDsmmCall({ ...selected, provider, model, ...(customParameters === undefined ? {} : { customParameters }) });
+            this.assertCaptured(captured);
+        }
         const customParameters = proposal.customParameters;
         const defaultReasoningEffort = captured.generation.defaultReasoningEffort ?? bound.model.reasoning?.defaultEffort;
         const adapterDefaults = Object.freeze({
@@ -212,6 +247,11 @@ export class DsmmAwareLlmRuntime extends LlmRuntime {
         });
         const config = snapshotDsmmCall({ ...proposal, ...(adapterDefaults.maxTokens ? { maxTokens: bound.model.defaultMaxTokens } : {}),
             ...(adapterDefaults.reasoningEffort ? { reasoningEffort: defaultReasoningEffort } : {}) });
+        if (adapterDefaults.reasoningEffort)
+            streamEffortSource = "native";
+        if (streamEffortSource === "native" && config.reasoningEffort !== undefined && !bound.model.reasoning?.efforts.some(effort => effort.id === config.reasoningEffort)) {
+            throw new LlmError("The native selection's reasoning effort is not supported by this model", "UNSUPPORTED_REASONING_EFFORT");
+        }
         return this.bindPrepared(captured, signal, {
             config, adapterDefaults, retryPolicy: freezeDsmmJson(captured.generation.retryPolicy),
             ...(bound.model.context === undefined ? {} : { context: freezeDsmmJson(bound.model.context) }),

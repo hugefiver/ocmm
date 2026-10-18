@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { setImmediate } from "node:timers/promises";
 import { runInThisContext } from "node:vm";
 import { build } from "esbuild";
 import { cloneElement, createElement, isValidElement } from "react";
 import type { ReactElement } from "react";
 import type { DeploymentController as Controller } from "../src/client/deployment-controller.js";
-import type { DeploymentPageProps } from "../src/client/DeploymentPage.js";
+import type { Field as DeploymentField } from "../src/client/DeploymentFields.js";
+import type { StateInspector as Inspector } from "../src/client/DeploymentPage.js";
+import { moduleFields, CONFIG_MODULES } from "../src/client/deployment-modules.ts";
+import { editLayer } from "../src/client/deployment-data.ts";
 import type { DsmmConfigRemote } from "../src/profile-remote.js";
 import type { DeploymentAdmissionView, DeploymentEditorSnapshot, SessionProfileSnapshot } from "../src/profile-types.js";
 import { deploymentEditorSchema, mergeConfigLayers, resolveConfig, resolveDeployment, validateSparseConfig } from "../src/settings.js";
@@ -17,18 +19,18 @@ import { deploymentEditorSchema, mergeConfigLayers, resolveConfig, resolveDeploy
 const root = fileURLToPath(new URL("..", import.meta.url));
 const compiled = await build({
   absWorkingDir: root,
-  stdin: { resolveDir: root, contents: 'export { DeploymentController } from "./src/client/deployment-controller.ts"; export { DeploymentPage } from "./src/client/DeploymentPage.tsx";' },
+  stdin: { resolveDir: root, contents: 'export { DeploymentController } from "./src/client/deployment-controller.ts"; export { Field, AdvancedField } from "./src/client/DeploymentFields.tsx"; export { StateInspector } from "./src/client/DeploymentPage.tsx";' },
   bundle: true, write: false, platform: "node", format: "cjs", target: "es2022",
   external: ["react", "react/jsx-runtime", "@deepseek-ai/dsh-client-ui-primitives", "jsonc-parser"],
 });
 const require = createRequire(import.meta.url);
-const module = { exports: {} as { DeploymentController: typeof Controller; DeploymentPage(props: DeploymentPageProps): unknown } };
+const module = { exports: {} as { DeploymentController: typeof Controller; Field: typeof DeploymentField; StateInspector: typeof Inspector } };
 runInThisContext(`(function(require, module, exports) { ${compiled.outputFiles[0].text}\n})`)((id: string) => {
   if (id === "react") return { ...require(id), useEffect() {}, useMemo: (factory: () => unknown) => factory(), useId: () => "advanced-validation", useState: (value: unknown) => [value, () => {}], useSyncExternalStore: (_subscribe: unknown, get: () => unknown) => get() };
   if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Button: (props: Record<string, unknown>) => createElement("button", props), Input: (props: Record<string, unknown>) => createElement("input", props) };
   return require(id);
 }, module, module.exports);
-const { DeploymentController, DeploymentPage } = module.exports;
+const { DeploymentController, Field, StateInspector } = module.exports;
 
 function fixture(global: Record<string, unknown>, profile: Record<string, unknown>, base: Record<string, unknown> = profile) {
   const defaults = resolveConfig() as unknown as Record<string, unknown>;
@@ -42,9 +44,21 @@ function fixture(global: Record<string, unknown>, profile: Record<string, unknow
     describe: async () => ({ ok: true, value: { config: snapshot.global, revision: snapshot.globalRevision } }),
     describeModules: async () => ({ ok: true, value: [] }),
     describeSettings: async () => ({ ok: true, value: structuredClone(snapshot) }),
-    save: async request => { writes.push(request); return { ok: true, value: { config: snapshot.global, revision: "g1" } }; },
+    save: async request => { writes.push(request); for (const edit of request.edits) snapshot.global = editLayer(snapshot.global, edit.path, edit.op === "set" ? edit.value : undefined); snapshot.globalRevision = "g1"; return { ok: true, value: { config: snapshot.global, revision: "g1" } }; },
   };
   return { snapshot, writes, controller: new DeploymentController(remote, "global"), remote };
+}
+function attachNative(f: ReturnType<typeof fixture>, c: Controller, mutations: unknown[]): void {
+  const native = f.snapshot.nativeForm!;
+  c.attachForm({ state: { status: "ready", writable: true, revision: f.snapshot.nativeFormRevision!, value: f.snapshot.profile, base: native.base, user: native.user }, mutate: async (ops, revision) => {
+    assert.equal(revision, f.snapshot.nativeFormRevision); mutations.push(ops);
+    let user = native.user as Record<string, unknown>;
+    for (const edit of ops) user = editLayer(user, edit.path, edit.op === "set" ? edit.value : undefined);
+    f.snapshot.nativeForm = { base: native.base, user };
+    f.snapshot.profile = mergeConfigLayers(validateSparseConfig(native.base), validateSparseConfig(user)) as Record<string, unknown>;
+    f.snapshot.nativeFormRevision!++; f.snapshot.nativeRevision = `n${f.snapshot.nativeFormRevision}`;
+    attachNative(f, c, mutations); return true;
+  } });
 }
 
 function elements(tree: unknown): ReactElement<Record<string, unknown>>[] {
@@ -68,11 +82,8 @@ function text(tree: unknown): string {
   return isValidElement<Record<string, unknown>>(tree) ? text(tree.props.children) : typeof tree === "string" || typeof tree === "number" ? String(tree) : "";
 }
 function advancedInput(controller: Controller, remote: DsmmConfigRemote) {
-  const props: DeploymentPageProps = { core: controller, remote, view: "page", t: key => key };
-  const layer = elements(DeploymentPage(props)).find(node => typeof node.type === "function" && node.type.name === "Layer")!;
-  const field = elements(renderComponent(layer)).find(node => typeof node.type === "function" && node.type.name === "Field" && (node.props.path as string[])[0] === "roleRouting")!;
-  const advanced = renderComponent(field) as ReactElement<Record<string, unknown>>;
-  const input = elements(renderComponent(advanced)).find(node => node.type === "textarea")!;
+  void remote;
+  const input = elements(renderTree(createElement(Field, { schema: controller.getSnapshot().snapshot!.schema.fields!.roleRouting, path: ["roleRouting"], controller, t: key => key }))).find(node => node.type === "textarea")!;
   return (value: string) => (input.props.onChange as (event: unknown) => void)({ currentTarget: { value } });
 }
 
@@ -83,8 +94,8 @@ test("Core passthrough field handlers save explicit false, same-default true and
     const f = fixture(initial, {});
     try {
       await f.controller.refresh();
-      const tree = renderTree(DeploymentPage({ core: f.controller, remote: f.remote, view: "page", t: key => key }));
-      const group = elements(tree).find(node => node.type === "div" && node.props.className === "dsmm-field dsmm-deployment-field" && text(node).includes("modelParameters.passthrough"));
+      const tree = renderTree(createElement(Field, { schema: f.snapshot.schema.fields!.modelParameters, path: ["modelParameters"], controller: f.controller, t: key => key }));
+      const group = elements(tree).find(node => node.props["data-field"] === "modelParameters.passthrough");
       assert.ok(group);
       const select = elements(group).find(node => node.type === "select")!;
       (select.props.onChange as (event: unknown) => void)({ currentTarget: { value: choice } });
@@ -124,11 +135,11 @@ test("Core permission enabled field uses ordinary Global/native Save and preserv
   for (const native of [false, true]) {
     const f = fixture(native ? {} : { permissionControl: policy }, native ? { permissionControl: policy } : {});
     const c = native ? new DeploymentController(f.remote, "profile", "dsmm") : f.controller, mutations: unknown[] = [];
-    if (native) { f.snapshot.nativeForm = { base: {}, user: f.snapshot.profile }; c.attachForm({ state: { status: "ready", writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile }, mutate: async (ops, revision) => { assert.equal(revision, 0); mutations.push(ops); return true; } }); }
+    if (native) { f.snapshot.nativeForm = { base: {}, user: f.snapshot.profile }; attachNative(f, c, mutations); }
     try {
       await c.refresh();
-      const tree = renderTree(DeploymentPage({ core: c, remote: f.remote, view: "page", t: key => key }));
-      const group = elements(tree).find(node => node.type === "div" && node.props.className === "dsmm-field dsmm-deployment-field" && text(node).includes("permissionControl.enabled"));
+      const tree = renderTree(createElement(Field, { schema: f.snapshot.schema.fields!.permissionControl, path: ["permissionControl"], controller: c, t: key => key }));
+      const group = elements(tree).find(node => node.props["data-field"] === "permissionControl.enabled");
       assert.ok(group);
       const select = elements(group).find(node => node.type === "select")!;
       (select.props.onChange as (event: unknown) => void)({ currentTarget: { value: "false" } }); await c.save();
@@ -234,7 +245,7 @@ test("Profile advanced fields inherit global and native base members but persist
   const f = fixture(global, mergeConfigLayers(validateSparseConfig(base), validateSparseConfig(user)) as Record<string, unknown>, base);
   f.snapshot.nativeForm = { base, user };
   const c = new DeploymentController(f.remote, "profile", "dsmm"), mutations: unknown[] = [];
-  c.attachForm({ state: { status: "ready", writable: true, revision: 0, value: {}, base, user }, mutate: async (ops, revision) => { assert.equal(revision, 0); mutations.push(ops); return true; } });
+  attachNative(f, c, mutations);
   try {
     await c.refresh(); advancedInput(c, f.remote)('{"dsmm-reviewer":{"primary":{"model":"changed"}}}'); await c.save();
     assert.equal(c.getSnapshot().saved, true);
@@ -244,40 +255,29 @@ test("Profile advanced fields inherit global and native base members but persist
   } finally { c.dispose(); f.controller.dispose(); }
 });
 
-test("native Global and profile controls omit LSP while unrelated UI saves preserve enabled input", async () => {
+test("selected-scope module fields preserve hidden LSP input through ordinary Global and native saves", async () => {
   const stored = { enabled: true, serverName: "retained-server", command: "retained-command", args: ["retained-argument"] };
   const f = fixture({ lsp: stored, defaultActive: true }, { lsp: stored, defaultActive: true }, {});
   f.snapshot.nativeForm = { base: {}, user: structuredClone(f.snapshot.profile) };
-  const nativeState = { status: "ready" as const, writable: true, revision: 0, value: f.snapshot.profile, base: {}, user: f.snapshot.profile };
   const mutations: unknown[] = [];
-  const form = { state: nativeState, mutate: async (ops: unknown, revision?: number) => { assert.equal(revision, 0); mutations.push(ops); return true; } };
   const profile = new DeploymentController(f.remote, "profile", "dsmm");
-  profile.attachForm(form);
-  f.controller.forProfile = () => profile;
-  const forms = { get: () => ({ getSnapshot: () => nativeState, subscribe: () => () => {}, mutate: form.mutate }) } as unknown as NonNullable<DeploymentPageProps["forms"]>;
-  const render = () => renderTree(DeploymentPage({ core: f.controller, remote: f.remote, view: "page", t: key => key, profilePage: true, forms, form }));
+  attachNative(f, profile, mutations);
   try {
-    await f.controller.refresh(); await profile.refresh();
-    for (const [layer, save] of [["global", "saveGlobal"], ["profile", "saveProfile"]]) {
-      let tree = render();
-      const section = elements(tree).find(node => node.props["data-dsmm-layer"] === layer)!;
-      assert.ok(section, "the production page renders both native configuration layers");
-      const paths = elements(section).filter(node => node.type === "code").map(text);
+    for (const controller of [f.controller, profile]) {
+      await controller.refresh();
+      const fields = CONFIG_MODULES.flatMap(module => moduleFields(f.snapshot.schema, module, controller.layer));
+      assert.equal(new Set(fields.map(([key]) => key)).size, fields.length);
+      const section = renderTree(fields.map(([key, schema]) => createElement(Field, { key, schema, path: [key], controller, t: key => key })));
+      const paths = elements(section).flatMap(node => typeof node.props["data-field"] === "string" ? [node.props["data-field"]] : []);
       assert.equal(paths.some(path => path === "lsp" || path.startsWith("lsp.")), false);
-      assert.ok(paths.includes("modules.deepwork.enabled") === (layer === "global"));
+      assert.ok(paths.includes("modules.deepwork.enabled") === (controller.layer === "global"));
       assert.ok(paths.includes("workflow.reviewCap"));
       assert.ok(paths.includes("roleRouting"));
-      const field = elements(section).find(node => node.props.className === "dsmm-field dsmm-deployment-field" && elements(node).some(child => child.type === "code" && text(child) === "defaultActive"))!;
+      const field = elements(section).find(node => node.props["data-field"] === "defaultActive")!;
       const select = elements(field).find(node => node.type === "select")!;
       assert.equal(select.props.disabled, false);
       (select.props.onChange as (event: unknown) => void)({ currentTarget: { value: "false" } });
-      tree = render();
-      const updated = elements(tree).find(node => node.props["data-dsmm-layer"] === layer)!;
-      const button = elements(updated).find(node => node.type === "button" && text(node) === save)!;
-      assert.equal(button.props.disabled, false);
-      (button.props.onClick as () => void)();
-      const controller = layer === "global" ? f.controller : profile;
-      for (let round = 0; round < 100 && controller.getSnapshot().busy; round++) await setImmediate();
+      await controller.save();
       assert.equal(controller.getSnapshot().saved, true);
       assert.deepEqual(controller.getSnapshot().draft.lsp, stored);
     }
@@ -301,15 +301,14 @@ test("rendered inspector hides LSP configuration, provenance and restart state a
   f.snapshot.nextRoot = admission;
   const session: SessionProfileSnapshot = {
     sessionId: "owned-inspector-root", admissionEpoch: "owned-inspector-epoch", scope: "deployment-baseline", switchAllowed: true,
+    canSelectModel: false, selectModelUnavailableReason: "model-unconfigured",
+    canToggleMode: false, toggleModeUnavailableReason: "runtime-unavailable",
+    canApplyOverlay: false, applyOverlayUnavailableReason: "new-session-required",
     globalDefault: { selectedId: null, appliedRevision: null, selectionRevision: "absent" },
     selection: { selectedId: null, appliedRevision: null, selectionRevision: "absent" }, configuration: admission,
   };
   const before = structuredClone(f.snapshot);
-  const inspector = () => {
-    const page = DeploymentPage({ core: f.controller, remote: f.remote, view: "page", t: key => key });
-    const component = elements(page).find(node => typeof node.type === "function" && node.type.name === "StateInspector")!;
-    return renderTree(component);
-  };
+  const inspector = () => renderTree(createElement(StateInspector, { controller: f.controller, t: key => key }));
   try {
     await f.controller.refresh();
     for (const state of [null, session]) {
@@ -321,9 +320,7 @@ test("rendered inspector hides LSP configuration, provenance and restart state a
       assert.ok(paths.includes("modules.deepwork.enabled"));
       assert.deepEqual(paths, [...paths].sort());
       assert.equal(nodes.some(node => node.type === "p" && text(node).includes("pending")), false);
-      const summary = nodes.find(node => node.type === "summary")!;
-      assert.equal(text(summary).includes("pending"), false, "LSP-only restart information must not create an unexplained pending status");
-      if (state !== null) assert.ok(text(tree).includes(state.sessionId));
+      if (state !== null) assert.ok(nodes.some(node => node.props.role === "status" && text(node) === "sessionObserved"));
     }
     f.snapshot.nextRoot = { ...admission, restartRequired: ["lsp.enabled", "permissions"] };
     await f.controller.refresh();

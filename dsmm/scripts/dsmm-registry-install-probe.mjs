@@ -9,7 +9,6 @@ import { gunzipSync } from "node:zlib";
 import { dshPolicyForVersion, isSource020, isSource022, isSource030, isStableNativeSource, isReviewedReleaseVersion, pluginTitleForVersion, COMPILED_NAMES_020, COMPILED_NAMES_021, COMPILED_NAMES_022, COMPILED_NAMES_030, COLD_PROFILE_SCRIPTS_022, publicRuntimeExportsForVersion } from "./release-contract.mjs";
 
 export const PACKAGE_NAME = "@dsmm/dsmm";
-export const DSH_VERSION = "0.2.0-rc.2";
 export const PNPM_VERSION = "11.9.0";
 export const REGISTRY = "https://registry.npmjs.org/";
 const PNPM_INTEGRITY = "sha512-vWgtXQP+Ul73yf1ngMaITR51asTJyf4AxTh4KCQxDc+Q493E9Tg18G3669UIXkGFXgvLs7YN4qxburieUDbwOw==";
@@ -88,7 +87,7 @@ export function publicExportsForVersion(version) {
 
 export function requiredChecksForVersion(version) {
   const checks = requiresDeepworkMetadata(version) ? [...REQUIRED_CHECKS, "localeResources", "nativePluginMetadata"] : [...REQUIRED_CHECKS];
-  return isSource022(version) ? [...checks, "coldMigrationResources"] : checks;
+  return isSource022(version) || isSource030(version) ? [...checks, "coldMigrationResources"] : checks;
 }
 
 export function validateLocaleResources(resources, version) {
@@ -341,7 +340,7 @@ export function verifyInstalledPackage(profilePackage, profileRoot, expected, ve
   }
   const compiledFiles = {};
   for (const path of compiledFilesForVersion(version)) compiledFiles[path] = verifyFile(path, profileRequire.resolve(join(packageRoot, path)));
-  if (isSource022(version)) for (const path of COLD_PROFILE_SCRIPTS_022) verifyFile(path, profileRequire.resolve(join(packageRoot, path)));
+  if (isSource022(version) || isSource030(version)) for (const path of COLD_PROFILE_SCRIPTS_022) verifyFile(path, profileRequire.resolve(join(packageRoot, path)));
   const resources = new Map([...expected].filter(([path]) => path.startsWith("locale/")).map(([path, entry]) => [path, entry.bytes]));
   validateLocaleResources(resources, version);
   if (requiresDeepworkMetadata(version)) {
@@ -353,6 +352,7 @@ export function verifyInstalledPackage(profilePackage, profileRoot, expected, ve
 
 export async function readInstalledPluginMetadata(profilePackage, profileRoot, nativePackage, nativeRoot, version) {
   requireFact(requiresDeepworkMetadata(version), "LEGACY_METADATA_NOT_REQUIRED");
+  const dshPolicy = dshPolicyForVersion(version);
   const profileRequire = createRequire(profilePackage), nativeRequire = createRequire(realpathSync(nativePackage));
   const packageRoot = realpathSync(dirname(profileRequire.resolve(`${PACKAGE_NAME}/package.json`)));
   requireFact(isInside(packageRoot, realpathSync(profileRoot)), "METADATA_PACKAGE_NOT_PROFILE_OWNED");
@@ -360,7 +360,6 @@ export async function readInstalledPluginMetadata(profilePackage, profileRoot, n
   requireFact(manifest.name === PACKAGE_NAME && manifest.version === version && exactKeys(manifest.exports, Object.keys(publicExportsForVersion(version))), "METADATA_PACKAGE_IDENTITY_MISMATCH");
   const reader = realpathSync(nativeRequire.resolve("@deepseek-ai/dsh-app-boot"));
   const readerManifest = JSON.parse(readFileSync(realpathSync(nativeRequire.resolve("@deepseek-ai/dsh-app-boot/package.json")), "utf8"));
-  const dshPolicy = dshPolicyForVersion(version);
   requireFact(isInside(reader, realpathSync(nativeRoot)) && readerManifest.name === "@deepseek-ai/dsh-app-boot" && readerManifest.version === dshPolicy.runtimeVersion, "NATIVE_METADATA_READER_IDENTITY_MISMATCH");
   const resources = new Map();
   for (const [name, path] of Object.entries(LOCALE_EXPORTS)) {
@@ -542,7 +541,7 @@ export async function runInstallProbe(options, runtime = {}) {
         receipt.exports = installed.exports;
         receipt.compiledFiles = installed.compiledFiles;
         for (const check of ["profileOwnedResolution", "publicExports", "compiledProfileClient", "installedBytes"]) receipt.checks[check] = true;
-        if (isSource022(options.version)) receipt.checks.coldMigrationResources = true;
+        if (isSource022(options.version) || isSource030(options.version)) receipt.checks.coldMigrationResources = true;
         if (requiresDeepworkMetadata(options.version)) {
           stage = "native-plugin-metadata";
           const code = "const {readInstalledPluginMetadata}=await import(process.argv[1]); const result=await readInstalledPluginMetadata(...process.argv.slice(2)); process.stdout.write(JSON.stringify(result));";

@@ -73,7 +73,7 @@ export interface PermissionFixture {
 
 /** Source-backed native ToolRuntime fixture. Shell execution is counted, not confinement proof. */
 export async function permissionFixture(_timeoutMs = 2000, options: {
-  mode?: "native" | "ptc" | "both"; settings?: PermissionControlSchemaInput;
+  mode?: "native" | "ptc"; settings?: PermissionControlSchemaInput;
   sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
   shellExecution?(spec: Record<string, unknown>): Promise<void>;
   rules?(permissions: PermissionControl, ctx: Context): { backend: PermissionRulesBackend; runtime: PermissionRulesRuntimeSync };

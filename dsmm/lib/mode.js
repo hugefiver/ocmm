@@ -1,57 +1,44 @@
-import { Context, getTraceable } from "@deepseek-ai/cordis";
+import { getTraceable } from "@deepseek-ai/cordis";
 import { agentForScope, nativeAgentContext } from "./native-scope.js";
 import { buildDeepworkPrompt } from "./prompts.js";
 import { resolveEffectiveDsmmRole, resolveSelectedAgentPreset } from "./session-scope.js";
+const bindings = new WeakMap();
 function routeFromAgent(agent) {
     const header = agent.session.requestHeader?.();
     const { provider, model } = (header === undefined ? agent.options : header.config) ?? {};
     return typeof provider === "string" && typeof model === "string" ? { provider, model } : undefined;
 }
-export function registerDeepworkPrompt(readyCtx, controller, getSettings, config = {}) {
-    const agents = new Map();
-    const install = (ctx, registry, agent) => {
-        if (registry === undefined)
-            return undefined;
-        const section = {
-            name: "dsmm:deepwork", order: getSettings().promptOrder, interpolate: false,
+/** The admission installer owns scope selection; assembly reads the immutable Agent configuration. */
+export function registerDeepworkPrompt(readyCtx, controller, getSettings, config, agent, lifetime) {
+    const refresh = bindings.get(agent);
+    if (refresh) {
+        refresh();
+        return;
+    }
+    const ctx = nativeAgentContext(agent);
+    let dispose;
+    const reconcile = () => {
+        dispose?.();
+        const registry = ctx.get("agentPresets")?.serviceFor(agent, "systemPrompt") ?? ctx.get("systemPrompt");
+        if (!registry)
+            throw new Error("Deepwork requires the native system prompt service");
+        dispose = getTraceable(ctx, registry).section({ name: "dsmm:deepwork", order: getSettings(agent).promptOrder, interpolate: false,
             text(context) {
-                if (context.signal?.aborted)
+                if (context.signal?.aborted || getSettings.subagentRuntime !== undefined && !getSettings.subagentRuntime().deliveryFenceReady)
                     return "";
-                const subject = agent !== undefined && context.scope === agent ? agent : agentForScope(readyCtx, context.scope);
-                if (subject === undefined)
+                if (context.scope !== agent && agentForScope(readyCtx, context.scope) !== agent)
                     return "";
-                const settings = getSettings(subject);
-                if (!settings.modules.deepwork.enabled || !controller.active(subject, settings.defaultActive))
+                const settings = getSettings(agent);
+                if (!settings.modules.deepwork.enabled || !controller.active(agent, settings.defaultActive))
                     return "";
-                return buildDeepworkPrompt(settings, { route: routeFromAgent(subject), selectedPreset: resolveSelectedAgentPreset(subject.session), roleId: resolveEffectiveDsmmRole(subject, settings, true) ?? null, overrideSection: config.section });
+                return buildDeepworkPrompt(settings, { route: routeFromAgent(agent), selectedPreset: resolveSelectedAgentPreset(agent.session), roleId: resolveEffectiveDsmmRole(agent, settings, true) ?? null, overrideSection: config.section });
             }
-        };
-        // Keep the caller's registration scope even when a primitive service is supplied.
-        const service = ctx instanceof Context ? getTraceable(ctx, registry) : registry;
-        return service.section(section);
+        });
     };
-    install(readyCtx, readyCtx.get !== undefined ? readyCtx.get("systemPrompt") : readyCtx.systemPrompt);
-    const installForAgent = (agent) => {
-        agents.get(agent)?.();
-        agents.delete(agent);
-        const ctx = nativeAgentContext(agent);
-        const presets = readyCtx.get?.("agentPresets");
-        const dispose = install(ctx, presets?.serviceFor(agent, "systemPrompt") ?? ctx.get("systemPrompt"), agent);
-        if (dispose !== undefined)
-            agents.set(agent, dispose);
-    };
-    readyCtx.on?.("agent/created", ({ agent }) => installForAgent(agent), { global: true });
-    readyCtx.on?.("agent-preset/selected", (id) => {
-        const agent = readyCtx.get?.("agents")?.get(id);
-        if (agent !== undefined)
-            installForAgent(agent);
-    }, { global: true });
-    readyCtx.on?.("agent/disposed", ({ agent }) => { agents.get(agent)?.(); agents.delete(agent); }, { global: true });
-    // Native fibers own each section. DSMM also releases the Agent-owned ones
-    // when its own plugin is unloaded while those Agents remain alive.
-    readyCtx.effect?.(() => () => { for (const dispose of agents.values())
-        dispose(); agents.clear(); });
-    for (const agent of readyCtx.get?.("agents")?.list() ?? [])
-        installForAgent(agent);
+    bindings.set(agent, reconcile);
+    const retire = () => { dispose?.(); bindings.delete(agent); lifetime.removeEventListener("abort", retire); };
+    lifetime.addEventListener("abort", retire, { once: true });
+    ctx.effect(() => retire);
+    reconcile();
 }
 //# sourceMappingURL=mode.js.map

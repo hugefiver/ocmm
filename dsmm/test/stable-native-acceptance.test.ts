@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 // @ts-expect-error Native release harnesses are source-only modules.
-import { digest, inspectStableExports, inspectStableProfileStorage, stableCompositionBundle, stableMainStartupRow, stableNativeProofIdentity, stableRuntimeStartupRows } from "../scripts/stable-native-acceptance.mjs";
+import { digest, inspectStableProfileStorage, stableCompositionBundle, stableNativeProofIdentity } from "../scripts/stable-native-acceptance.mjs";
 // @ts-expect-error Native release harnesses are source-only modules.
 import { createStableNativeBridge } from "../scripts/profile-ui-harness-stable021-native.mjs";
 // @ts-expect-error Native release harnesses are source-only modules.
@@ -43,44 +43,25 @@ test("stable cold profile inspection allows absent storage without materializing
   } finally { await rm(home, { recursive: true, force: false }); }
 });
 
-test("stable native bootstrap refuses stock, duplicate, unready and legacy-enabled substrate proof", () => {
+test("historical stable bootstrap contracts refuse stock, duplicate, unready and legacy-enabled substrate proof", () => {
   const proof = { startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsmm/dsmm"], stockSubagentDisabled: true,
     customRuntimeEntries: 1, mainEntries: 1, runtimeLoaded: true, mainLoaded: true, binding: "dsmm", deliveryFenceReady: true, restartRequired: false, experimentalLegacyRead: "unconfigured/unavailable",
     loader: [{ id: "include:dsmm", name: "@dsmm/dsmm", state: 2 }, { id: "include:dsmm-runtime", name: "@dsmm/dsmm/subagent-runtime", state: 2 }] };
   assert.equal(validateStableBootstrap(proof), proof);
+  const auto = { ...proof, stockAgentDisabled: true, registryEntries: 1, registryLoaded: true,
+    agentsService: "DsmmAgentRegistry", subagentsService: "DsmmSubagentRuntime", legacyCompatibility: "not-composed",
+    runtimeMode: "auto", autoRuntimeEntries: 1, manualRuntimeEntries: 0,
+    loader: [{ id: "include:dsmm", name: "@dsmm/dsmm", state: 2 },
+      { id: "include:dsmm-registry", name: "@dsmm/dsmm/agent-registry", state: 2 },
+      { id: "dsmm-auto-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", state: 2 }] };
+  delete (auto as Partial<typeof auto>).experimentalLegacyRead;
+  assert.equal(validateStableBootstrap(auto, { version: "0.3.0" }), auto);
+  assert.throws(() => validateStableBootstrap({ ...auto, loader: proof.loader }, { version: "0.3.0" }));
   for (const change of [{ stockSubagentDisabled: false }, { customRuntimeEntries: 2 }, { mainEntries: 2 }, { loader: [] }, { runtimeLoaded: false }, { mainLoaded: false },
     { binding: "stock" }, { deliveryFenceReady: false }, { restartRequired: true }, { experimentalLegacyRead: "enabled" }]) {
     assert.throws(() => validateStableBootstrap({ ...proof, ...change }));
   }
   assert.equal(validateStableBootstrap({ ...proof, deliveryFenceReady: false, restartRequired: true }, { requireDeliveryFence: false }).binding, "dsmm");
-});
-
-test("030 startup explicitly replaces both stock owners with one settled DSMM registry/runtime/Main composition", () => {
-  assert.deepEqual(stableRuntimeStartupRows("0.3.0"), [
-    { id: "agent", name: "@deepseek-ai/dsh-agent", disabled: true },
-    { id: "subagent", name: "@deepseek-ai/dsh-subagent", disabled: true },
-    { insert: [{ id: "dsmm-agent-registry", name: "@dsmm/dsmm/agent-registry", config: {} }] },
-    { insert: [{ id: "dsmm-subagent-runtime", name: "@dsmm/dsmm/subagent-runtime", inject: ["agents"], config: { maxDepth: 3, maxActiveSubagents: 8 } }] },
-  ]);
-  assert.deepEqual(stableMainStartupRow({}, "0.3.0"), { id: "dsmm", name: "@dsmm/dsmm", inject: ["profileContext", "agents"], config: {} });
-  const proof = { startedBundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsmm/dsmm"], stockAgentDisabled: true, stockSubagentDisabled: true,
-    registryEntries: 1, customRuntimeEntries: 1, mainEntries: 1, registryLoaded: true, runtimeLoaded: true, mainLoaded: true,
-    agentsService: "DsmmAgentRegistry", subagentsService: "DsmmSubagentRuntime", binding: "dsmm", deliveryFenceReady: true, restartRequired: false,
-    legacyCompatibility: "not-composed", loader: [
-      { id: "include:dsmm", name: "@dsmm/dsmm", state: 2 },
-      { id: "include:dsmm-registry", name: "@dsmm/dsmm/agent-registry", state: 2 },
-      { id: "include:dsmm-runtime", name: "@dsmm/dsmm/subagent-runtime", state: 2 },
-    ] };
-  assert.equal(validateStableBootstrap(proof, { version: "0.3.0" }), proof);
-  for (const change of [{ stockAgentDisabled: false }, { registryEntries: 2 }, { registryLoaded: false }, { legacyCompatibility: "enabled" }, { agentsService: "AgentRegistry" },
-    { subagentsService: "SubagentRuntime" }, { loader: proof.loader.slice(1) }]) assert.throws(() => validateStableBootstrap({ ...proof, ...change }, { version: "0.3.0" }));
-});
-
-test("030 native export inspection resolves AgentRegistry without requiring the retired legacy entry", async () => {
-  const packageRoot = join(import.meta.dirname, "..");
-  const proof = await inspectStableExports(packageRoot, join(packageRoot, "package.json"), { sourceContract: "0.3.0" });
-  assert.equal(proof.agentRegistryClass, true);
-  assert.equal("legacyReadHostLibraryFactory" in proof, false);
 });
 
 test("stable browser composition installs an answering owned connection", () => {
@@ -124,7 +105,8 @@ test("stable carrier forwards only approved native operations with exact owner P
     assert.deepEqual(await bridge.invoke(source, call), { ok: true, value: { messageId: "accepted-native-message" } });
     assert.equal(invoked.length, 1); assert.equal(report.nativeCalls[0].endpoint, "dsmmChildren/prompt");
     for (const changed of [{ ...source, page: {} }, { ...source, frame: { url: () => "https://foreign.invalid/" } }]) await assert.rejects(bridge.invoke(changed, call));
-    await assert.rejects(bridge.invoke(source, { ...call, endpoint: "dsmmConfig/save" }));
+    assert.deepEqual(await bridge.invoke(source, { ...call, id: "config", endpoint: "dsmmConfig/save" }), { ok: true, value: { messageId: "accepted-native-message" } });
+    await assert.rejects(bridge.invoke(source, { ...call, id: "foreign", endpoint: "foreign/save" }));
     await bridge.invoke(source, { operation: "open", id: "stream", channel: "/api", endpoint: "session/control", payload: {} });
     assert.equal((await bridge.invoke(source, { operation: "next", id: "stream" })).value.value.seq, 1);
     assert.equal(report.nativeStreams[0].frames, 1);

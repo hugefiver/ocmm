@@ -1,16 +1,27 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 // @ts-expect-error Standalone release controller has no TypeScript declarations.
-import { POLICY, computeDigests, registryVerificationFailure, verifyRegistryArtifact } from "../scripts/dsmm-release.mjs";
+import {
+  POLICY, computeDigests, createArtifactIdentity, registryVerificationFailure,
+  resolveReleaseContext, verifyRegistryArtifact,
+} from "../scripts/dsmm-release.mjs";
 // @ts-expect-error Standalone terminal controller has no TypeScript declarations.
 import { EvidenceMismatch, verificationFailureForError, verifyPublishedArtifact } from "../scripts/check-dsmm-release-completion.mjs";
 // @ts-expect-error Standalone historical fixture builder has no TypeScript declarations.
-import { archiveFiles, makeAcceptedFixture, packageFiles } from "./dsmm-trusted-release-fixtures.mjs";
+import {
+  archiveFiles, contextInput, packageFiles, receiptFixture,
+} from "./dsmm-trusted-release-fixtures.mjs";
+
+function historicalAcceptedIdentity() {
+  const context = resolveReleaseContext(contextInput());
+  const tarball = archiveFiles(packageFiles(context.version));
+  const receiptBytes = Buffer.from(JSON.stringify(receiptFixture(context.version, computeDigests(tarball).sha256)));
+  return createArtifactIdentity(context, tarball, receiptBytes, { sourceChecks: "COMPLETED" });
+}
 
 /** Synthetic registry fixtures exercise verification, never publication proof. */
 function fixture(version = "0.1.9", contentVersion = version) {
-  const base = makeAcceptedFixture().identity, tarball = archiveFiles(packageFiles(contentVersion));
+  const base = historicalAcceptedIdentity(), tarball = archiveFiles(packageFiles(contentVersion));
   const tag = `dsmm-scoped-v${version}`, ref = `refs/tags/${tag}`;
   const identity = { ...base, ...computeDigests(tarball), version, tag, ref, filename: `dsmm-dsmm-${version}.tgz`,
     workflow: { ...base.workflow, ref: `${POLICY.repository}/${POLICY.workflowFile}@${ref}` } };
@@ -92,10 +103,4 @@ test("0.1.9 keeps non-404, bytes, provenance and native install failures closed 
     assert.deepEqual(verificationFailureForError(error), { stage: "native-install", code: "INSTALL_PROOF_REJECTED" });
     assert.doesNotMatch(error.message, /private/); return true;
   });
-});
-
-test("the DSMM verify job retains its bounded visibility and fresh native install budget", () => {
-  const workflow = readFileSync(new URL("../.github/workflows/dsmm-release.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
-  assert.match(workflow.split("  verify:\n")[1].split("  github-release:\n")[0], /timeout-minutes: 45/u);
-  assert.doesNotMatch(workflow, /NPM_TOKEN|NODE_AUTH_TOKEN|--clobber|npm publish/u);
 });

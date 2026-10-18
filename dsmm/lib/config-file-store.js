@@ -11,12 +11,14 @@ export class FixedConfigFileStore {
     timeoutMs;
     pollMs;
     rename;
+    observe;
     constructor(home, options = {}) {
         this.directory = join(files.trustedHome(home), "plugins", "dsmm");
         this.path = join(this.directory, "config.json");
         this.timeoutMs = files.boundedOption(options.lockTimeoutMs, 2000, 0, 30000);
         this.pollMs = files.boundedOption(options.lockPollMs, 25, 1, 1000);
         this.rename = options.rename ?? renameSync;
+        this.observe = options.observe;
         this.validateRoot(false);
     }
     read() {
@@ -56,8 +58,8 @@ export class FixedConfigFileStore {
                     throw new DsmmProfileError("conflict", "Global configuration changed. Refresh before saving; existing bytes were retained.");
             };
             recheck();
-            files.atomicReplace(this.path, bytes, recheck, assertLock, this.rename, assertCurrent);
-            return { content, revision: files.digest(bytes) };
+            const owned = files.atomicReplace(this.path, bytes, recheck, assertLock, this.rename, assertCurrent);
+            return { content, ...files.observeCommitted(this.path, owned, this.observe) };
         });
     }
     validateRoot(create) {

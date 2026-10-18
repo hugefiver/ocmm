@@ -3,33 +3,43 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 import { setImmediate } from "node:timers/promises";
 import { createContext, runInContext } from "node:vm";
 import { test } from "node:test";
 import * as Cordis from "@deepseek-ai/cordis";
 import { Context } from "@deepseek-ai/cordis";
+import type { Service } from "@deepseek-ai/cordis";
+import * as ConnectionHost from "@deepseek-ai/dsh-client-connection";
 import * as SlotCore from "@deepseek-ai/dsh-client-ui-slots";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
-import { Peer } from "@deepseek-ai/dsh-client-connection";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
 import type * as ConnectionClient from "@deepseek-ai/dsh-client-connection/client";
 import type * as RendererClient from "@deepseek-ai/dsh-client-ui-renderer/client";
 import type * as LocaleClient from "@deepseek-ai/dsh-client-locale/client";
 import type { SlotComponent, ComposedProps } from "@deepseek-ai/dsh-client-ui-slots";
-import type { ProfilesInjected } from "../lib/client/ProfilesSection.js";
-import type { ChildrenInjected } from "../lib/client/ChildrenPanel.js";
-import type { DeploymentPageProps } from "../lib/client/DeploymentPage.js";
-import { NS, en } from "../lib/client/locales.js";
-import { CHILDREN_NS, childrenEn } from "../lib/client/children-locales.js";
-import { DEPLOYMENT_NS, deploymentEn } from "../lib/client/deployment-locales.js";
-import { registerProfilesRpc } from "../lib/profile-rpc.js";
-import { ProfileStore } from "../lib/profile-store.js";
-import { DsmmProfileRuntime } from "../lib/profile-runtime.js";
-import { resolveConfig } from "../lib/settings.js";
-import type { DshContext } from "../lib/dsh-types.js";
+import type { ProfilesInjected } from "../src/client/ProfilesSection.js";
+import type { DeploymentPageProps } from "../src/client/DeploymentPage.js";
+import { NS, en, zh } from "../src/client/locales.js";
+import { DEPLOYMENT_NS, deploymentEn } from "../src/client/deployment-locales.js";
+import { registerProfilesRpc } from "../src/profile-rpc.js";
+import { ProfileStore } from "../src/profile-store.js";
+import { DsmmProfileRuntime } from "../src/profile-runtime.js";
+import { resolveConfig } from "../src/settings.js";
+import type { DshContext } from "../src/dsh-types.js";
 
 const require = createRequire(import.meta.url);
+const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? new URL("../package.json", import.meta.url));
+const connectionSdk = createRequire(require.resolve("@deepseek-ai/dsh-client-connection"));
+const { CredentialProvider } = connectionSdk("@deepseek-ai/dsh-credentials") as { CredentialProvider: new (ctx: Context) => Service };
+class MemoryCredentials extends CredentialProvider {
+  private readonly records = new Map<string, unknown>();
+  async modifyRecord(key: string, modify: (value: unknown) => Promise<unknown>) {
+    const next = await modify(this.records.get(key)); if (next !== undefined) this.records.set(key, next); return this.records.get(key);
+  }
+}
 type ClientPlugin = { inject: string[]; apply(ctx: Context): void | Promise<void> };
 type StyleNode = { dataset: Record<string, string>; textContent: string; remove(): void };
 
@@ -47,24 +57,27 @@ function startupDocument() {
   } };
 }
 function profileStyles(styles: Set<StyleNode>): number { return [...styles].filter(node => Object.hasOwn(node.dataset, "dsmmProfiles")).length; }
-function surfaceStyle(styles: Set<StyleNode>, key: "dsmmProfiles" | "dsmmSettings" | "dsmmChildren" | "dsmmPermissions"): StyleNode {
+function surfaceStyle(styles: Set<StyleNode>, key: "dsmmProfiles" | "dsmmSettings" | "dsmmRoleToolStyles"): StyleNode {
   const owned = [...styles].filter(node => Object.hasOwn(node.dataset, key));
   assert.equal(owned.length, 1, `${key} owns exactly one live style`);
   return owned[0];
 }
 function surfaceStyles(styles: Set<StyleNode>) {
-  const core = surfaceStyle(styles, "dsmmSettings"), profiles = surfaceStyle(styles, "dsmmProfiles"), children = surfaceStyle(styles, "dsmmChildren"), permissions = surfaceStyle(styles, "dsmmPermissions");
-  const owners = [core, profiles, children, permissions];
+  const core = surfaceStyle(styles, "dsmmSettings"), profiles = surfaceStyle(styles, "dsmmProfiles"), roleTool = surfaceStyle(styles, "dsmmRoleToolStyles");
+  const owners = [core, profiles, roleTool];
   assert.equal(new Set(owners).size, owners.length, "surfaces have distinct style owners");
   assert.deepEqual(styles, new Set(owners), "no duplicate or unowned client styles");
-  return { core, profiles, children, permissions };
+  return { core, profiles, roleTool };
 }
 
 async function nativeClient<T>(packageName: string, document: ReturnType<typeof startupDocument>["document"], sourceOverride?: string): Promise<T> {
-  const manifestPath = require.resolve(`${packageName}/package.json`);
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  const entry = manifest.exports["./client"];
-  const source = sourceOverride ?? await readFile(join(dirname(manifestPath), entry.browser ?? entry.default), "utf8");
+  const loadBrowser = async () => {
+    const manifestPath = require.resolve(`${packageName}/package.json`);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const entry = manifest.exports["./client"];
+    return readFile(join(dirname(manifestPath), entry.browser ?? entry.default), "utf8");
+  };
+  const source = sourceOverride ?? await loadBrowser();
   let factory: ((require: (id: string) => unknown) => T) | undefined;
   const realm = createContext({ crypto: globalThis.crypto, AbortController, AbortSignal, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout, queueMicrotask, console,
     ...(packageName === "@dsmm/dsmm" ? { document } : {}),
@@ -87,19 +100,27 @@ async function nativeClient<T>(packageName: string, document: ReturnType<typeof 
 }
 
 const SettingsShell: SlotComponent<ComposedProps<"root", string, "settings.section" | "conversation.header.leading", undefined, object>> = (props) => [props.renderSlot("settings.section", { close() {} }), props.renderSlot("conversation.header.leading", {})];
-const PluginsShell: SlotComponent<ComposedProps<"root", string, "plugins.item" | "plugins.bundle.config" | "plugins.row.config", undefined, object>> = props => props.renderSlot("plugins.item", { view: "summary" });
-const ConversationShell: SlotComponent<ComposedProps<"root", string, "conversation.view", undefined, object>> = props => props.renderSlot("conversation.view", { inspectCall: undefined, viewRequest: null, openView() {}, completeViewRequest() {} });
+const PluginsShell: SlotComponent<ComposedProps<"root", string, "plugins.bundle.config", undefined, object>> = props => props.renderSlot("plugins.bundle.config", { view: "page" }, { entryKey: "@dsmm/dsmm" });
 
-async function fixture(sourceOverride?: string, deferUi = false) {
+let sourceBundle: Promise<string> | undefined;
+function currentClientSource(): Promise<string> {
+  return sourceBundle ??= build({ entryPoints: [fileURLToPath(new URL("../src/client/index.ts", import.meta.url))], bundle: true, write: false, platform: "browser", format: "cjs", target: "es2022",
+    external: ["@deepseek-ai/cordis", "@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-ui-primitives", "@deepseek-ai/dsh-client-store", "react", "react/jsx-runtime", "react-dom", "react-dom/client"] })
+    .then(result => `window.__ModuleLoader__.load({factory(require){const module={exports:{}};const exports=module.exports;${result.outputFiles[0].text}\nreturn module.exports;}});`);
+}
+
+async function fixture(deferUi = false) {
   const root = await mkdtemp(join(tmpdir(), "dsmm-client-startup-"));
   const host = new Context();
   const client = new Context();
-  const peer = new Peer(host, { principal: { kind: "owner" } });
   const dom = startupDocument();
   try {
-    const sdk = createRequire(process.env.DSMM_TEST_DSH_ENTRY ?? new URL("../package.json", import.meta.url));
     const { RemoteAccessService } = sdk("@deepseek-ai/dsh-api-remote-access");
     await host.plugin(RemoteAccessService).await();
+    await host.plugin(MemoryCredentials).await(); await host.plugin(ConnectionHost).await();
+    // Operator carrier seams; native Connection peer and Gateway still enforce writes.
+    host.provide("webServer", { host: "127.0.0.1" });
+    host.provide("settings", { writable: true });
     await Promise.all([host.plugin(TypertRegistry).await(), host.plugin(TypertGatewayService, {}).await(), client.plugin(TypertRegistry).await()]);
     const store = new ProfileStore(join(root, "dsmm-profiles"));
     const runtime = new DsmmProfileRuntime(host as unknown as DshContext, resolveConfig(), store);
@@ -118,7 +139,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
         // Match the native JSON wire boundary between the isolated client realm
         // and Host codecs; VM-prototype request objects are not Host inputs.
         const args = (JSON.parse(JSON.stringify(payload)) as { args: Record<string, unknown> }).args;
-        try { return { ok: true, value: await gateway.invoke({ namespace, method, args, signal, peer }) }; }
+        try { return { ok: true, value: await gateway.invoke({ namespace, method, args, signal, peer: host.connection.browserPeer }) }; }
         catch (error) {
           const failure = remoteErrorOf(error);
           if (failure === undefined) throw error;
@@ -127,7 +148,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
       },
       async *open(channel, endpoint, payload, signal, uplink) {
         assert.equal(channel, "/api");
-        yield* await gateway.wireStream.open(endpoint, payload, uplink ?? (async function* () {})(), peer, signal);
+        yield* await gateway.wireStream.open(endpoint, payload, uplink ?? (async function* () {})(), host.connection.browserPeer, signal);
       },
     } } });
     const remoteModule = await nativeClient<ClientPlugin>("@deepseek-ai/dsh-api-gateway", dom.document);
@@ -135,7 +156,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
     await remoteFiber.await();
     const renderer = await nativeClient<typeof RendererClient>("@deepseek-ai/dsh-client-ui-renderer", dom.document);
     const locale = await nativeClient<typeof LocaleClient>("@deepseek-ai/dsh-client-locale", dom.document);
-    const productionSource = sourceOverride ?? await readFile(new URL("../lib/client.js", import.meta.url), "utf8");
+    const productionSource = await currentClientSource();
     const production = await nativeClient<ClientPlugin>("@dsmm/dsmm", dom.document, productionSource);
     async function installUi() {
       await client.plugin(renderer).await();
@@ -145,8 +166,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
     const entry = client.plugin(production);
     return { host, client, production, entry, remoteFiber, calls, requests, styles: dom.styles, installUi,
       declareSettings: () => client.slots.register({ name: "root", children: { "settings.section": { kind: "list", scope: "root" }, "conversation.header.leading": { kind: "single", scope: "root" } } }, SettingsShell),
-      declarePlugins: () => client.slots.register({ name: "root", priority: 1, children: { "plugins.item": { kind: "list", scope: "root" }, "plugins.bundle.config": { kind: "keyed", scope: "root" }, "plugins.row.config": { kind: "keyed", scope: "root" } } }, PluginsShell),
-      declareConversation: () => client.slots.register({ name: "root", priority: 2, children: { "conversation.view": { kind: "list", scope: "session" } } }, ConversationShell),
+      declarePlugins: () => client.slots.register({ name: "root", priority: 1, children: { "plugins.bundle.config": { kind: "keyed", scope: "root" } } }, PluginsShell),
       async dispose() { await client.fiber.dispose(); await host.fiber.dispose(); await rm(root, { recursive: true, force: true }); },
     };
   } catch (error) {
@@ -155,7 +175,7 @@ async function fixture(sourceOverride?: string, deferUi = false) {
   }
 }
 
-function namespaceChild(f: Awaited<ReturnType<typeof fixture>>, namespace: "dsmmProfiles" | "dsmmConfig" | "dsmmChildren" = "dsmmProfiles") {
+function namespaceChild(f: Awaited<ReturnType<typeof fixture>>, namespace: "dsmmProfiles" | "dsmmConfig" = "dsmmProfiles") {
   const fibers = [...f.client.registry.values()].flatMap((runtime) => [...runtime.fibers]);
   const children = fibers.filter((fiber) => fiber.parent.fiber.uid === f.entry.uid && Object.hasOwn(fiber.inject, `remote.${namespace}`));
   assert.equal(children.length, 1, "the production entry must own exactly one native namespace injection");
@@ -163,17 +183,10 @@ function namespaceChild(f: Awaited<ReturnType<typeof fixture>>, namespace: "dsmm
 }
 
 function coreFace(f: Awaited<ReturnType<typeof fixture>>): Pick<DeploymentPageProps, "core" | "remote"> {
-  const entries = f.client.slots.entries("plugins.item").filter(entry => entry.options.id === "dsmm");
+  const entries = f.client.slots.entries("plugins.bundle.config").filter(entry => entry.options.key === "@dsmm/dsmm");
   assert.equal(entries.length, 1, "one native core registration per declaration lifetime");
   assert.ok(entries[0].inject);
   return entries[0].inject() as unknown as Pick<DeploymentPageProps, "core" | "remote">;
-}
-
-function childrenFace(f: Awaited<ReturnType<typeof fixture>>): ChildrenInjected {
-  const entries = f.client.slots.entries("conversation.view").filter(entry => entry.options.id === "dsmm-children");
-  assert.equal(entries.length, 1, "one native children registration per declaration lifetime");
-  assert.ok(entries[0].inject);
-  return entries[0].inject() as unknown as ChildrenInjected;
 }
 
 function profilesFace(f: Awaited<ReturnType<typeof fixture>>): ProfilesInjected {
@@ -190,20 +203,7 @@ async function settled(face: ProfilesInjected): Promise<void> {
   assert.equal(face.hooks.profiles.getSnapshot().busy, null, "native profile request must settle");
 }
 
-async function replayUninjectedClient(): Promise<string> {
-  const source = await readFile(new URL("../lib/client.js", import.meta.url), "utf8");
-  const start = source.indexOf("// src/client/index.ts");
-  assert.ok(start >= 0);
-  const apply = source.slice(start);
-  const opening = 'await ctx.inject(["remote.dsmmProfiles"], (profileCtx) => {';
-  const closing = "    void controller.refresh();\n  });";
-  assert.ok(apply.includes(opening) && apply.includes(closing), "replay must remove exactly the production namespace injection");
-  // Toggle only the production DI boundary in memory, preserving the real
-  // mounted contribution, native services and every controller operation.
-  return source.slice(0, start) + apply.replace(opening, "{").replace(closing, "    void controller.refresh();\n  }").replaceAll("profileCtx.", "ctx.");
-}
-
-test("compiled native settings metadata follows exact English and Chinese Deepwork labels under the original section ID", async () => {
+test("native Settings resolves profile labels from the active locale without replacing its section", async () => {
   const f = await fixture();
   try {
     f.declareSettings();
@@ -216,26 +216,14 @@ test("compiled native settings metadata follows exact English and Chinese Deepwo
     assert.equal(section.options.id, "dsmm-profiles");
     assert.equal(section.options.order, 30);
     assert.equal(section.locale, "settings.dsmm-profiles");
-    assert.equal(SlotCore.resolveSlotLabel(section.options.label), "Deepwork Profiles");
+    assert.equal(SlotCore.resolveSlotLabel(section.options.label), en.title);
     f.client.locale.setLocale("zh");
-    assert.equal(SlotCore.resolveSlotLabel(section.options.label), "Deepwork 配置档");
+    assert.equal(SlotCore.resolveSlotLabel(section.options.label), zh.title);
     assert.deepEqual(f.client.slots.entries("settings.section"), rows, "changing display locale must preserve the native section registrations");
     f.client.locale.setLocale("en");
-    assert.equal(SlotCore.resolveSlotLabel(section.options.label), "Deepwork Profiles");
+    assert.equal(SlotCore.resolveSlotLabel(section.options.label), en.title);
     assert.equal(section.options.id, "dsmm-profiles");
     await settled(profilesFace(f));
-  } finally { await f.dispose(); }
-});
-
-test("replaying the uninjected production client reproduces the frozen native startup refusal", async () => {
-  const f = await fixture(await replayUninjectedClient());
-  try {
-    f.declareSettings();
-    await assert.rejects(f.entry.await(), /cannot get property "remote\.dsmmProfiles" without inject/u);
-    assert.equal(f.entry.state, 3);
-    assert.deepEqual(f.calls, [], "dependency refusal happens before native business calls");
-    assert.equal(profileStyles(f.styles), 0);
-    assert.equal(f.client.slots.entries("settings.section").length, 0);
   } finally { await f.dispose(); }
 });
 
@@ -243,9 +231,9 @@ test("production client activates after mounting the independently injected nati
   const f = await fixture();
   try {
     const collapseSettings = f.declareSettings();
+    f.declarePlugins();
     await f.entry.await();
     assert.equal(f.entry.state, 2);
-    assert.deepEqual(Array.from(f.production.inject), ["slots", "locale", "remote"], "the namespace cannot be an initial self-dependency");
     const child = namespaceChild(f);
     await child.await();
     assert.equal(child.state, 2);
@@ -274,6 +262,8 @@ test("production client activates after mounting the independently injected nati
     assert.equal(f.client.locale.bind(NS)("title"), "title");
     assert.equal(f.client.slots.entries("settings.section").length, 0);
     assert.equal(f.client.get("remote.dsmmProfiles"), undefined, "the mounted contribution belongs to the production entry");
+    assert.equal(f.client.slots.entries("plugins.bundle.config").length, 0);
+    assert.equal(f.client.slots.entries("conversation.header.leading").length, 0);
     const calls = f.calls.length;
     const snapshot = face.hooks.profiles.getSnapshot();
     await face.refresh(); await face.save(); await face.apply(); await face.reset();
@@ -300,7 +290,7 @@ test("profile icon uses the persistent root leading slot at fallback priority an
 });
 
 test("production client waits for genuine native UI providers before mounting its namespace", async () => {
-  const f = await fixture(undefined, true);
+  const f = await fixture(true);
   try {
     await f.entry.await();
     assert.equal(f.entry.state, 0);
@@ -315,6 +305,7 @@ test("production client waits for genuine native UI providers before mounting it
     f.declareSettings();
     await settled(profilesFace(f));
     assert.equal(profileStyles(f.styles), 1);
+    surfaceStyles(f.styles);
   } finally { await f.dispose(); }
 });
 
@@ -323,15 +314,14 @@ test("native namespace withdrawal disposes its UI and remote re-arrival installs
   try {
     f.declareSettings();
     f.declarePlugins();
-    f.declareConversation();
     await f.entry.await();
     const child = namespaceChild(f);
     await child.await();
     const old = profilesFace(f);
     await settled(old);
-    const styles = surfaceStyles(f.styles), core = coreFace(f), children = childrenFace(f);
-    const coreChild = namespaceChild(f, "dsmmConfig"), childrenChild = namespaceChild(f, "dsmmChildren");
-    await Promise.all([coreChild.await(), childrenChild.await()]);
+    const styles = surfaceStyles(f.styles), core = coreFace(f);
+    const coreChild = namespaceChild(f, "dsmmConfig");
+    await coreChild.await();
     let notifications = 0;
     old.hooks.profiles.subscribe(() => notifications++);
     const namespace = [...f.client.registry.values()].flatMap((runtime) => [...runtime.fibers])
@@ -343,20 +333,16 @@ test("native namespace withdrawal disposes its UI and remote re-arrival installs
     assert.equal(f.entry.state, 2);
     assert.equal(f.client.get("remote.dsmmProfiles"), undefined);
     assert.equal(profileStyles(f.styles), 0);
-    assert.deepEqual(f.styles, new Set([styles.core, styles.children, styles.permissions]), "named withdrawal preserves the independent style owners");
-    assert.equal(coreChild.state, 2); assert.equal(childrenChild.state, 2);
+    assert.deepEqual(f.styles, new Set([styles.core, styles.roleTool]), "named withdrawal preserves the core and parent RoleTool style owners");
+    assert.equal(coreChild.state, 2);
     assert.equal(coreFace(f).core, core.core);
-    assert.equal(childrenFace(f).hooks.children, children.hooks.children);
     assert.equal(f.client.locale.bind(DEPLOYMENT_NS)("title"), deploymentEn.title);
-    assert.equal(f.client.locale.bind(CHILDREN_NS)("title"), childrenEn.title);
     assert.equal(f.client.locale.bind(NS)("title"), "title");
     assert.equal(f.client.slots.entries("settings.section").some(row => row.options.id === "dsmm-profiles"), false);
-    assert.equal(f.client.slots.entries("settings.section").filter(row => row.options.id === "dsmm-permissions").length, 1);
     assert.equal(f.client.slots.entries("conversation.header.leading").length, 0);
-    const coreItems = f.client.slots.entries("plugins.item");
+    const coreItems = f.client.slots.entries("plugins.bundle.config");
     assert.equal(coreItems.length, 1, "sessionless Plugins core survives named namespace withdrawal");
-    assert.equal(coreItems[0].options.id, "dsmm");
-    assert.equal(SlotCore.resolveSlotLabel(coreItems[0].options.label), "DSMM");
+    assert.equal(coreItems[0].options.key, "@dsmm/dsmm");
     assert.equal(f.client.get("uiSession"), undefined);
     assert.equal(f.client.get("sessions"), undefined);
     const calls = f.calls.length;
@@ -377,8 +363,7 @@ test("native namespace withdrawal disposes its UI and remote re-arrival installs
     assert.equal(current.hooks.profiles.getSnapshot().issue, null);
     const replacementStyles = surfaceStyles(f.styles);
     assert.notEqual(replacementStyles.profiles, styles.profiles);
-    assert.notEqual(replacementStyles.permissions, styles.permissions);
-    coreFace(f); childrenFace(f);
+    coreFace(f);
     assert.equal(f.client.slots.entries("conversation.header.leading").length, 1);
     assert.equal(f.client.locale.bind(NS)("title"), en.title);
     assert.deepEqual(f.calls, ["dsmmProfiles/describe", "dsmmProfiles/describe"]);
@@ -390,69 +375,45 @@ test("native namespace withdrawal disposes its UI and remote re-arrival installs
   } finally { await f.dispose(); }
 });
 
-for (const namespace of ["dsmmConfig", "dsmmChildren"] as const) test(`${namespace} withdrawal isolates its native surface and remote return does not duplicate controllers`, async () => {
+test("dsmmConfig withdrawal isolates its native surface and remote return does not duplicate controllers", async () => {
   const f = await fixture();
   try {
-    f.declareSettings(); f.declarePlugins(); f.declareConversation();
+    f.declareSettings(); f.declarePlugins();
     await f.entry.await();
-    const fibers = { core: namespaceChild(f, "dsmmConfig"), profiles: namespaceChild(f), children: namespaceChild(f, "dsmmChildren") };
+    const fibers = { core: namespaceChild(f, "dsmmConfig"), profiles: namespaceChild(f) };
     await Promise.all(Object.values(fibers).map(fiber => fiber.await()));
-    const styles = surfaceStyles(f.styles), core = coreFace(f), profiles = profilesFace(f), children = childrenFace(f);
+    const styles = surfaceStyles(f.styles), core = coreFace(f), profiles = profilesFace(f);
     await settled(profiles);
-    const provider = [...f.client.registry.values()].flatMap(runtime => [...runtime.fibers]).find(fiber => fiber.runtime?.name === `remote.${namespace}`);
+    const provider = [...f.client.registry.values()].flatMap(runtime => [...runtime.fibers]).find(fiber => fiber.runtime?.name === "remote.dsmmConfig");
     assert.ok(provider);
     await provider.dispose();
     await Promise.all(Object.values(fibers).map(fiber => fiber.await()));
     assert.equal(f.entry.state, 2);
-    assert.equal(f.client.get(`remote.${namespace}`), undefined);
+    assert.equal(f.client.get("remote.dsmmConfig"), undefined);
     assert.equal(fibers.profiles.state, 2);
     assert.equal(profilesFace(f).hooks.profiles, profiles.hooks.profiles);
     assert.equal(f.client.slots.entries("conversation.header.leading").length, 1);
     assert.equal(f.client.locale.bind(NS)("title"), en.title);
     const requests = f.requests.length;
-    if (namespace === "dsmmConfig") {
-      assert.equal(fibers.core.state, 0); assert.equal(fibers.children.state, 2);
-      assert.deepEqual(f.styles, new Set([styles.profiles, styles.children, styles.permissions]));
-      assert.equal(f.client.slots.entries("plugins.item").length, 0);
-      assert.equal(f.client.locale.bind(DEPLOYMENT_NS)("title"), "title");
-      assert.equal(childrenFace(f).hooks.children, children.hooks.children);
-      assert.equal(f.client.locale.bind(CHILDREN_NS)("title"), childrenEn.title);
-      const snapshot = core.core.getSnapshot();
-      await core.core.refresh();
-      assert.equal(core.core.getSnapshot(), snapshot, "retained core actions are inert after withdrawal");
-    } else {
-      assert.equal(fibers.children.state, 0); assert.equal(fibers.core.state, 2);
-      assert.deepEqual(f.styles, new Set([styles.core, styles.profiles, styles.permissions]));
-      assert.equal(f.client.slots.entries("conversation.view").some(row => row.options.id === "dsmm-children"), false);
-      assert.equal(f.client.slots.entries("conversation.view").filter(row => row.options.id === "dsmm-permissions").length, 1);
-      assert.equal(f.client.locale.bind(CHILDREN_NS)("title"), "title");
-      assert.equal(coreFace(f).core, core.core);
-      assert.equal(f.client.locale.bind(DEPLOYMENT_NS)("title"), deploymentEn.title);
-      const snapshot = children.hooks.children.getSnapshot();
-      await children.refresh(snapshot.generation);
-      await children.background(snapshot.generation, "unowned-call", "unowned-run");
-      await children.prompt(snapshot.generation, "unowned-child");
-      await children.interrupt(snapshot.generation, "unowned-child");
-      assert.equal(children.hooks.children.getSnapshot(), snapshot, "retained child actions are inert after withdrawal");
-    }
+    assert.equal(fibers.core.state, 0);
+    assert.deepEqual(f.styles, new Set([styles.profiles, styles.roleTool]), "core withdrawal preserves the profiles and parent RoleTool style owners");
+    assert.equal(f.client.locale.bind(DEPLOYMENT_NS)("title"), "title");
+    const snapshot = core.core.getSnapshot();
+    await core.core.refresh();
+    assert.equal(core.core.getSnapshot(), snapshot, "retained core actions are inert after withdrawal");
     assert.equal(f.requests.length, requests, "withdrawn controllers cannot send native requests");
     await f.remoteFiber.restart(); await f.entry.await();
-    await Promise.all([namespaceChild(f).await(), namespaceChild(f, "dsmmConfig").await(), namespaceChild(f, "dsmmChildren").await()]);
-    const replacementStyles = surfaceStyles(f.styles), currentCore = coreFace(f), currentChildren = childrenFace(f);
+    await Promise.all([namespaceChild(f).await(), namespaceChild(f, "dsmmConfig").await()]);
+    const replacementStyles = surfaceStyles(f.styles), currentCore = coreFace(f);
     await settled(profilesFace(f));
     assert.notEqual(currentCore.core, core.core);
-    assert.notEqual(currentChildren.hooks.children, children.hooks.children);
     assert.notEqual(replacementStyles.core, styles.core);
-    assert.notEqual(replacementStyles.children, styles.children);
-    assert.notEqual(replacementStyles.permissions, styles.permissions);
     assert.equal(f.client.slots.entries("conversation.header.leading").length, 1);
     assert.equal(f.client.locale.bind(DEPLOYMENT_NS)("title"), deploymentEn.title);
-    assert.equal(f.client.locale.bind(CHILDREN_NS)("title"), childrenEn.title);
-    const returnedRequests = f.requests.length, coreSnapshot = core.core.getSnapshot(), childrenSnapshot = children.hooks.children.getSnapshot();
-    await core.core.refresh(); await children.refresh(childrenSnapshot.generation);
+    const returnedRequests = f.requests.length, coreSnapshot = core.core.getSnapshot();
+    await core.core.refresh();
     assert.equal(f.requests.length, returnedRequests, "remote return cannot revive disposed controllers");
     assert.equal(core.core.getSnapshot(), coreSnapshot);
-    assert.equal(children.hooks.children.getSnapshot(), childrenSnapshot);
   } finally { await f.dispose(); }
 });
 

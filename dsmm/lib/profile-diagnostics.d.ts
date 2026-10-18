@@ -26,7 +26,7 @@ export interface ProfileDiagnostic {
     reason: string;
     location?: ProfileDiagnosticLocation;
 }
-export declare const DEPRECATED_DSMM_FIELDS: readonly ["deepseekV4ProMaxReasoningPresets", "deepseekFlashMaxReasoningPresets"];
+export declare const DEPRECATED_DSMM_FIELDS: readonly ["deepseekV4ProMaxReasoningPresets", "deepseekFlashMaxReasoningPresets", "deepseekV4ProCalibration", "deepseekV4ProDefaultReasoningEffort", "deepseekFlashCalibration", "deepseekFlashDefaultReasoningEffort"];
 /** Host parser location provenance only; never serialized on an error or DTO. */
 export declare function diagnosticSourcePath(error: object): readonly (string | number)[] | undefined;
 export declare function safeDiagnosticField(parts: readonly (string | number)[]): string;

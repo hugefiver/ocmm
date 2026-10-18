@@ -1,5 +1,5 @@
 import type { DsmmChildrenRemote } from "../role-control-remote.js";
-import type { BackgroundTransitionResult, ChildSessionSnapshot, RoleControlAvailability, RoleControlDescendantsSnapshot, RoleControlErrorInfo, SubagentInterruptReceipt, SubagentPromptReceipt, SubagentPromptRequest } from "../role-control-types.js";
+import type { ChildSessionSnapshot, RoleControlAvailability, RoleControlDescendantsSnapshot, RoleControlErrorInfo, SubagentInterruptReceipt, SubagentPromptReceipt, SubagentPromptRequest } from "../role-control-types.js";
 export interface ChildrenIssue extends Partial<RoleControlErrorInfo> {
     kind: "domain" | "transport" | "protocol" | "local";
     code: RoleControlErrorInfo["code"];
@@ -16,9 +16,6 @@ export interface ChildDraft {
     uncertain: boolean;
 }
 export type ChildOutcome = {
-    kind: "background";
-    receipt: BackgroundTransitionResult;
-} | {
     kind: "prompt";
     receipt: SubagentPromptReceipt;
 } | {
@@ -35,13 +32,12 @@ export interface ChildrenSnapshot {
     issue: ChildrenIssue | null;
     descendantIssue: ChildrenIssue | null;
     drafts: ReadonlyMap<string, ChildDraft>;
-    pending: ReadonlyMap<string, "background" | "prompt" | "interrupt">;
+    pending: ReadonlyMap<string, "prompt" | "interrupt">;
     issues: ReadonlyMap<string, ChildrenIssue>;
     outcomes: ReadonlyMap<string, ChildOutcome>;
 }
 export interface ChildrenActions {
     refresh(generation: number): Promise<void>;
-    background(generation: number, toolCallId: string, runId: string): Promise<void>;
     prompt(generation: number, childId: string): Promise<void>;
     interrupt(generation: number, childId: string): Promise<void>;
     editText(generation: number, childId: string, text: string): void;
@@ -52,7 +48,6 @@ export interface ChildrenActions {
 }
 export declare const EMPTY_CHILD_DRAFT: ChildDraft;
 export declare const childActionKey: (childId: string) => string;
-export declare const runActionKey: (toolCallId: string, runId: string) => string;
 export declare function enabled(availability: RoleControlAvailability | undefined): boolean;
 /** Client presentation/draft state only. Host owns all run, inbox and admission authority. */
 export declare class ChildrenController {
@@ -89,7 +84,6 @@ export declare class ChildrenController {
     private finish;
     private refuse;
     private accepted;
-    background(generation: number, toolCallId: string, runId: string): Promise<void>;
     private canControl;
     prompt(generation: number, id: string): Promise<void>;
     interrupt(generation: number, id: string): Promise<void>;

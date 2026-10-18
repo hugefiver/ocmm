@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createRequire, registerHooks } from "node:module";
 import { dirname, join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
-import { setImmediate } from "node:timers/promises";
 import * as Cordis from "@deepseek-ai/cordis";
 import { Context } from "@deepseek-ai/cordis";
+import type { ModelSelectionRef } from "@deepseek-ai/dsh-agent";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
 import type {} from "@deepseek-ai/dsh-api-gateway/client";
 import * as NativeConnection from "@deepseek-ai/dsh-client-connection";
@@ -20,12 +20,12 @@ import type { DshAgent } from "../src/dsh-types.ts";
 import type { DsmmProfilesRemote } from "../src/profile-remote.ts";
 import type { DsmmProfileRuntime } from "../src/profile-runtime.ts";
 import { ProfileStore } from "../src/profile-store.ts";
-import type { ProfileSnapshot, SessionProfileSnapshot } from "../src/profile-types.ts";
+import type { ProfileSnapshot } from "../src/profile-types.ts";
 import type { DsmmProfileOverlay } from "../src/profiles.ts";
 import type { DsmmPluginConfig } from "../src/settings.ts";
 import "./profile-apply-source-loader.mjs";
 
-const { RoutingFixtureAdapter, nativeFixturePlugin, nativeRoutingFixture } = await import("./native-routing-fixture.ts");
+const { RoutingFixtureAdapter, nativeFixturePlugin, nativeRoutingFixture, runFixtureTurn, headerRoutes } = await import("./native-routing-fixture.ts");
 
 const require = createRequire(import.meta.url);
 const nativeRequire = createRequire(require.resolve("@deepseek-ai/dsh-client-connection/package.json"));
@@ -63,23 +63,12 @@ class CatalogAdapter extends RoutingFixtureAdapter {
   }
 }
 
-async function fixture(config: DsmmPluginConfig = {}, metadataOnly = false) {
+async function fixture(config: DsmmPluginConfig = {}) {
   const adapter = new CatalogAdapter();
   const metadataFailures: Array<{ code?: string; provider: string; model: string; reasoningEffort?: string }> = [];
   const metadataCalls: Array<{ provider: string; model: string; reasoningEffort?: string }> = [];
-  const native = await nativeRoutingFixture(config, { adapter, headless: true, nativePresets: !metadataOnly, persistence: true,
-    nativeFs: !metadataOnly, nativeJobs: !metadataOnly, async beforeDsmm(ctx) {
-      if (metadataOnly) return;
-      for (const [name, peer, config] of [
-        ["dsh-subprocess-local", undefined, {}],
-        ["dsh-pwsh-local", undefined, { cwd: ctx.get("profileContext")!.dir }],
-        ["dsh-shell-env", undefined, { dshHome: ctx.get("profileContext")!.home }],
-        ["dsh-web", "@deepseek-ai/dsh-tool-web", {}],
-      ] as const) {
-        const plugin = await nativeFixturePlugin(`@deepseek-ai/${name}`, peer);
-        await ctx.plugin(plugin.default ?? plugin, config).await();
-      }
-    } });
+  const native = await nativeRoutingFixture(config, { adapter, headless: true, persistence: true,
+    nativeFs: true, nativePermissionSettings: true });
   const resolve = LlmRuntime.prototype.resolveCallConfig;
   const observation = mock.method(LlmRuntime.prototype, "resolveCallConfig", async function (this: LlmRuntime, ...args: Parameters<typeof resolve>) {
     metadataCalls.push({ ...args[0] });
@@ -92,6 +81,9 @@ async function fixture(config: DsmmPluginConfig = {}, metadataOnly = false) {
   });
   const client = new Context();
   try {
+    const { WebServer } = await nativeFixturePlugin("@deepseek-ai/dsh-host-webserver", "@deepseek-ai/dsh-web-app");
+    await native.ctx.plugin(WebServer, { host: "127.0.0.1", port: 0 }).await();
+    assert.equal(native.ctx.settings.writable, true);
     await Promise.all([native.ctx.plugin(TypertRegistry).await(), native.ctx.plugin(TypertGatewayService, {}).await(), client.plugin(TypertRegistry).await()]);
     await native.ctx.plugin(MemoryCredentials).await();
     const remoteAccess = await nativeFixturePlugin("@deepseek-ai/dsh-api-remote-access");
@@ -143,10 +135,8 @@ async function fixture(config: DsmmPluginConfig = {}, metadataOnly = false) {
     const remote = client.remote.dsmmProfiles as DsmmProfilesRemote;
     const runtime = native.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
     assert.ok(runtime);
-    if (!metadataOnly) {
-      const preset = await native.ctx.get("agentPresets")!.resolve("dsmm-orchestrator");
-      assert.equal(preset.broken, undefined);
-    }
+    const preset = await native.ctx.get("agentPresets")!.resolve("dsmm-orchestrator");
+    assert.equal(preset.broken, undefined);
     const store = ProfileStore.fromCentral(native.home, native.profileDir, runtime.admission().deployment!.entryId);
     return { native, adapter, runtime, remote, clone, store, metadataFailures, metadataCalls,
       async dispose() { observation.mock.restore(); await client.fiber.dispose(); await native.dispose(); } };
@@ -162,7 +152,7 @@ test("finite native Gateway and cross-VM strict client save/read raw route JSON 
   const parameters = { temperature: 0, maxTokens: 1, stop: [], custom_flag: false, custom_zero: 0, custom_null: null,
     custom_nested: { rows: [false, 0, null, {}, []] }, customParameters: { original_name: "data" } };
   const primary = { provider: "fixture", model: "profile-a", ...parameters };
-  const f = await fixture({ defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary } } }, true);
+  const f = await fixture({ defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary } } });
   try {
     const settings = { modelParameters: { passthrough: false }, roleRouting: { "dsmm-reviewer": { primary: { ...primary, reasoningEffort: "medium" },
       fallbackRoutes: [{ ...primary, custom_flag: true }, primary] } } };
@@ -211,6 +201,16 @@ test("finite native catalog and cross-VM RPC Apply default with no root and idle
     assert.equal(f.runtime.admission(oldRoot as unknown as DshAgent), oldAdmission);
     assert.equal(oldAdmission.profile?.id, "a");
     assert.equal(f.runtime.admission(newRoot as unknown as DshAgent).profile?.id, "b");
+    const before = value(await f.remote.describeSession(oldRoot.id));
+    assert.equal(before.canApplyOverlay, false);
+    assert.equal(before.applyOverlayUnavailableReason, "new-session-required");
+    const refused = await f.remote.selectSession(oldRoot.id, { sessionId: oldRoot.id, id: b.id, expectedRevision: b.revision,
+      expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch });
+    assert.ok(!refused.ok);
+    const failure = remoteErrorOf(refused.error);
+    assert.equal(failure?.code, "dsmm-profiles/refused");
+    assert.equal(failure?.details.code, "unavailable");
+    assert.equal(f.runtime.admission(oldRoot as unknown as DshAgent), oldAdmission);
     assert.equal(oldAdmission.settings.modelParameters.passthrough, true);
     assert.equal(value(await f.remote.describeSession(newRoot.id)).configuration!.modelParameterPolicy?.mode, "native-defaults");
     assert.deepEqual(JSON.parse(JSON.stringify(value(await f.remote.describeSession(newRoot.id)).configuration!.settings.modelParameters)), { passthrough: false });
@@ -221,52 +221,41 @@ test("finite native catalog and cross-VM RPC Apply default with no root and idle
   } finally { await f.dispose(); }
 });
 
-test("finite native catalog and cross-VM RPC session Apply uses native maintenance without changing default or another root", async () => {
-  const f = await fixture();
+test("Use profile model remains an independent capability while manual native model intent and operator authority stay separate", async () => {
+  const primary = { provider: "fixture", model: "profile-a", reasoningEffort: "high" };
+  const f = await fixture({ defaultActive: true, roleRouting: { "dsmm-orchestrator": { primary } } });
   try {
-    const a = await save(f, "a", overlay("profile-a"));
-    const b = await save(f, "b", { ...overlay("profile-b"), modelParameters: { passthrough: false } });
-    await select(f, "a", a.revision);
-    const root = await f.native.create({ agentPreset: "standard" });
-    const other = await f.native.create({ agentPreset: "standard" });
-    const nativeChoice = structuredClone(root.options);
-    const otherAdmission = f.runtime.admission(other as unknown as DshAgent);
-    const global = value(await f.remote.describe());
+    const selection: ModelSelectionRef = { current: { provider: "fixture", model: "native-default" }, assembled: undefined };
+    const root = await f.native.create({ agentPreset: "dsmm-orchestrator" }, selection);
+    const admission = f.runtime.admission(root as unknown as DshAgent);
     const before = value(await f.remote.describeSession(root.id));
-    const request = f.clone(JSON.stringify({ sessionId: root.id, id: "b", expectedRevision: b.revision,
-      expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch })) as Parameters<DsmmProfilesRemote["selectSession"]>[1];
-    const applied: SessionProfileSnapshot = value(await f.remote.selectSession(root.id, request));
-    assert.equal(applied.selection.selectedId, "b");
-    assert.notEqual(applied.admissionEpoch, before.admissionEpoch);
-    assert.equal(applied.scope, "session-override");
-    assert.equal(applied.configuration!.modelParameterPolicy?.mode, "native-defaults");
-    assert.deepEqual(JSON.parse(JSON.stringify(applied.configuration!.settings.modelParameters)), { passthrough: false });
-    assert.equal(otherAdmission.settings.modelParameters.passthrough, true);
-    assert.equal(f.metadataCalls.length, 0);
-    assert.equal(f.runtime.admission(root as unknown as DshAgent).profile?.id, "b");
-    assert.equal(f.runtime.admission(other as unknown as DshAgent), otherAdmission);
-    assert.deepEqual(root.options, nativeChoice);
-    assert.deepEqual(value(await f.remote.describe()), global);
-    const stale = await f.remote.selectSession(root.id, request);
-    assert.ok(!stale.ok);
-    const failure = remoteErrorOf(stale.error);
-    assert.ok(failure?.code === "dsmm-profiles/refused");
-    assert.equal(failure.details.code, "conflict");
-    assert.equal(f.adapter.calls.length, 0);
-    await f.native.disposeAgent(root);
-    const resumed = await f.native.agents.resume({ resumeSessionId: root.id, agentOptions: root.options,
-      async setup(scope) { await f.native.ctx.get("agentPresets")!.mount(scope, "standard"); } });
+    assert.equal(before.canSelectModel, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(before.profileModel)), primary);
+    assert.equal(before.canApplyOverlay, false);
+    assert.equal(before.applyOverlayUnavailableReason, "new-session-required");
+    // Native public selection and durable intent seams, not a replacement Models SDK.
+    for (const route of [primary, { provider: "fixture", model: "profile-b", reasoningEffort: "low" }]) {
+      const resolved = await f.native.ctx.llm.resolveCallConfig({ ...route, reasoningEffort: ReasoningEffortId(route.reasoningEffort) });
+      selection.current = { provider: resolved.provider, model: resolved.model, reasoningEffort: resolved.reasoningEffort };
+      root.session.append("model/selection", selection.current);
+      await runFixtureTurn(root);
+    }
+    assert.deepEqual(headerRoutes(root).map(({ model }) => model), ["profile-a", "profile-b"]);
+    assert.equal(f.runtime.admission(root as unknown as DshAgent), admission);
+    assert.deepEqual(JSON.parse(JSON.stringify(value(await f.remote.describeSession(root.id)).profileModel)), primary);
+    const otherPeer = f.native.ctx.connection.createPeer({ principal: { kind: "owner" } });
     try {
-      assert.notEqual(resumed.agent, root);
-      const reopened = value(await f.remote.describeSession(resumed.agent.id));
-      assert.equal(reopened.admissionEpoch, applied.admissionEpoch);
-      assert.equal(reopened.selection.appliedRevision, b.revision);
-      assert.equal(reopened.scope, "session-override");
-    } finally { await resumed.dispose(); }
+      await assert.rejects(f.native.ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "save", peer: otherPeer,
+        args: { request: { id: "profile-b", expectedRevision: null, content: JSON.stringify({ version: 1, id: "profile-b", settings: {} }) } } }), error => {
+        const failure = remoteErrorOf(error);
+        return failure?.code === "dsmm-profiles/refused" && failure.details.code === "not-owned";
+      });
+      assert.equal((await f.store.describe()).profiles.some(profile => profile.id === "profile-b"), false);
+    } finally { await otherPeer.dispose(); }
   } finally { await f.dispose(); }
 });
 
-test("cross-VM Apply preserves unknown provider/model and unadvertised effort without metadata I/O", async () => {
+test("cross-VM future-session defaults preserve unknown provider/model and unadvertised effort without metadata I/O", async () => {
   const f = await fixture();
   try {
     const a = await save(f, "a", overlay("profile-a"));
@@ -278,82 +267,16 @@ test("cross-VM Apply preserves unknown provider/model and unadvertised effort wi
       ["effort", { provider: "fixture", model: "profile-a", reasoningEffort: "max" }],
     ] as const) {
       const draft = await save(f, id, { roleRouting: { "dsmm-reviewer": { primary: route } } });
-      for (const entry of ["default", "session"] as const) {
-        const admitted = f.runtime.admission(root as unknown as DshAgent);
-        const global = value(await f.remote.describe());
-        const session = value(await f.remote.describeSession(root.id));
-        const request = { id, expectedRevision: draft.revision, expectedSelectionRevision: entry === "default" ? global.selectionRevision : session.selection.selectionRevision };
-        const result = entry === "default" ? await f.remote.select(request)
-          : await f.remote.selectSession(root.id, { ...request, sessionId: root.id, expectedAdmissionEpoch: session.admissionEpoch });
-        assert.ok(result.ok, JSON.stringify(result));
-        assert.deepEqual(f.runtime.admission(entry === "default" ? undefined : root as unknown as DshAgent).settings.roleRouting["dsmm-reviewer"]?.primary, route);
-        if (entry === "default") assert.equal(f.runtime.admission(root as unknown as DshAgent), admitted);
-        else assert.equal((await f.store.loadSelection()).selectionRevision, global.selectionRevision);
-        assert.equal(f.metadataCalls.length, 0);
-        assert.equal(f.metadataFailures.length, 0);
-      }
+      const admitted = f.runtime.admission(root as unknown as DshAgent);
+      await select(f, id, draft.revision);
+      assert.deepEqual(f.runtime.admission().settings.roleRouting["dsmm-reviewer"]?.primary, route);
+      const fresh = await f.native.create({ agentPreset: "standard" });
+      assert.deepEqual(f.runtime.admission(fresh as unknown as DshAgent).settings.roleRouting["dsmm-reviewer"]?.primary, route);
+      assert.equal(f.runtime.admission(root as unknown as DshAgent), admitted);
+      assert.equal(f.metadataCalls.length, 0);
+      assert.equal(f.metadataFailures.length, 0);
     }
   } finally { await f.dispose(); }
-});
-
-function gate() {
-  let release!: () => void;
-  const promise = new Promise<void>(resolve => { release = resolve; });
-  return { promise, release };
-}
-
-test("pending native session Apply fails closed on draft edits, cancellation, operator change and Agent disposal", async t => {
-  for (const change of ["draft", "cancel", "operator", "dispose"] as const) {
-    await t.test(change, async t => {
-      const f = await fixture();
-      const entered = gate(), held = gate();
-      let pending: Promise<unknown> | undefined;
-      let disposing: Promise<void> | undefined;
-      try {
-        const draft = await save(f, "b", overlay("profile-b"));
-        const root = await f.native.create({ agentPreset: "standard" });
-        const admitted = f.runtime.admission(root as unknown as DshAgent);
-        const before = value(await f.remote.describeSession(root.id));
-        // Pause the real transaction after candidate validation, before its commit fence.
-        const selectSession = ProfileStore.prototype.selectSession;
-        t.mock.method(ProfileStore.prototype, "selectSession", function (this: ProfileStore, ...args: Parameters<ProfileStore["selectSession"]>) {
-          const [request, epoch, validateCandidate, commit] = args;
-          return selectSession.call(this, request, epoch, async document => {
-            const prepared = await validateCandidate(document);
-            entered.release();
-            await held.promise;
-            return prepared;
-          }, commit);
-        });
-        const request = { sessionId: root.id, id: "b", expectedRevision: draft.revision,
-          expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch };
-        const controller = new AbortController();
-        const applying = f.native.ctx.typertGateway.invoke({ namespace: "dsmmProfiles", method: "selectSession",
-          args: { sessionId: root.id, request }, peer: f.native.ctx.connection.browserPeer, signal: controller.signal }).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
-        pending = applying;
-        assert.equal(await Promise.race([entered.promise.then(() => true), applying.then(() => false)]), true,
-          "Apply must reach candidate validation before the concurrent change");
-        if (change === "draft") await writeFile(join(f.store.profileDir, "b.jsonc"), JSON.stringify({ version: 1, id: "b", settings: overlay("profile-a") }));
-        else if (change === "cancel") controller.abort();
-        else if (change === "operator") {
-          const connection = Reflect.get(f.native.ctx.connection, Cordis.symbols.original) ?? f.native.ctx.connection;
-          const replacement = f.native.ctx.connection.createPeer({ principal: { kind: "owner" } });
-          Reflect.set(connection, "browserPeer", replacement);
-        } else { disposing = f.native.disposeAgent(root); await setImmediate(); }
-        held.release();
-        const result = await applying;
-        await disposing;
-        assert.ok(!result.ok, `${change} must not publish a late session admission`);
-        assert.equal((await f.store.loadSessionSelection(root.id)).admissionEpoch, null);
-        assert.equal((await f.store.loadSelection()).selectedId, null);
-        if (change !== "dispose") assert.equal(f.runtime.admission(root as unknown as DshAgent), admitted);
-      } finally {
-        held.release();
-        try { await pending; await disposing; }
-        finally { await f.dispose(); }
-      }
-    });
-  }
 });
 
 test("documenting baseline and named overlay retain exact routes independently without metadata I/O", async () => {
@@ -374,11 +297,8 @@ test("documenting baseline and named overlay retain exact routes independently w
     assert.equal(f.metadataCalls.length, 0);
     assert.equal(f.metadataCalls.some(route => route.model === baselineRoute.model), false);
     assert.equal(f.runtime.admission(root as unknown as DshAgent), oldAdmission);
-    const before = value(await f.remote.describeSession(root.id));
-    f.metadataCalls.length = 0;
-    value(await f.remote.selectSession(root.id, { sessionId: root.id, id: overridden.id, expectedRevision: overridden.revision,
-      expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch }));
-    assert.deepEqual(f.runtime.admission(root as unknown as DshAgent).settings.roleRouting["dsmm-documenting"]?.primary, overlayRoute);
+    const overriddenRoot = await f.native.create({ agentPreset: "standard" });
+    assert.deepEqual(f.runtime.admission(overriddenRoot as unknown as DshAgent).settings.roleRouting["dsmm-documenting"]?.primary, overlayRoute);
     assert.equal(f.metadataCalls.length, 0);
     assert.equal(f.metadataCalls.some(route => route.model === baselineRoute.model), false);
     const omittedRoute = { provider: "fixture", model: "profile-a" };
@@ -387,17 +307,15 @@ test("documenting baseline and named overlay retain exact routes independently w
     await select(f, omitted.id, omitted.revision);
     assert.deepEqual(f.runtime.admission().settings.roleRouting["dsmm-documenting"]?.primary, omittedRoute);
     assert.equal(f.metadataCalls.length, 0);
-    const session = value(await f.remote.describeSession(root.id));
-    f.metadataCalls.length = 0;
-    value(await f.remote.selectSession(root.id, { sessionId: root.id, id: omitted.id, expectedRevision: omitted.revision,
-      expectedSelectionRevision: session.selection.selectionRevision, expectedAdmissionEpoch: session.admissionEpoch }));
-    assert.deepEqual(f.runtime.admission(root as unknown as DshAgent).settings.roleRouting["dsmm-documenting"]?.primary, omittedRoute);
+    const omittedRoot = await f.native.create({ agentPreset: "standard" });
+    assert.deepEqual(f.runtime.admission(omittedRoot as unknown as DshAgent).settings.roleRouting["dsmm-documenting"]?.primary, omittedRoute);
+    assert.equal(f.runtime.admission(root as unknown as DshAgent), oldAdmission);
     assert.equal(f.metadataCalls.length, 0);
     assert.equal(f.adapter.calls.length, 0);
   } finally { await f.dispose(); }
 });
 
-test("documenting role toggles preserve configured effort without model validation in either Apply domain", async () => {
+test("documenting role toggles preserve configured effort for future roots without model validation", async () => {
   const f = await fixture({ roleRouting: { "dsmm-documenting": { primary: { provider: "fixture", model: "profile-a", reasoningEffort: "max" } } } });
   try {
     const draft = await save(f, "disabled-doc", { roles: { "dsmm-documenting": false } });
@@ -405,34 +323,24 @@ test("documenting role toggles preserve configured effort without model validati
     assert.equal(f.runtime.admission().settings.roles["dsmm-documenting"], false);
     assert.equal(f.metadataCalls.some(route => route.model === "profile-a"), false);
     const root = await f.native.create({ agentPreset: "standard" });
-    const before = value(await f.remote.describeSession(root.id));
     f.metadataCalls.length = 0;
-    value(await f.remote.selectSession(root.id, { sessionId: root.id, id: draft.id, expectedRevision: draft.revision,
-      expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch }));
     assert.equal(f.runtime.admission(root as unknown as DshAgent).settings.roles["dsmm-documenting"], false);
     assert.equal(f.metadataCalls.some(route => route.model === "profile-a"), false);
     assert.equal(f.metadataFailures.length, 0);
     const enabled = await save(f, "enabled-doc", {});
-    const current = value(await f.remote.describe());
     const admitted = f.runtime.admission(root as unknown as DshAgent);
-    const session = value(await f.remote.describeSession(root.id));
-    for (const domain of ["default", "session"] as const) {
-      f.metadataFailures.length = 0;
-      const request = { id: enabled.id, expectedRevision: enabled.revision,
-        expectedSelectionRevision: domain === "default" ? current.selectionRevision : session.selection.selectionRevision };
-      const result = domain === "default" ? await f.remote.select(request)
-        : await f.remote.selectSession(root.id, { ...request, sessionId: root.id, expectedAdmissionEpoch: session.admissionEpoch });
-      assert.ok(result.ok, JSON.stringify(result));
-      assert.equal(f.metadataFailures.length, 0);
-      assert.equal(f.metadataCalls.length, 0);
-      assert.equal((await f.store.loadSelection()).selectedId, enabled.id);
-      if (domain === "default") assert.equal(f.runtime.admission(root as unknown as DshAgent), admitted);
-      else assert.equal(f.runtime.admission(root as unknown as DshAgent).settings.roles["dsmm-documenting"], true);
-    }
+    await select(f, enabled.id, enabled.revision);
+    const fresh = await f.native.create({ agentPreset: "standard" });
+    assert.equal(f.runtime.admission(fresh as unknown as DshAgent).settings.roles["dsmm-documenting"], true);
+    assert.equal(f.runtime.admission(fresh as unknown as DshAgent).settings.roleRouting["dsmm-documenting"]?.primary?.reasoningEffort, "max");
+    assert.equal(f.metadataFailures.length, 0);
+    assert.equal(f.metadataCalls.length, 0);
+    assert.equal((await f.store.loadSelection()).selectedId, enabled.id);
+    assert.equal(f.runtime.admission(root as unknown as DshAgent), admitted);
   } finally { await f.dispose(); }
 });
 
-test("enabled documenting preserves unresolved routes in both Apply domains without consulting the model owner", async () => {
+test("enabled documenting preserves unresolved future-session routes without consulting the model owner", async () => {
   const f = await fixture();
   try {
     const root = await f.native.create({ agentPreset: "standard" });
@@ -442,25 +350,19 @@ test("enabled documenting preserves unresolved routes in both Apply domains with
       ["doc-effort", { provider: "fixture", model: "profile-a", reasoningEffort: "max" }],
     ] as const) {
       const draft = await save(f, id, { roleRouting: { "dsmm-documenting": { primary: route } } });
-      for (const domain of ["default", "session"] as const) {
-        const global = value(await f.remote.describe());
-        const session = value(await f.remote.describeSession(root.id));
-        f.metadataFailures.length = 0;
-        const request = { id, expectedRevision: draft.revision,
-          expectedSelectionRevision: domain === "default" ? global.selectionRevision : session.selection.selectionRevision };
-        const result = domain === "default" ? await f.remote.select(request)
-          : await f.remote.selectSession(root.id, { ...request, sessionId: root.id, expectedAdmissionEpoch: session.admissionEpoch });
-        assert.ok(result.ok, JSON.stringify(result));
-        assert.equal(f.metadataFailures.length, 0);
-        assert.equal(f.metadataCalls.length, 0);
-        assert.deepEqual(f.runtime.admission(domain === "default" ? undefined : root as unknown as DshAgent).settings.roleRouting["dsmm-documenting"]?.primary, route);
-      }
+      const admitted = f.runtime.admission(root as unknown as DshAgent);
+      await select(f, id, draft.revision);
+      const fresh = await f.native.create({ agentPreset: "standard" });
+      assert.deepEqual(f.runtime.admission(fresh as unknown as DshAgent).settings.roleRouting["dsmm-documenting"]?.primary, route);
+      assert.equal(f.runtime.admission(root as unknown as DshAgent), admitted);
+      assert.equal(f.metadataFailures.length, 0);
+      assert.equal(f.metadataCalls.length, 0);
     }
     assert.equal(f.adapter.calls.length, 0);
   } finally { await f.dispose(); }
 });
 
-test("documenting Apply preserves ordered unresolved primary and fallback parameters", async () => {
+test("documenting defaults preserve ordered unresolved primary and fallback parameters", async () => {
   const f = await fixture();
   try {
     const primary = { provider: "fixture", model: "unlisted-doc", reasoningEffort: "high" };
@@ -468,26 +370,16 @@ test("documenting Apply preserves ordered unresolved primary and fallback parame
     const available = await save(f, "doc-fallback", { roleRouting: { "dsmm-documenting": { primary, fallbackRoutes: [fallback] } } });
     await select(f, available.id, available.revision);
     const root = await f.native.create({ agentPreset: "standard" });
-    const before = value(await f.remote.describeSession(root.id));
-    value(await f.remote.selectSession(root.id, { sessionId: root.id, id: available.id, expectedRevision: available.revision,
-      expectedSelectionRevision: before.selection.selectionRevision, expectedAdmissionEpoch: before.admissionEpoch }));
     const admitted = f.runtime.admission(root as unknown as DshAgent);
-    const global = value(await f.remote.describe());
-    const session = value(await f.remote.describeSession(root.id));
     const invalidFallback = { ...fallback, reasoningEffort: "max" };
     const invalid = await save(f, "doc-invalid-fallback", { roleRouting: { "dsmm-documenting": { primary, fallbackRoutes: [invalidFallback] } } });
-    for (const domain of ["default", "session"] as const) {
-      f.metadataFailures.length = 0;
-      const request = { id: invalid.id, expectedRevision: invalid.revision,
-        expectedSelectionRevision: domain === "default" ? global.selectionRevision : session.selection.selectionRevision };
-      const result = domain === "default" ? await f.remote.select(request)
-        : await f.remote.selectSession(root.id, { ...request, sessionId: root.id, expectedAdmissionEpoch: session.admissionEpoch });
-      assert.ok(result.ok, JSON.stringify(result));
-      assert.equal(f.metadataFailures.length, 0);
-      assert.equal(f.metadataCalls.length, 0);
-      assert.deepEqual(f.runtime.admission(domain === "default" ? undefined : root as unknown as DshAgent).settings.roleRouting["dsmm-documenting"], { primary, fallbackRoutes: [invalidFallback] });
-      if (domain === "default") assert.equal(f.runtime.admission(root as unknown as DshAgent), admitted);
-    }
+    await select(f, invalid.id, invalid.revision);
+    const fresh = await f.native.create({ agentPreset: "standard" });
+    assert.deepEqual(f.runtime.admission(fresh as unknown as DshAgent).settings.roleRouting["dsmm-documenting"], { primary, fallbackRoutes: [invalidFallback] });
+    assert.deepEqual(admitted.settings.roleRouting["dsmm-documenting"], { primary, fallbackRoutes: [fallback] });
+    assert.equal(f.runtime.admission(root as unknown as DshAgent), admitted);
+    assert.equal(f.metadataFailures.length, 0);
+    assert.equal(f.metadataCalls.length, 0);
   } finally { await f.dispose(); }
 });
 
@@ -533,20 +425,14 @@ test("installed PiAiAdapter metadata does not gate Apply or normalize requested 
         const draft = await save(f, "apai-doc", { roleRouting: { "dsmm-documenting": documentingChain } });
         const beforeGlobal = value(await f.remote.describe());
         assert.equal(beforeGlobal.roles?.find(role => role.id === "dsmm-documenting")?.enabled, true);
-        for (const domain of ["default", "session"] as const) {
-          const root = domain === "session" ? await f.native.create({ agentPreset: "standard" }) : undefined;
-          const before = root === undefined ? undefined : value(await f.remote.describeSession(root.id));
-          f.metadataCalls.length = 0;
-          f.metadataFailures.length = 0;
-          const request = { id: draft.id, expectedRevision: draft.revision,
-            expectedSelectionRevision: before?.selection.selectionRevision ?? beforeGlobal.selectionRevision };
-          const result = root === undefined ? await f.remote.select(request)
-            : await f.remote.selectSession(root.id, { ...request, sessionId: root.id, expectedAdmissionEpoch: before!.admissionEpoch });
-          assert.deepEqual(f.metadataFailures, []);
-          assert.deepEqual(f.metadataCalls, []);
-          assert.ok(result.ok, JSON.stringify(result));
-          assert.deepEqual(f.runtime.admission(root as unknown as DshAgent | undefined).settings.roleRouting["dsmm-documenting"], documentingChain);
-        }
+        f.metadataCalls.length = 0;
+        f.metadataFailures.length = 0;
+        value(await f.remote.select({ id: draft.id, expectedRevision: draft.revision, expectedSelectionRevision: beforeGlobal.selectionRevision }));
+        const root = await f.native.create({ agentPreset: "standard" });
+        assert.deepEqual(f.metadataFailures, []);
+        assert.deepEqual(f.metadataCalls, []);
+        assert.deepEqual(f.runtime.admission().settings.roleRouting["dsmm-documenting"], documentingChain);
+        assert.deepEqual(f.runtime.admission(root as unknown as DshAgent).settings.roleRouting["dsmm-documenting"], documentingChain);
         assert.equal(network.mock.callCount(), 0);
         assert.equal(completion.mock.callCount(), 0);
         assert.equal(f.adapter.calls.length, 0);

@@ -34,7 +34,7 @@ test("real native root Builder owns formal planning; native plan review returns 
   const plan = "# Native complete plan\n\n- [ ] Implement bounded change\n- [ ] Verify result\n";
   let planner: import("@deepseek-ai/dsh-agent").Agent | undefined;
   const f = await nativeRoutingFixture({ subagents: { maxDepth: 3 }, roleRouting: { "dsmm-planner": { primary: { provider: "fixture", model: "formal-planner" } } } }, {
-    nativePresets: true, nativeFs: true, nativeJobs: true,
+    nativePresets: true, nativeFs: true,
     async beforeDsmm(ctx) {
       await presetHostServices(ctx);
       const module = await nativeFixturePlugin("@deepseek-ai/dsh-plan-mode");
@@ -76,7 +76,7 @@ test("real native root Builder owns formal planning; native plan review returns 
 });
 
 test("native blank preset rebind refreshes actual tool realm while planner remains read-only and permitted utilities remain callable", async () => {
-  const f = await nativeRoutingFixture({ roles: { "dsmm-planner": true, "dsmm-quick": true }, presets: { plannerRootEnabled: true }, subagents: { maxDepth: 3 } }, { nativePresets: true, nativeFs: true, nativeJobs: true, beforeDsmm: presetHostServices });
+  const f = await nativeRoutingFixture({ roles: { "dsmm-planner": true, "dsmm-quick": true }, presets: { plannerRootEnabled: true }, subagents: { maxDepth: 3 } }, { nativePresets: true });
   try {
     const root = await f.create({ agentPreset: "dsmm-builder", cwd: f.profileDir });
     const presets = f.ctx.get("agentPresets")!;
@@ -93,42 +93,30 @@ test("native blank preset rebind refreshes actual tool realm while planner remai
   } finally { await f.dispose(); }
 });
 
-test("native one-shot background jobs deliver useful output, enforce owner cancellation and release owned children", async () => {
-  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { enableRunInBackground: true, maxDepth: 3 } }, { nativeJobs: true });
+test("native background activation returns accepted identity and survives caller return until explicit interruption", async () => {
+  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { enableRunInBackground: true, maxDepth: 3 } }, { nativePresets: true });
   try {
     const parent = await f.create(), foreign = await f.create();
-    const tools = parent.ctx.get("tools")!, jobs = f.ctx.get("jobs")!;
-    const start = () => tools.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("native-background"), arguments: { category: "dsmm-coding", description: "Owned native background", prompt: "Return useful background result", run_in_background: true }, signal: new AbortController().signal });
-    const first = await start(); assert.equal(first.isError, false);
-    const id = (first.value as { jobId: string }).jobId as Parameters<typeof jobs.get>[0];
-    assert.equal((await jobs.wait(id, 5000, parent.id)).status, "completed");
-    const output = jobs.read(id, parent.id); assert.match(output.result ?? "", /fixture complete/);
-    assert.throws(() => jobs.read(id, foreign.id), /another|foreign|own/i);
+    const tools = parent.ctx.get("tools")!, caller = new AbortController();
     let entered!: () => void;
     const started = new Promise<void>((done) => { entered = done; });
     f.adapter.beforeStream = async (options) => { entered(); await new Promise<void>((done) => options.signal!.addEventListener("abort", () => done(), { once: true })); };
-    const second = await start(); assert.equal(second.isError, false); await started;
-    const secondId = (second.value as { jobId: string }).jobId as Parameters<typeof jobs.get>[0];
-    assert.throws(() => jobs.kill(secondId, foreign.id), /another|foreign|own/i);
-    jobs.kill(secondId, parent.id, "explicit native cancellation");
-    assert.equal((await jobs.wait(secondId, 5000, parent.id)).status, "killed");
+    const result = await tools.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("native-background"), arguments: { category: "dsmm-coding", description: "Owned native background", prompt: "Return useful background result", run_in_background: true }, signal: caller.signal });
+    assert.equal(result.isError, false, JSON.stringify(result)); await started;
+    const child = f.agents.list().find(agent => f.agents.isOwnedBy(agent.id, parent))!;
+    assert.ok(child); assert.match(JSON.stringify(result.value), new RegExp(child.id));
+    caller.abort(); assert.equal(f.adapter.calls[0].signal?.aborted, false);
+    assert.throws(() => f.subagents.interruptByParent(child.id, foreign.id, "continuable"));
+    assert.deepEqual(await f.subagents.interruptByParent(child.id, parent.id, "continuable"), { accepted: true });
+    await f.subagents.drainChildren(parent, [child.id]);
     assert.deepEqual(f.agents.list(), [parent, foreign]);
   } finally { await f.dispose(); }
 });
 
-test("native default depth and unknown filters refuse before publication; foreground failure and abort retain typed terminal outcomes", async () => {
-  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { enableRunInBackground: true, backgroundMode: "continuable" }, roleRouting: { "dsmm-coding": { primary: { provider: "fixture", model: "typed-error" } } } }, { persistence: true });
+test("native default depth refuses before publication; foreground failure and abort retain typed terminal outcomes", async () => {
+  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { enableRunInBackground: true }, roleRouting: { "dsmm-coding": { primary: { provider: "fixture", model: "typed-error" } } } }, { nativePresets: true });
   try {
     const parent = await f.create();
-    f.adapter.streamChunks = async function* () { yield* call("structured_output", { ok: true }); };
-    const removeFilter = f.ctx.on("agent/created", ({ agent }) => { if (f.agents.isOwnedBy(agent.id, parent)) agent.ctx.tools.restrict({ allow: ["read"] }); }, { global: true });
-    const structured = await f.subagents.startActivation({ provider: "dsmm-role-coding", delivery: "caller", label: "Structured output", signal: new AbortController().signal, request: { parent, prompt: [],
-      outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false } } });
-    try { const result = await structured.result; assert.equal(result.stopReason, "completed"); assert.deepEqual(result.structured, { ok: true }); }
-    finally { removeFilter(); await structured.dispose(); f.adapter.streamChunks = undefined; }
-    const removeUnknown = f.ctx.on("agent/created", ({ agent }) => { if (f.agents.isOwnedBy(agent.id, parent)) agent.ctx.tools.restrict({ allow: ["unknown-native-tool-filter"] }); }, { global: true });
-    try { await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-reviewer", delivery: "caller", label: "Invalid filter", request: { parent, prompt: [] }, signal: new AbortController().signal }), /unknown|not.*registered/i); }
-    finally { removeUnknown(); }
     assert.deepEqual(f.agents.list(), [parent]);
     const child = await f.createAuxiliary("dsmm-deep", undefined, "continuable", parent);
     try {
@@ -139,7 +127,7 @@ test("native default depth and unknown filters refuse before publication; foregr
     } finally { await f.releaseAuxiliary(child); }
     f.adapter.failModels.add("typed-error");
     const fail = await parent.ctx.get("tools")!.execute({ agent: parent, name: "dsmm_category", callId: ToolCallId("typed-child-failure"), arguments: { category: "dsmm-coding", description: "Typed failure proof", prompt: "Fail inside mock model", run_in_background: false }, signal: new AbortController().signal });
-    assert.equal(fail.isError, true); assert.match(JSON.stringify(fail), /ERROR|subagent error/);
+    assert.equal(fail.isError, true); assert.match(JSON.stringify(fail), /DSMM_INCOMPLETE/);
     f.adapter.failModels.clear();
     let entered!: () => void;
     const started = new Promise<void>((done) => { entered = done; });
@@ -152,32 +140,61 @@ test("native default depth and unknown filters refuse before publication; foregr
   } finally { await f.dispose(); }
 });
 
-test("native continuable capacity is per-parent and builtin controls continue useful output on the same interrupted child", async () => {
-  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { enableRunInBackground: true, backgroundMode: "continuable", maxDepth: 3 } }, { persistence: true, nativeSubagents: { maxActiveSubagents: 1 } });
+test("official model-facing controls enforce adjacency and continue useful output on the same interrupted child", { timeout: 15000 }, async () => {
+  const f = await nativeRoutingFixture({ defaultActive: true, subagents: { enableRunInBackground: true, maxDepth: 3 } }, { nativePresets: true, nativeControls: true, nativeSubagents: { maxActiveSubagents: 1 } });
   try {
     const parent = await f.create(), other = await f.create();
     let entered!: () => void;
     const started = new Promise<void>((done) => { entered = done; });
-    f.adapter.beforeStream = async (options) => { entered(); await new Promise<void>((done) => options.signal!.addEventListener("abort", () => done(), { once: true })); };
+    f.adapter.beforeStream = async (options) => {
+      if (options.sessionId === parent.id) return;
+      entered(); await new Promise<void>((done) => options.signal!.addEventListener("abort", () => done(), { once: true }));
+    };
     const invoke = (agent: typeof parent, name: string, args: unknown) => agent.ctx.get("tools")!.execute({ agent, name, arguments: args, callId: ToolCallId(name), signal: new AbortController().signal });
-    const first = await invoke(parent, "dsmm_category", { category: "dsmm-coding", description: "Durable child proof", prompt: "Wait for continuation" });
+    const first = await invoke(parent, "dsmm_category", { category: "dsmm-coding", description: "Durable child proof", prompt: "Wait for continuation", run_in_background: true });
     assert.equal(first.isError, false);
-    const id = (first.value as { subagentId: string }).subagentId as typeof parent.id;
+    const id = f.agents.list().find(agent => f.agents.isOwnedBy(agent.id, parent))!.id;
     const child = f.agents.get(id)!; await started;
-    const overflow = await invoke(parent, "dsmm_category", { category: "dsmm-coding", description: "Capacity refusal", prompt: "Must not publish" });
+    const overflow = await invoke(parent, "dsmm_category", { category: "dsmm-coding", description: "Capacity refusal", prompt: "Must not publish", run_in_background: true });
     assert.equal(overflow.isError, true); assert.match(JSON.stringify(overflow), /capacity|maxActive|limit|active.*subagent/i);
-    const independent = await invoke(other, "dsmm_category", { category: "dsmm-coding", description: "Independent parent pool", prompt: "No cross-parent starvation" });
+    const independent = await invoke(other, "dsmm_category", { category: "dsmm-coding", description: "Independent parent pool", prompt: "No cross-parent starvation", run_in_background: true });
     assert.equal(independent.isError, false);
-    const sent = await invoke(parent, "send_message", { agent_id: id, message: "SAME_CHILD_CONTINUATION_INPUT" }); assert.equal(sent.isError, false);
-    const foreignInterrupt = await invoke(other, "interrupt_agent", { agent_id: id }); assert.equal(foreignInterrupt.isError, true);
-    assert.equal((await invoke(parent, "interrupt_agent", { agent_id: id })).isError, false);
+    const delivered = await invoke(parent, "send_message", { agent_id: id, message: "SAME_CHILD_CONTINUATION_INPUT" });
+    assert.equal(delivered.isError, false, JSON.stringify(delivered));
+    assert.ok(delivered.value !== null && typeof delivered.value === "object" && "messageId" in delivered.value);
+    assert.equal(typeof delivered.value.messageId, "string");
+    assert.equal((await invoke(other, "send_message", { agent_id: id, message: "Not my child" })).isError, true);
+    assert.equal((await invoke(other, "interrupt_agent", { agent_id: id })).isError, true);
+    let requestedInterrupt = false;
+    f.adapter.streamChunks = async function* (options) {
+      if (options.sessionId === parent.id && !requestedInterrupt) {
+        requestedInterrupt = true;
+        yield* call("interrupt_agent", { agent_id: id });
+      } else yield* answer("Interrupt requested");
+    };
+    await runFixtureTurn(parent);
+    assert.equal(requestedInterrupt, true);
+    const interruptResult = parent.session.snapshotEvents().filter(event => event.type === "tool/result").find(event => event.data.message.toolCallId === ToolCallId("native-interrupt_agent"));
+    assert.ok(interruptResult);
+    assert.equal(interruptResult.data.message.isError, false);
     await child.whenIdle();
+    assert.equal(child.session.snapshotEvents().filter(event => event.type === "turn/end").at(-1)?.data.reason.kind, "aborted");
     f.adapter.beforeStream = undefined;
-    f.adapter.streamChunks = async function* () { yield* answer("CONTINUED_USEFUL_OUTPUT"); };
+    let requestedContinuation = false;
+    f.adapter.streamChunks = async function* (options) {
+      if (options.sessionId === parent.id && !requestedContinuation) {
+        requestedContinuation = true;
+        yield* call("send_message", { agent_id: id, message: "Wake the retained conversation" });
+      } else yield* answer("CONTINUED_USEFUL_OUTPUT");
+    };
     let released!: () => void;
     const disposed = new Promise<void>((done) => { released = done; });
     f.ctx.on("agent/disposed", ({ agent }) => { if (agent === child) released(); }, { global: true });
-    assert.equal((await invoke(parent, "send_message", { agent_id: id, message: "Wake the retained conversation" })).isError, false);
+    await runFixtureTurn(parent);
+    assert.equal(requestedContinuation, true);
+    const controlResult = parent.session.snapshotEvents().filter(event => event.type === "tool/result").find(event => event.data.message.toolCallId === ToolCallId("native-send_message"));
+    assert.ok(controlResult);
+    assert.equal(controlResult.data.message.isError, false);
     assert.equal(f.agents.get(id), child, "the durable id still selects the exact retained Agent, not a replacement task");
     await child.whenIdle();
     const events = child.session.snapshotEvents();
@@ -185,12 +202,8 @@ test("native continuable capacity is per-parent and builtin controls continue us
     assert.match(JSON.stringify(events.filter((event) => event.type === "assistant/message")), /CONTINUED_USEFUL_OUTPUT/);
     await f.subagents.drainChildren(parent, [id]);
     await disposed;
-    const cold = await invoke(parent, "send_message", { agent_id: id, message: "Cold-resume the same durable child" });
-    assert.equal(cold.isError, false, JSON.stringify(cold));
-    const resumed = f.agents.get(id);
-    assert.ok(resumed); assert.notEqual(resumed, child); assert.equal(resumed.id, child.id);
-    await resumed.whenIdle();
-    assert.match(JSON.stringify(resumed.session.snapshotEvents()), /Cold-resume the same durable child/);
+    assert.equal((await invoke(parent, "send_message", { agent_id: id, message: "Cold-resume the same durable child" })).isError, true);
+    assert.equal(f.agents.get(id), undefined);
     await f.disposeAgent(other);
     assert.equal(f.agents.list().some((agent) => agent !== parent && f.agents.isOwnedBy(agent.id, other)), false);
   } finally { await f.dispose(); }

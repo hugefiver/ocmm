@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { modelRouteToCall } from "../src/role-llm.ts";
+import { inspectSourceCandidateRuntime } from "./host-llm-candidate-support.mjs";
 
 export const nativeEntry = realpathSync(process.env.DSMM_TEST_DSH_ENTRY);
 const native = createRequire(nativeEntry);
@@ -122,7 +123,26 @@ export default class FixtureCredentials extends CredentialProvider {
   if (controls.cli) await writeFile(join(profileDir, "route-input.mjs"), `export const inject = ['dsmmCoreLlmOwner'];
 export function apply(ctx) { ctx.on('agent/request', async (_frame, next) => ({ ...await next(), customParameters: ${JSON.stringify(controls.cli)} })); }
 `);
-  await writeFile(join(profileDir, "package.json"), JSON.stringify({ private: true, type: "module", dsh: { profile: { bundles: ["@deepseek-ai/dsh-base", ...controls.cli ? ["@deepseek-ai/dsh-headless"] : [], "@dsmm/dsmm"] } } }));
+  // The ordinary module fixture supplies its own base composition, not a migration receipt.
+  const baseBundle = "@dsmm/native-root-base-fixture", baseDir = join(profileDir, "node_modules", baseBundle);
+  const basePatches = bootApi.loadOverlayPatches("dsmm-native-root", native.resolve("@deepseek-ai/dsh-base/cordis.patch.yml"));
+  const rows = basePatches.flatMap(patch => patch.insert ?? []);
+  for (const [id, source, target] of [
+    ["llm", "llm", "llm-runtime"], ["settings", "settings", "managed-settings"],
+    ["session-persistence-jsonl", "session-persistence-jsonl", "session-persistence"],
+    ["tool-fs", "tool-fs", "permission-fs"], ["tool-fs-search", "tool-fs-search", "permission-fs-search"],
+    ["tool-web", "tool-web", "permission-web"],
+    ...controls.migrateShell ? [["tool-bash", "tool-bash", "permission-bash"], ["tool-pwsh", "tool-pwsh", "permission-pwsh"]] : [],
+  ]) {
+    const matches = rows.filter(row => row.id === id);
+    assert.equal(matches.length, 1); assert.equal(matches[0].name, `@deepseek-ai/dsh-${source}`);
+    matches[0].name = `@dsmm/dsmm/${target}`;
+  }
+  const yaml = await loadNative("js-yaml"), include = await loadNative("@deepseek-ai/cordis-plugin-include");
+  await mkdir(baseDir);
+  await writeFile(join(baseDir, "package.json"), JSON.stringify({ name: baseBundle, private: true, dsh: { bundle: { patch: "./cordis.patch.yml" } } }));
+  await writeFile(join(baseDir, "cordis.patch.yml"), yaml.dump(basePatches, { schema: include.entryListSchema, noRefs: true, lineWidth: -1 }));
+  await writeFile(join(profileDir, "package.json"), JSON.stringify({ private: true, type: "module", dsh: { profile: { bundles: [baseBundle, ...controls.cli ? ["@deepseek-ai/dsh-headless"] : [], "@dsmm/dsmm"] } } }));
   const provider = { api: "openai-completions", baseURL: `http://127.0.0.1:${server.address().port}/v1`, apiKeyEnv: "DSMM_ROOT_FICTIONAL",
     models: [{ id: "root-model" }, { id: "fallback-model" }], compat: { maxTokensField: "max_tokens" }, retryPolicy: { mode: "normal", maxRetries: 0 } };
   await writeFile(join(profileDir, "cordis.patch.yml"), JSON.stringify([
@@ -150,7 +170,8 @@ export function apply(ctx) { ctx.on('agent/request', async (_frame, next) => ({ 
       agents: (controls.loopConfig.agents ?? []).map(agent => ({ cwd: workspace, ...agent })) } }] : [],
     { id: "llm-pi-ai", config: { providers: { local: provider } } },
     { id: "agent-default-model", config: { provider: "local", model: "root-model" } },
-    { id: "dsmm", inject: ["profileContext", "agents"], config: { presets: { root: join(root, "presets") }, lsp: { enabled: false }, defaultActive: true, ...config } },
+    { id: "dsmm", inject: ["profileContext", "agents"], config: { presets: { root: join(root, "presets") }, lsp: { enabled: false }, defaultActive: true, ...config,
+      ...controls.nativeSubagent ? { runtime: { ...config.runtime, enabled: false } } : {} } },
   ]));
   if (controls.cli) return { root, home, profileDir, workspace, bodies, errors, provider };
   const profile = prepareProfile("native-root");
@@ -166,6 +187,8 @@ export function apply(ctx) { ctx.on('agent/request', async (_frame, next) => ({ 
   });
   assert.ok(ctx.get("dsmmCoreLlmOwner"), "ordinary main module must publish real Core admission");
   assert.ok(ctx.get("sessionPersistence"), "the native fixture requires its durable session backend");
+  inspectSourceCandidateRuntime(ctx, { mode: controls.nativeSubagent ? "stock" : "default", deliveryFenceReady: !controls.lateSpawn,
+    deepworkMounted: controls.globalConfig?.modules?.deepwork?.enabled !== false });
   await ctx.credentials.set(credentialRef("DSMM_ROOT_FICTIONAL"), "fictional-loopback-key");
   let sequence = 0;
   const handles = [];
