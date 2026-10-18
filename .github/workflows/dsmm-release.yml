@@ -59,7 +59,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Publish to npm
-        run: npm publish "$RUNNER_TEMP/dsmm-release/dsmm-dsmm-${DSMM_VERSION}.tgz" --access public --registry=https://registry.npmjs.org/ --ignore-scripts --provenance --fetch-retries=0
+        working-directory: ${{ runner.temp }}/dsmm-release
+        run: npm publish "./dsmm-dsmm-${DSMM_VERSION}.tgz" --access public --registry=https://registry.npmjs.org/ --ignore-scripts --provenance --fetch-retries=0
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
