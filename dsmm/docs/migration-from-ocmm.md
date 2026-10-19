@@ -9,7 +9,7 @@ Model selection, authentication, permissions, session ownership and package load
 | ocmm area | DSMM contract |
 | --- | --- |
 | Deepwork workflow | Risk-based discovery and planning adapted to native tools. Complex product behavior retains orchestrator-owned planning/criticism; bounded routine work doesn't require a ceremonial approval loop. |
-| Roles and categories | 11 base roles and 11 categories with canonical `dsmm-*` IDs. Cross-cutting defaults off. Only enabled Orchestrator, Builder and opted-in Planner are standing-root eligible. |
+| Roles and categories | 11 base roles and 11 categories with canonical `dsmm-*` IDs. Cross-cutting defaults off. Only the Orchestrator is standing-root eligible; other roles are internal delegation targets. |
 | Skills | Fourteen configurable lazy native skills, discovered through metadata and loaded through `get`/`resourceBase`, not full bodies injected every turn. |
 | Model routing | Generic native capabilities, `modelParameters`, role primary/fallback routes and explicit invocation levels. Ordinary root model/effort stays native-owned. |
 | Settings | Sparse Global/native deployment layers plus independent named Profiles. Save, future default, mode and native model selection have independent capabilities; live overlay Apply is unavailable. |

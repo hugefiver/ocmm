@@ -23,7 +23,7 @@ for (const managed of [false, true]) {
   for (const name of [
     `native readonly own-layer-only ${kind} bash/pwsh composes without masking local tools and preserves runtime denial`,
     `native Full Access readonly child blocks real ${kind} bash/pwsh before execution, direct and AgentLoop`,
-    `native Full Access readonly Root/DW-off/scope-off rejects ${kind} shell; ordinary switchback and unknown-policy controls execute`,
+    `native Full Access readonly child/scope-off rejects ${kind} shell; ordinary controls execute`,
     `live reviewer keeps real ${kind} shell denial across parent off and future defaults; retired owner cannot recover it`
   ]) {
     test(name, t => {

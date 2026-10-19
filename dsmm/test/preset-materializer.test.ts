@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -70,14 +70,14 @@ function snapshotDirectory(directory: string): ReadonlyMap<string, string> {
   return new Map(readdirSync(directory).sort().map((entry) => [entry, readFileSync(join(directory, entry), "utf8")]));
 }
 
-function linkedPathFilesystem(linkedPath: string) {
+function linkedPathFilesystem(linkedPath: string, file: boolean) {
   return {
     lstatSync(path: string) {
       if (path === linkedPath) {
         return {
           isSymbolicLink: () => true,
-          isDirectory: () => true,
-          isFile: () => false
+          isDirectory: () => !file,
+          isFile: () => file
         };
       }
       return lstatSync(path);
@@ -85,76 +85,66 @@ function linkedPathFilesystem(linkedPath: string) {
   };
 }
 
-function createLinkOrFilesystem(linkPath: string, destination: string, type: "file" | "junction", fallback: () => void) {
-  try {
-    symlinkSync(destination, linkPath, type);
-    return undefined;
-  } catch {
-    fallback();
-    return linkedPathFilesystem(linkPath);
-  }
-}
-
 function tempSiblings(root: string, roleId: string): readonly string[] {
   return readdirSync(root).filter((entry) => entry.startsWith(`.${roleId}.dsmm-`));
 }
 
-test("reconcileRolePresets materializes enabled roles and skips disabled roles", () => {
+test("reconcileRolePresets materializes only the dispatcher and removes other owned role directories", () => {
   usingFixture((root) => {
     const settings = resolveConfig({ presets: { materialize: true }, roles: { "dsmm-reviewer": false } });
+    const reviewer = writeManagedRole(root, "dsmm-reviewer", currentMarker("dsmm-reviewer"));
 
     reconcileRolePresets({ root, settings });
 
+    assert.equal(existsSync(reviewer), false, "a non-dispatcher owned directory is removed");
+    const dispatcher = roleDefinition("dsmm-orchestrator");
+    const presetDirectory = join(root, dispatcher.id);
+    assert.equal(readFileSync(join(presetDirectory, "agent.cordis.yml"), "utf8"), renderAgentCordis(dispatcher, enabledSkillNames(settings), DSMM_ROLES.filter((candidate) => settings.roles[candidate.id]).map((candidate) => candidate.id)));
+    assert.equal(readFileSync(join(presetDirectory, "preset.yml"), "utf8"), renderPresetMetadata(dispatcher));
+    assert.equal(readFileSync(join(presetDirectory, DSMM_MANAGED_PRESET_MARKER), "utf8"), currentMarker(dispatcher.id));
     for (const role of DSMM_ROLES) {
-      const presetDirectory = join(root, role.id);
-
-      if (!settings.roles[role.id]) {
-        assert.equal(existsSync(presetDirectory), false, "disabled role directory is absent");
-        continue;
-      }
-
-      assert.equal(readFileSync(join(presetDirectory, "agent.cordis.yml"), "utf8"), renderAgentCordis(role, enabledSkillNames(settings), DSMM_ROLES.filter((candidate) => settings.roles[candidate.id]).map((candidate) => candidate.id)));
-      assert.equal(readFileSync(join(presetDirectory, "preset.yml"), "utf8"), renderPresetMetadata(role));
-      assert.equal(readFileSync(join(presetDirectory, DSMM_MANAGED_PRESET_MARKER), "utf8"), currentMarker(role.id));
+      if (role.id === dispatcher.id) continue;
+      assert.equal(existsSync(join(root, role.id)), false, `${role.id} is not materialized`);
     }
-    const planner = join(root, "dsmm-planner"), original = snapshotDirectory(planner);
+    const original = snapshotDirectory(presetDirectory);
     const off = resolveConfig({ modules: { deepwork: { enabled: false } }, presets: { materialize: false } });
     reconcileRolePresets({ root, settings: off });
-    assert.deepEqual(snapshotDirectory(planner), original, "module off reconciliation preserves the existing export");
+    assert.deepEqual(snapshotDirectory(presetDirectory), original, "module off reconciliation preserves the existing export");
     materializeRolePresets({ root, settings: off });
-    assert.deepEqual(snapshotDirectory(planner), original, "module off must not delete or rewrite previously materialized assets");
-    assert.equal(existsSync(join(root, "dsmm-reviewer")), false, "module off must not export a newly enabled role");
+    assert.deepEqual(snapshotDirectory(presetDirectory), original, "module off must not delete or rewrite previously materialized assets");
   });
 });
 
-test("reconcileRolePresets refuses an existing unmarked known role before changing it", () => {
+test("reconcileRolePresets refuses an unmarked dispatcher directory and never claims foreign non-dispatcher roles", () => {
   usingFixture((root) => {
-    const reviewerDirectory = join(root, "dsmm-reviewer");
-    const userFile = join(reviewerDirectory, "user.txt");
-    mkdirSync(reviewerDirectory, { recursive: true });
+    const dispatcherDirectory = join(root, "dsmm-orchestrator");
+    const userFile = join(dispatcherDirectory, "user.txt");
+    mkdirSync(dispatcherDirectory, { recursive: true });
     writeFileSync(userFile, "keep this user content\n", "utf8");
+    const reviewer = writeManagedRole(root, "dsmm-reviewer", currentMarker("dsmm-reviewer"));
+    const reviewerBefore = snapshotDirectory(reviewer);
 
     assert.throws(
       () => reconcileRolePresets({ root, settings: resolveConfig({ presets: { materialize: true } }) }),
       /foreign|managed|marker/i
     );
     assert.equal(readFileSync(userFile, "utf8"), "keep this user content\n");
-    assert.equal(existsSync(join(reviewerDirectory, "agent.cordis.yml")), false);
-    assert.equal(existsSync(join(reviewerDirectory, "preset.yml")), false);
+    assert.equal(existsSync(join(dispatcherDirectory, "agent.cordis.yml")), false);
+    assert.deepEqual(snapshotDirectory(reviewer), reviewerBefore, "a foreign non-dispatcher directory stays untouched");
   });
 });
 
 test("reconcileRolePresets rejects malformed or role-mismatched markers without changing foreign content", () => {
   for (const [name, marker] of [
     ["wrong role", currentMarker("dsmm-planner")],
-    ["malformed", "dsmm-managed-preset/v1\nrole=dsmm-reviewer\nextra=true\n"]
+    ["malformed", "dsmm-managed-preset/v1\nrole=dsmm-orchestrator\nextra=true\n"]
   ]) {
     usingFixture((root) => {
-      const directory = writeManagedRole(root, "dsmm-reviewer", marker, "user agent\n", "user preset\n");
+      const directory = writeManagedRole(root, "dsmm-orchestrator", marker, "user agent\n", "user preset\n");
       const before = snapshotDirectory(directory);
 
       assert.throws(
-        () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-reviewer") }),
+        () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-orchestrator") }),
         /foreign|marker|managed/i,
         `${name} marker is foreign`
       );
@@ -165,15 +155,14 @@ test("reconcileRolePresets rejects malformed or role-mismatched markers without 
 
 test("reconcileRolePresets rejects linked role paths and linked managed files without changing destinations", () => {
   usingFixture((root) => {
-    const external = writeManagedRole(join(root, "external"), "dsmm-reviewer", currentMarker("dsmm-reviewer"));
-    const linkedDirectory = join(root, "dsmm-reviewer");
-    const filesystem = createLinkOrFilesystem(linkedDirectory, external, "junction", () => {
-      writeManagedRole(root, "dsmm-reviewer", currentMarker("dsmm-reviewer"));
-    });
+    const external = writeManagedRole(join(root, "external"), "dsmm-orchestrator", currentMarker("dsmm-orchestrator"));
+    const linkedDirectory = join(root, "dsmm-orchestrator");
+    // Node 26 reports an inside-root junction as a plain directory, so the refusal
+    // is verified through the link-reporting filesystem seam.
     const before = snapshotDirectory(external);
 
     assert.throws(
-      () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-reviewer"), filesystem }),
+      () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-orchestrator"), filesystem: linkedPathFilesystem(linkedDirectory, false) }),
       /link|symbolic|managed/i
     );
     assert.deepEqual(snapshotDirectory(external), before, "linked role destination remains untouched");
@@ -181,31 +170,26 @@ test("reconcileRolePresets rejects linked role paths and linked managed files wi
 
   for (const fileName of [DSMM_MANAGED_PRESET_MARKER, "agent.cordis.yml", "preset.yml"]) {
     usingFixture((root) => {
-      const directory = writeManagedRole(root, "dsmm-reviewer", currentMarker("dsmm-reviewer"));
+      const directory = writeManagedRole(root, "dsmm-orchestrator", currentMarker("dsmm-orchestrator"));
       const linkPath = join(directory, fileName);
-      const destination = join(root, `${fileName}.destination`);
       const original = readFileSync(linkPath, "utf8");
-      rmSync(linkPath);
-      writeFileSync(destination, `destination for ${fileName}\n`, "utf8");
-      const filesystem = createLinkOrFilesystem(linkPath, destination, "file", () => writeFileSync(linkPath, original, "utf8"));
-      const destinationBefore = readFileSync(destination, "utf8");
 
       assert.throws(
-        () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-reviewer"), filesystem }),
+        () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-orchestrator"), filesystem: linkedPathFilesystem(linkPath, true) }),
         /link|symbolic|managed/i,
         `linked ${fileName} is rejected`
       );
-      assert.equal(readFileSync(destination, "utf8"), destinationBefore, `linked ${fileName} destination remains untouched`);
+      assert.equal(readFileSync(linkPath, "utf8"), original, `linked ${fileName} remains untouched`);
     });
   }
 });
 
 test("reconcileRolePresets rejects a canonical role path outside the canonical root", () => {
   usingFixture((root) => {
-    const directory = writeManagedRole(root, "dsmm-reviewer", currentMarker("dsmm-reviewer"));
+    const directory = writeManagedRole(root, "dsmm-orchestrator", currentMarker("dsmm-orchestrator"));
     const outsideParent = mkdtempSync(join(tmpdir(), "dsmm-preset-outside-"));
     try {
-      const outside = join(outsideParent, "dsmm-reviewer");
+      const outside = join(outsideParent, "dsmm-orchestrator");
       mkdirSync(outside, { recursive: true });
       const before = snapshotDirectory(directory);
       const filesystem = {
@@ -215,7 +199,7 @@ test("reconcileRolePresets rejects a canonical role path outside the canonical r
       };
 
       assert.throws(
-        () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-reviewer"), filesystem }),
+        () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-orchestrator"), filesystem }),
         /outside|containment|root/i
       );
       assert.deepEqual(snapshotDirectory(directory), before);
@@ -227,20 +211,20 @@ test("reconcileRolePresets rejects a canonical role path outside the canonical r
 
 test("reconcileRolePresets updates an exact current role and refuses current roles with extra entries", () => {
   usingFixture((root) => {
-    const directory = writeManagedRole(root, "dsmm-reviewer", currentMarker("dsmm-reviewer"));
+    const directory = writeManagedRole(root, "dsmm-orchestrator", currentMarker("dsmm-orchestrator"));
 
-    reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-reviewer") });
+    reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-orchestrator") });
 
-    assertExactManagedRole(directory, "dsmm-reviewer");
+    assertExactManagedRole(directory, "dsmm-orchestrator");
   });
 
   usingFixture((root) => {
-    const directory = writeManagedRole(root, "dsmm-reviewer", currentMarker("dsmm-reviewer"));
+    const directory = writeManagedRole(root, "dsmm-orchestrator", currentMarker("dsmm-orchestrator"));
     writeFileSync(join(directory, "user.txt"), "do not overwrite\n", "utf8");
     const before = snapshotDirectory(directory);
 
     assert.throws(
-      () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-reviewer") }),
+      () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-orchestrator") }),
       /foreign|extra|managed/i
     );
     assert.deepEqual(snapshotDirectory(directory), before, "current marker with a user entry is not claimed");
@@ -249,20 +233,20 @@ test("reconcileRolePresets updates an exact current role and refuses current rol
 
 test("reconcileRolePresets migrates only an exact safe legacy role", () => {
   usingFixture((root) => {
-    const directory = writeManagedRole(root, "dsmm-reviewer", LEGACY_MARKER, "legacy agent\n", "legacy preset\n");
+    const directory = writeManagedRole(root, "dsmm-orchestrator", LEGACY_MARKER, "legacy agent\n", "legacy preset\n");
 
-    reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-reviewer") });
+    reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-orchestrator") });
 
-    assertExactManagedRole(directory, "dsmm-reviewer");
+    assertExactManagedRole(directory, "dsmm-orchestrator");
   });
 
   usingFixture((root) => {
-    const directory = writeManagedRole(root, "dsmm-reviewer", LEGACY_MARKER, "legacy agent\n", "legacy preset\n");
+    const directory = writeManagedRole(root, "dsmm-orchestrator", LEGACY_MARKER, "legacy agent\n", "legacy preset\n");
     writeFileSync(join(directory, "user.txt"), "keep\n", "utf8");
     const before = snapshotDirectory(directory);
 
     assert.throws(
-      () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-reviewer") }),
+      () => reconcileRolePresets({ root, settings: settingsWithOnlyRoleEnabled("dsmm-orchestrator") }),
       /foreign|extra|managed/i
     );
     assert.deepEqual(snapshotDirectory(directory), before, "legacy directory with extras is never migrated");
@@ -290,7 +274,7 @@ test("reconcileRolePresets removes only disabled known current or safe legacy ro
 
 test("reconcileRolePresets publishes new role directories atomically and cleans private siblings on failure", () => {
   usingFixture((root) => {
-    const roleId = "dsmm-reviewer";
+    const roleId = "dsmm-orchestrator";
     const finalDirectory = join(root, roleId);
     const writes: string[] = [];
     let renamed = false;
@@ -319,7 +303,7 @@ test("reconcileRolePresets publishes new role directories atomically and cleans 
 
   for (const failure of ["write", "rename"] as const) {
     usingFixture((root) => {
-      const roleId = "dsmm-reviewer";
+      const roleId = "dsmm-orchestrator";
       const finalDirectory = join(root, roleId);
       const filesystem = failure === "write"
         ? {
@@ -344,35 +328,26 @@ test("reconcileRolePresets publishes new role directories atomically and cleans 
   }
 });
 
-test("reconcileRolePresets removes disabled role directories only when dsmm-marked", () => {
+test("reconcileRolePresets removes non-dispatcher owned directories only when dsmm-marked", () => {
   usingFixture((root) => {
-    const reviewerDirectory = join(root, "dsmm-reviewer");
-    const clarifierDirectory = join(root, "dsmm-clarifier");
-
-    reconcileRolePresets({ root, settings: resolveConfig({ presets: { materialize: true } }) });
+    const reviewerDirectory = writeManagedRole(root, "dsmm-reviewer", currentMarker("dsmm-reviewer"));
+    const clarifierDirectory = writeManagedRole(root, "dsmm-clarifier", currentMarker("dsmm-clarifier"));
     rmSync(join(reviewerDirectory, DSMM_MANAGED_PRESET_MARKER));
 
-    reconcileRolePresets({
-      root,
-      settings: resolveConfig({
-        presets: { materialize: true },
-        roles: { "dsmm-clarifier": false, "dsmm-reviewer": false }
-      })
-    });
+    reconcileRolePresets({ root, settings: resolveConfig({ presets: { materialize: true } }) });
 
-    assert.equal(existsSync(clarifierDirectory), false, "current disabled role directory is removed");
-    assert.equal(existsSync(reviewerDirectory), true, "unmarked disabled role directory is preserved");
+    assert.equal(existsSync(clarifierDirectory), false, "marked non-dispatcher owned directory is removed");
+    assert.equal(existsSync(reviewerDirectory), true, "unmarked non-dispatcher directory is preserved");
   });
 });
 
 test("reconcileRolePresets with materialize false removes known owned directories only", () => {
   usingFixture((root) => {
+    reconcileRolePresets({ root, settings: resolveConfig({ presets: { materialize: true } }) });
     const foreignDirectory = join(root, "custom-preset");
     const legacyDirectory = join(root, "dsmm-legacy-role");
-
-    reconcileRolePresets({ root, settings: resolveConfig({ presets: { materialize: true } }) });
     writeFileSync(join(root, "custom-file.txt"), "keep\n", "utf8");
-    rmSync(join(root, "dsmm-planner", DSMM_MANAGED_PRESET_MARKER));
+    rmSync(join(root, "dsmm-orchestrator", DSMM_MANAGED_PRESET_MARKER));
     mkdirSync(foreignDirectory, { recursive: true });
     writeFileSync(join(foreignDirectory, "preset.yml"), "id: custom-preset\n", "utf8");
     mkdirSync(legacyDirectory, { recursive: true });
@@ -380,8 +355,7 @@ test("reconcileRolePresets with materialize false removes known owned directorie
 
     reconcileRolePresets({ root, settings: resolveConfig({ presets: { materialize: false } }) });
 
-    assert.equal(existsSync(join(root, "dsmm-orchestrator")), false, "marked dsmm preset is removed");
-    assert.equal(existsSync(join(root, "dsmm-planner")), true, "unmarked dsmm directory is preserved");
+    assert.equal(existsSync(join(root, "dsmm-orchestrator")), true, "unmarked dsmm directory is preserved");
     assert.equal(existsSync(legacyDirectory), true, "unknown legacy-marked directory is preserved");
     assert.equal(existsSync(foreignDirectory), true, "unmarked custom directory is preserved");
     assert.equal(existsSync(join(root, "custom-file.txt")), true, "non-directory root files are preserved");

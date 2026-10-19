@@ -47,20 +47,24 @@ test("MAIN never enrolls a retained unbound Agent merely because it is resident"
   } finally { await f.dispose(); }
 });
 
-test("MAIN read-only policy fences own-layer aliases and re-registered allowed tool names", async () => {
-  const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true } }, { nativePresets: true });
+test("read-only child policy fences own-layer aliases and re-registered allowed tool names", async () => {
+  const f = await nativeRoutingFixture({}, { nativePresets: true });
   const disposers = [];
   try {
-    const root = await f.create({ agentPreset: "dsmm-planner" }), tools = root.ctx.tools;
-    const execute = name => tools.execute({ agent: root, name, callId: ToolCallId(`readonly-${name}`), arguments: {}, signal: new AbortController().signal });
-    assert.ok(tools.get("read", root));
-    let effects = 0;
-    for (const name of ["write_alias", "read"]) {
-      disposers.push(tools.register({ name, description: "Fixture effect", parameters: {},
-        output: { schema: { type: "string" }, render: value => [{ type: "text", text: value }] },
-        async execute() { effects++; return "effect"; } }));
-      assert.equal((await execute(name)).isError, true);
-    }
-    assert.equal(effects, 0);
+    const root = await f.create({ agentPreset: "dsmm-orchestrator" });
+    const child = await f.createAuxiliary("dsmm-reviewer", undefined, "one-shot", root);
+    try {
+      const tools = f.ctx.get("agentPresets").serviceFor(child, "tools") ?? child.ctx.tools;
+      const execute = name => tools.execute({ agent: child, name, callId: ToolCallId(`readonly-${name}`), arguments: {}, signal: new AbortController().signal });
+      assert.ok(tools.get("read", child));
+      let effects = 0;
+      for (const name of ["write_alias", "read"]) {
+        disposers.push(tools.register({ name, description: "Fixture effect", parameters: {},
+          output: { schema: { type: "string" }, render: value => [{ type: "text", text: value }] },
+          async execute() { effects++; return "effect"; } }));
+        assert.equal((await execute(name)).isError, true);
+      }
+      assert.equal(effects, 0);
+    } finally { await f.releaseAuxiliary(child); }
   } finally { for (const dispose of disposers.reverse()) dispose(); await f.dispose(); }
 });

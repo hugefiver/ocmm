@@ -99,7 +99,6 @@ export const deploymentFieldLabels: Record<string, [string, string]> = {
   subagents: ["Subagents", "子 Agent"], lsp: ["LSP", "LSP"], presets: ["Preset materialization", "预设物化"],
   promptOrder: ["Prompt order", "提示词顺序"], defaultActive: ["Default Deepwork mode", "默认 Deepwork 模式"],
   enabled: ["Enabled", "启用"], materialize: ["Materialize presets", "物化预设"], scope: ["Guard scope", "保护范围"],
-  plannerRootEnabled: ["Planner main-chat preset (restart required)", "Planner 主聊天预设（需重启）"],
   shellCommandSafety: ["Shell command safety", "Shell 命令安全"], gitWriteGuard: ["Git write policy", "Git 写入策略"],
   toolOutputTruncation: ["Tool output truncation", "工具输出截断"], maxInlineBytes: ["Inline byte limit", "内联字节上限"],
   planFormatValidation: ["Plan format validation", "计划格式校验"], questionLabelHelper: ["Question labels", "提问标签"], maxLabelChars: ["Label character limit", "标签字符上限"], todoDisciplineHelper: ["Todo discipline", "待办纪律"],

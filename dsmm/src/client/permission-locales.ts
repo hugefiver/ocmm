@@ -1,15 +1,5 @@
 export const PERMISSIONS_NS = "settings.dsmm-permissions";
 export const permissionEn = {
-  childPermissions: "Permissions", childEnable: "Allow this child to ask me for approval", childRevoke: "Revoke child approvals",
-  childPermissionBoundary: "Future approvals for this live child only. Root grants, siblings and future children are unchanged. Role and sandbox limits remain. Revocation does not cancel an already pending native request or replay work.",
-  childUnavailable: "Verified live ownership, policy or approval route is unavailable. Refresh; retired children cannot be revived here.",
-  childNoPending: "No native approval is pending for this child.", childEnabled: "This child may request approval.", childDisabled: "Interactive approval is off for this child.",
-  childUnconfirmed: "The child permission result is unavailable or unconfirmed. Refresh before retrying.", childProject: "Project", childRole: "Role ceiling", childReadOnly: "Read-only",
-  temporaryChildSession: "This child task", temporaryWebBoundary: "Exact scheme, host and port for native Web Fetch only; no subdomains, shell sockets, search, model or MCP access. Existing redirect, DNS, proxy and Fake-IP restrictions remain. A proxy path does not provide local DNS proof.",
-  temporaryTitle: "Temporary approvals", temporaryDuration: "Approval duration", temporaryApprove: "Approve", temporaryRevoke: "Revoke", temporaryRefresh: "Refresh", temporaryEmpty: "No active temporary approvals.",
-  "temporary:once": "Once only", "temporary:session": "This session", "temporary:15min": "15 minutes", "temporary:1h": "1 hour",
-  temporaryBoundary: "Selected tool scope in this live session only; no child inheritance or sandbox upgrade. Revocation stops future handoffs, not effects already started. File scopes do not confine shell processes or guarantee final-inode/hardlink isolation.",
-  temporaryUnavailable: "Temporary approval is unavailable or unconfirmed. Refresh, or use the native once-only prompt. No operation is replayed.",
   title: "Permission control", rules: "Global permission rules",
   nativeApproval: "Approve commands in the native prompt. Allow approves only that call.",
   root: "Selected main session", noRoot: "Select a main session to view its permission rules.",
@@ -61,16 +51,6 @@ export const permissionEn = {
 };
 export type PermissionLocaleKey = keyof typeof permissionEn;
 export const permissionZh: Record<PermissionLocaleKey, string> = {
-  childPermissions: "权限", childEnable: "允许此子任务向我请求批准", childRevoke: "撤销子任务批准",
-  childPermissionBoundary: "仅影响此 live 子任务的后续审批，不继承 Root 批准，不影响同级或未来子任务。角色与沙箱上限不变。撤销不取消已经 pending 的原生请求，也不重放任务。",
-  childUnavailable: "可信 live ownership、策略或审批入口不可用。请刷新；这里不能复活已结束的子任务。",
-  childNoPending: "此子任务当前没有原生待审批请求。", childEnabled: "此子任务可请求批准。", childDisabled: "此子任务的交互审批已关闭。",
-  childUnconfirmed: "子任务权限结果不可用或待确认。请刷新后再重试。", childProject: "项目", childRole: "角色上限", childReadOnly: "只读",
-  temporaryChildSession: "本次子任务", temporaryWebBoundary: "仅限原生 Web Fetch 的精确 scheme、主机与端口，不含子域、Shell socket、搜索、模型或 MCP。原有重定向、DNS、代理和 Fake-IP 限制保留；代理路径不提供本地 DNS 证明。",
-  temporaryTitle: "临时批准", temporaryDuration: "批准时长", temporaryApprove: "批准", temporaryRevoke: "撤销", temporaryRefresh: "刷新", temporaryEmpty: "没有生效中的临时批准。",
-  "temporary:once": "仅本次", "temporary:session": "本次会话", "temporary:15min": "15 分钟", "temporary:1h": "1 小时",
-  temporaryBoundary: "仅限当前 live 会话的所选工具范围，不传给子任务、不提升沙箱。撤销阻止后续交接，不回滚已经开始的效果。文件范围不约束 Shell 进程，也不保证最终 inode／hardlink 隔离。",
-  temporaryUnavailable: "临时批准不可用或结果待确认。请刷新，或使用原生仅本次审批；不会自动重放操作。",
   title: "权限控制", rules: "全局权限规则",
   nativeApproval: "请在原生提示中批准命令；「允许」仅批准本次调用。",
   root: "所选主会话", noRoot: "请选择主会话以查看权限规则。", child: "请切换到此子会话的主会话后编辑全局规则。",

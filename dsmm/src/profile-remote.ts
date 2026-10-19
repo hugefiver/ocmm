@@ -402,8 +402,7 @@ function readOnlySettingsData(value: unknown): Record<string, unknown> {
     for (const [key, value] of Object.entries(env)) if (!/^variable-[1-9][0-9]*$/u.test(key) || value !== "<redacted>") fail("private environment");
   }
   if (settings.presets !== undefined) {
-    const presets = object(settings.presets, ["materialize"], ["root", "plannerRootEnabled"]);
-    if (Object.hasOwn(presets, "plannerRootEnabled")) boolean(presets.plannerRootEnabled, "presets.plannerRootEnabled");
+    const presets = object(settings.presets, ["materialize"], ["root"]);
     if (presets.root !== undefined && presets.root !== "<configured>") fail("private directory");
   }
   if (settings.runtimeRecovery !== undefined) {

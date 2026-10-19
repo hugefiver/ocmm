@@ -56,8 +56,8 @@ declare module "@deepseek-ai/cordis" {
   }
 }
 
-test("first real DW compositions expose scoped native compact/plan/interaction without automatic model calls; planner stays read-only and quick keeps native write access", async () => {
-  const f = await nativeRoutingFixture({ roles: { "dsmm-planner": true, "dsmm-quick": true }, presets: { plannerRootEnabled: true } }, { nativePresets: true, nativeFs: true, nativeJobs: true, async beforeDsmm(ctx) {
+test("first real DW compositions expose scoped native compact/plan/interaction without automatic model calls; children keep their own ceilings (planner read-only, quick native write)", async () => {
+  const f = await nativeRoutingFixture({ roles: { "dsmm-planner": true, "dsmm-quick": true } }, { nativePresets: true, nativeFs: true, nativeJobs: true, async beforeDsmm(ctx) {
     const denied = async (): Promise<never> => { throw new Error("fixture forbids external web/shell/subprocess work"); };
     ctx.provide("web", { search: denied, fetch: denied });
     ctx.provide("subprocess", { spawn: denied });
@@ -67,7 +67,7 @@ test("first real DW compositions expose scoped native compact/plan/interaction w
   try {
     const presets = f.ctx.get("agentPresets")!;
     const commands = f.ctx.get("commands") as NativeCommands;
-    const roots = await Promise.all(["dsmm-orchestrator", "dsmm-builder", "dsmm-planner", "dsmm-builder"].map((agentPreset) => f.create({ agentPreset, cwd: f.profileDir })));
+    const roots = await Promise.all(["dsmm-orchestrator", "dsmm-orchestrator"].map((agentPreset) => f.create({ agentPreset, cwd: f.profileDir })));
     const compactions: unknown[] = [];
     const planners: NativePlanMode[] = [];
     for (const agent of roots) {
@@ -92,35 +92,36 @@ test("first real DW compositions expose scoped native compact/plan/interaction w
     }
     assert.ok(compactions.every(Boolean));
     const implementation = (service: object) => Reflect.get(service, symbols.original) ?? service;
-    assert.equal(new Set(compactions.map((service) => implementation(service as object))).size, 3, "three preset realms, shared only by two Builders");
-    assert.equal(new Set(planners.map(implementation)).size, 3);
+    assert.equal(new Set(compactions.map((service) => implementation(service as object))).size, 1, "one dispatcher preset realm, shared by both roots without leaking to the Host");
+    assert.equal(new Set(planners.map(implementation)).size, 1);
     assert.equal(f.ctx.get("compaction"), undefined, "no compaction service leaks to the Host realm");
     assert.equal(f.ctx.get("planMode"), undefined, "no plan service leaks to the Host realm");
-    const [orchestrator, builder, planner, otherBuilder] = roots;
+    const [first, second] = roots;
     const todos = [
       { content: "[preset] [inspect] to [scope defaults] - expect [native rows]", status: "in_progress" },
       { content: "[preset] [verify] to [retain authority] - expect [no mutation]", status: "in_progress" }
     ];
-    const tools = presets.serviceFor(builder, "tools") ?? builder.ctx.get("tools")!;
-    const result = await tools.execute({ agent: builder, name: "todo_write", arguments: { todos }, callId: ToolCallId("native-default-todo"), signal: new AbortController().signal });
+    const tools = presets.serviceFor(first, "tools") ?? first.ctx.get("tools")!;
+    const result = await tools.execute({ agent: first, name: "todo_write", arguments: { todos }, callId: ToolCallId("native-default-todo"), signal: new AbortController().signal });
     assert.equal(result.isError, false, JSON.stringify(result));
-    assert.deepEqual(builder.session.snapshotEvents().filter((event) => event.type === "todo/write").at(-1)?.data.todos, todos);
-    assert.equal(otherBuilder.session.snapshotEvents().some((event) => event.type === "todo/write"), false, "shared preset never shares the session's todo list");
-    assert.deepEqual((await commands.execute(planner, "/plan", [], new AbortController().signal))?.result.kind, "success");
-    assert.equal(planners[2].get(planner).active, true);
-    assert.equal(planners[0].get(orchestrator).active, false);
-    assert.equal(planners[1].get(otherBuilder).active, false);
-    await commands.execute(planner, "/plan off", [], new AbortController().signal);
-    const plannerTools = presets.serviceFor(planner, "tools") ?? planner.ctx.get("tools")!;
-    const sentinel = join(f.profileDir, "planner-denied-sentinel");
-    const denied = await plannerTools.execute({ agent: planner, name: "write", arguments: { file_path: sentinel, content: "must not execute" }, callId: ToolCallId("native-default-planner-denied"), signal: new AbortController().signal });
-    assert.equal(denied.isError, true);
-    assert.equal(existsSync(sentinel), false);
+    assert.deepEqual(first.session.snapshotEvents().filter((event) => event.type === "todo/write").at(-1)?.data.todos, todos);
+    assert.equal(second.session.snapshotEvents().some((event) => event.type === "todo/write"), false, "shared preset never shares the session's todo list");
+    await commands.execute(first, "/plan", [], new AbortController().signal);
+    assert.equal(planners[0].get(first).active, true);
+    assert.equal(planners[1].get(second).active, false);
     assert.equal(f.adapter.calls.length, 0, "human commands/pruning/todo do not invoke an LLM");
-    const quick = await f.createAuxiliary("dsmm-quick", undefined, "one-shot", builder);
+    const planner = await f.createAuxiliary("dsmm-planner", undefined, "one-shot", first);
     try {
-      assert.equal(presets.composedPreset(quick.ctx), "dsmm-quick");
-      assert.equal(presets.serviceFor(quick, "compaction"), undefined, "the short child uses its registered target preset rather than inheriting root-only compaction");
+      const plannerTools = presets.serviceFor(planner, "tools") ?? planner.ctx.get("tools")!;
+      const sentinel = join(f.profileDir, "planner-denied-sentinel");
+      const denied = await plannerTools.execute({ agent: planner, name: "write", arguments: { file_path: sentinel, content: "must not execute" }, callId: ToolCallId("native-default-planner-denied"), signal: new AbortController().signal });
+      assert.equal(denied.isError, true);
+      assert.equal(existsSync(sentinel), false);
+    } finally { await f.releaseAuxiliary(planner); }
+    const quick = await f.createAuxiliary("dsmm-quick", undefined, "one-shot", first);
+    try {
+      assert.equal(presets.composedPreset(quick.ctx), presets.composedPreset(first.ctx), "a delegation child shares its parent's standing composition");
+      assert.notEqual(presets.serviceFor(quick, "compaction"), undefined, "the shared standing composition serves every delegated child alike");
       const path = join(f.profileDir, "quick-write-proof");
       const written = await quick.ctx.get("tools")!.execute({ agent: quick, name: "write", arguments: { file_path: path, content: "QUICK_WRITE_PROOF" }, callId: ToolCallId("native-default-quick-write"), signal: new AbortController().signal });
       assert.equal(written.isError, false, JSON.stringify(written));

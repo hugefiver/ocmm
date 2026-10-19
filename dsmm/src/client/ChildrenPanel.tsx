@@ -1,5 +1,4 @@
 import { useId, useRef } from "react";
-import type { ReactNode } from "react";
 import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { InjectFace, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { DsmmInvocationView, RoleControlAvailability, RoleControlChildView } from "../role-control-types.js";
@@ -10,7 +9,7 @@ import type { ChildrenLocaleKey } from "./children-locales.js";
 
 type Locale = PropsLocale<"conversation.dsmm-children">;
 export type ChildrenInjected = ChildrenActions & { hooks: { children: ChildrenController["store"] } };
-export type ChildrenPanelProps = InjectFace<ChildrenInjected> & Locale & { sessionId?: string; renderChildPermissions?: (child: RoleControlChildView) => ReactNode };
+export type ChildrenPanelProps = InjectFace<ChildrenInjected> & Locale & { sessionId?: string };
 export function ControlAvailability({ value, label, t }: Locale & { value?: RoleControlAvailability; label: ChildrenLocaleKey }) {
   return <div className="dsmm-availability"><p>{t(label)}: {t(value?.enabled === true ? "enabled" : "disabled")}</p>
     {value?.enabled !== true && <p className="dsmm-hint">{t(`reason:${value?.reason ?? "unavailable"}`)}</p>}</div>;
@@ -95,7 +94,7 @@ export function ChildComposer({ child, state, actions, t }: Locale & { child: Ro
     <p className="dsmm-status" role="status" aria-live="polite">{pending ? t("pending") : draft.imageBusy ? t("imageReading") : ""}</p>
   </form>;
 }
-export function ChildDetails({ child, state, actions, t, inspection = false, renderChildPermissions }: Locale & { child: RoleControlChildView; state: ChildrenSnapshot; actions: ChildrenActions; inspection?: boolean; renderChildPermissions?: ChildrenPanelProps["renderChildPermissions"] }) {
+export function ChildDetails({ child, state, actions, t, inspection = false }: Locale & { child: RoleControlChildView; state: ChildrenSnapshot; actions: ChildrenActions; inspection?: boolean }) {
   return <fieldset><legend>{child.label?.trim() ? child.label : child.id}</legend>
     <p>{t("childId")}: {child.id}</p><p>{t("parentId")}: {child.parentSessionId}</p><p>{t("mode")}: {child.mode}</p><p>{t("activity")}: {child.activity}</p>
     {(inspection || child.readonly) && <p>{t("readonly")}</p>}{child.mode === "one-shot" && <p className="dsmm-hint">{t("oneShot")}</p>}
@@ -103,7 +102,6 @@ export function ChildDetails({ child, state, actions, t, inspection = false, ren
     {(!inspection || !child.controls.prompt.enabled) && <ControlAvailability value={child.controls.prompt} label="promptAvailability" t={t} />}
     {(!inspection || !child.controls.interrupt.enabled) && <ControlAvailability value={child.controls.interrupt} label="interruptAvailability" t={t} />}
     {!inspection && child.mode === "continuable" && !child.readonly && <ChildComposer child={child} state={state} actions={actions} t={t} />}
-    {!inspection && child.mode === "continuable" && !child.readonly && renderChildPermissions?.(child)}
     {!inspection && <><Issue value={state.issues.get(childActionKey(child.id))} t={t} /><Outcome value={state.outcomes.get(childActionKey(child.id))} t={t} /></>}
   </fieldset>;
 }
@@ -126,7 +124,7 @@ export function ChildrenPanel(props: ChildrenPanelProps) {
       </section>
       <p className="dsmm-hint">{t("backgroundHint")}</p>
       <section className="dsmm-zone" aria-label={t("children")}><h3>{t("children")}</h3>{data.children.length === 0 ? <p className="dsmm-hint">{t("emptyChildren")}</p>
-        : data.children.map(child => <ChildDetails key={child.id} child={child} state={state} actions={props} t={t} renderChildPermissions={props.renderChildPermissions} />)}</section>
+        : data.children.map(child => <ChildDetails key={child.id} child={child} state={state} actions={props} t={t} />)}</section>
     </>}
     <section className="dsmm-zone" aria-label={t("descendants")}><h3>{t("descendants")}</h3><Issue value={state.descendantIssue} t={t} />
       {state.descendants === null ? <p className="dsmm-hint">{t("treeUnavailable")}</p> : state.descendants.descendants.length === 0 ? <p className="dsmm-hint">{t("emptyDescendants")}</p>

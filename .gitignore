@@ -5,8 +5,11 @@
 !.agents/plugins/marketplace.json
 node_modules/
 dist/
+dsmm/lib/
 target/
 *.log
 .DS_Store
 packages/ocmm-lsp-*/bin/
 packages/ocmm-lsp-*/*.tgz
+.codex/
+.agents/

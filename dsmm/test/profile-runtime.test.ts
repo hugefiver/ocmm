@@ -27,7 +27,7 @@ function mockAgent(id: string): DshAgent {
 function liveRoots(services = new Map<string, unknown>()) {
   const roots = new Map<string, DshAgent>();
   const lifetime = new AbortController();
-  const owner = { lifetime, isReady: true };
+  const owner = { lifetime, isReady: true, blankReason: () => "new-session-required" as const };
   const registry = { get: (id: string) => roots.get(id), roots: () => [...roots.values()] };
   const context: DshContext = { get(name) { return (name === "agents" ? registry : name === "dsmmNativeAdmission" ? owner : services.get(name)) as never; } };
   return { context, roots, lifetime, owner, async admit(runtime: DsmmProfileRuntime, id: string) {
@@ -477,7 +477,7 @@ test("native role tool preflights exact parent-profile route before child creati
       assert.equal(child.options.model, "explicit-route");
       assert.equal(child.options.reasoningEffort, "low");
       assert.equal(child.options.maxTokens, 30);
-      assert.equal(fixture.ctx.agentPresets.composedPreset(child.ctx), "dsmm-reviewer");
+      assert.equal(fixture.ctx.agentPresets.composedPreset(child.ctx), fixture.ctx.agentPresets.composedPreset(parent.ctx), "a delegated child shares its parent's standing composition");
       assert.equal(child.session.header.parentSession, parent.id);
       assert.equal(child.session.header.delegationDepth, 1);
       assert.equal(fixture.agents.isOwnedBy(child.id, parent), true);

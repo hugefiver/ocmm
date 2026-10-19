@@ -65,7 +65,7 @@ test("real Loader module admission preserves busy captures, fences off work, and
     }
     await ctx.plugin(InertJobs).await();
   };
-  const config = { presets: { plannerRootEnabled: true }, defaultActive: true, roleRouting: { "dsmm-coding": { primary: { provider: "fixture", model: "owned-child" } } },
+  const config = { defaultActive: true, roleRouting: { "dsmm-coding": { primary: { provider: "fixture", model: "owned-child" } } },
     runtimeRecovery: { enabled: true, idleContinuation: { enabled: true } } };
   const mounted = await nativeRoutingFixture(config, { nativePresets: true, beforeDsmm });
   const fixtures = [mounted];
@@ -180,7 +180,9 @@ test("real Loader module admission preserves busy captures, fences off work, and
     let standingBody = 0, standingRequest = 0;
     mounted.ctx.on("system-prompt/assemble", async (_assembly, _options, next) => { standingBody++; return next(); });
     mounted.ctx.on("agent/request", async (_frame, next) => { standingRequest++; return next(); });
-    await assert.rejects(mounted.create({ agentPreset: "dsmm-planner" }), { code: "activation" });
+    // Delegation roles are not registered presets; forcing one as a root is
+    // refused by the registry before admission runs.
+    await assert.rejects(mounted.create({ agentPreset: "dsmm-planner" }), { code: "agent-preset/not-found" });
     await mounted.ctx.agentPresets.register({ id: "dsmm-fake", name: "Invalid root", description: "Native picker residue", plugins: [] });
     await assert.rejects(mounted.create({ agentPreset: "dsmm-fake" }), { code: "activation" });
     const resume = Session.create(SessionId("module-off-child-resume"));
@@ -221,7 +223,7 @@ test("real Loader module admission preserves busy captures, fences off work, and
     // Same first-party bundle installed, but DW substrate never mounts on this Host.
     let foreignProvider: ReturnType<typeof mounted.subagents.getProvider>;
     let gitBodies = 0, readBodies = 0;
-    const cold = await nativeRoutingFixture({ ...config, guards: { scope: "always", gitWriteGuard: "deny" }, presets: { ...config.presets, materialize: true }, lsp: { enabled: true, command: "module-off-must-not-spawn" } }, {
+    const cold = await nativeRoutingFixture({ ...config, guards: { scope: "always", gitWriteGuard: "deny" }, presets: { materialize: true }, lsp: { enabled: true, command: "module-off-must-not-spawn" } }, {
       nativePresets: true, home: mounted.home, profileDir: mounted.profileDir,
       async beforeDsmm(ctx) {
         await beforeDsmm(ctx);
@@ -362,8 +364,17 @@ test("real Loader module admission preserves busy captures, fences off work, and
     await restartedRuntime.selectMode({ sessionId: first.id, active: false, expectedModeRevision: firstState.deepwork!.revision, expectedAdmissionEpoch: firstState.admissionEpoch }, first as DshAgent);
     await restarted.disposeAgent(first);
     await restarted.ctx.sessionPersistence.flush();
-    await assert.rejects(restarted.agents.resume({ resumeSessionId: first.id, agentOptions: first.options,
-      async setup(scope) { await restarted.ctx.agentPresets.mount(scope, "standard"); } }), { code: "UNAUTHORIZED" });
+    // A persisted session resumes with a fresh admission; the user's explicit
+    // Deepwork-off intent survives as a mode event, so the resumed session
+    // stays on its ordinary composition without delegated role tools.
+    const resumedHandle = await restarted.agents.resume({ resumeSessionId: first.id, agentOptions: first.options,
+      async setup(scope) { await restarted.ctx.agentPresets.mount(scope, "standard"); } });
+    const resumed = resumedHandle.agent;
+    assert.equal(restarted.agents.get(first.id), resumed);
+    assert.equal((await (restarted.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime).getSession(resumed as DshAgent)).deepwork!.active, false, "the explicit Deepwork-off intent survives the resume");
+    assert.equal((restarted.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime).getSettings(resumed as DshAgent).modules.deepwork.enabled, true);
+    assert.equal(resumed.ctx.tools.schemas(resumed).some(schema => schema.name.startsWith("dsmm_")), false, "the mounted standard composition exposes no delegated role tools");
+    await resumedHandle.dispose();
     assert.equal(restarted.agents.get(first.id), undefined);
     for (const agent of [childAgent, pinnedAgent]) {
       await runFixtureTurn(agent);
@@ -371,7 +382,7 @@ test("real Loader module admission preserves busy captures, fences off work, and
       await mounted.releaseAuxiliary(agent);
       assert.equal(agent.session.requestHeader()!.config.model, "owned-child");
     }
-    t.diagnostic(`real Loader/native loop: immutable parent/child snapshots; off standing body/request=0/0; foreign child read bodies=${readBodies}; git push body=0; cold recovery rejected; desired-on pending until independent startup; save updates/disposals=${updates}/${disposals},${coldUpdates}/${coldDisposals}`);
+    t.diagnostic(`real Loader/native loop: immutable parent/child snapshots; off standing body/request=0/0; foreign child read bodies=${readBodies}; git push body=0; resume keeps explicit Deepwork-off; desired-on pending until independent startup; save updates/disposals=${updates}/${disposals},${coldUpdates}/${coldDisposals}`);
   } finally {
     release?.(); t.signal.removeEventListener("abort", release);
     for (const fixture of [...fixtures].reverse()) await fixture.dispose();

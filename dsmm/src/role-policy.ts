@@ -65,7 +65,7 @@ export class DsmmRolePolicy {
   }
   bindChild(agent: DshAgent, parent: DshAgent, admission: DsmmProfileAdmission, invocation: ResolvedRoleInvocation, maximum: number | undefined, toolFilter: ToolRestriction): void {
     this.assertLive(agent); this.assertLive(parent); this.assertDelegation(parent, invocation.target);
-    if (!this.agents().isOwnedBy(agent.id!, parent) || agent.session.header?.parentSession !== parent.id || this.selected(agent) !== invocation.target) throw new SubagentError("Child lineage or composition mismatch", "UNAUTHORIZED");
+    if (!this.agents().isOwnedBy(agent.id!, parent) || agent.session.header?.parentSession !== parent.id || this.selected(agent) !== this.selected(parent)) throw new SubagentError("Child lineage or composition mismatch", "UNAUTHORIZED");
     if (maximum !== undefined && delegationDepthOf(agent as Agent) > maximum) throw new SubagentError("Delegation depth exceeded", "UNAUTHORIZED");
     const upstream = this.identity(parent);
     liveIdentities.set(agent, Object.freeze({ role: invocation.target, child: true, parent, epoch: admission.epoch,
@@ -80,7 +80,7 @@ export class DsmmRolePolicy {
     const settings = this.getSettings(agent), identity = liveIdentities.get(agent), selected = this.selected(agent);
     if (identity?.child) {
       this.assertLive(identity.parent!);
-      if (!this.agents().isOwnedBy(agent.id!, identity.parent!) || selected !== identity.role) throw new SubagentError("Child admission no longer matches composition", "UNAUTHORIZED");
+      if (!this.agents().isOwnedBy(agent.id!, identity.parent!) || selected !== this.selected(identity.parent!)) throw new SubagentError("Child admission no longer matches composition", "UNAUTHORIZED");
     } else if (agent.session.header?.origin !== "subagent") this.validateRootRole(agent, this.getSettings.admission!(agent));
     const role = identity?.role ?? (isDsmmRoleId(selected) ? selected : undefined);
     if (role && (!settings.modules.deepwork.enabled || !settings.roles[role])) throw new SubagentError("Role is disabled in the immutable admission", "UNAUTHORIZED");

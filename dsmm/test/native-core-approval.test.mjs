@@ -31,25 +31,24 @@ test("native full access runs ordinary tools without an unrelated DW delivery pr
   await assert.rejects(f.ctx.subagents.start("dsmm-role-coding", { parent: root, prompt: [], signal: new AbortController().signal }));
 });
 
-test("full access keeps a read-only preset's exact blacklist but not a missing-admission veto for a new native capability", { skip: unavailable, timeout: 30000 }, async t => {
-  const f = await nativeRootLlmFixture(t, { defaultActive: true, roles: { "dsmm-planner": true }, presets: { plannerRootEnabled: true } }, { approvalPolicy: "ask" });
+test("full access runs preexisting and newly registered native capabilities without a missing-admission veto", { skip: unavailable, timeout: 30000 }, async t => {
+  const f = await nativeRootLlmFixture(t, { defaultActive: true }, { approvalPolicy: "ask" });
   const { setSandboxMode } = await loadNative("@deepseek-ai/dsh-sandbox-policy");
   const { ToolCallId } = await loadNative("@deepseek-ai/dsh-llm");
   const { getTraceable } = await loadNative("@deepseek-ai/cordis");
   let approvals = 0, bodies = 0;
   f.ctx.tools.register({ name: "owned_preexisting_probe", description: "Preexisting native capability with no filesystem or process effect", parameters: {},
     output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: value }] }, execute() { bodies++; return "preexisting native result"; } });
-  const root = await f.create("dsmm-planner"); root.session.append("turn/start", { turn: 1 });
+  const root = await f.create("dsmm-orchestrator"); root.session.append("turn/start", { turn: 1 });
   setSandboxMode(root.session, "danger-full-access");
   f.ctx.on("approval/request", async () => { approvals++; return "allowed-once"; }, { global: true });
   const raw = f.ctx.agentPresets.serviceFor(root, "tools"), tools = raw === undefined ? root.ctx.tools : getTraceable(root.ctx, raw);
   tools.register({ name: "owned_native_probe", description: "Native capability with no filesystem or process effect", parameters: {},
     output: { schema: { type: "string" }, render: (_args, value) => [{ type: "text", text: value }] }, execute() { bodies++; return "native capability result"; } });
-  const execute = name => tools.execute({ agent: root, name, arguments: {}, callId: ToolCallId(`full-readonly-${name}`), signal: new AbortController().signal });
+  const execute = name => tools.execute({ agent: root, name, arguments: {}, callId: ToolCallId(`full-native-${name}`), signal: new AbortController().signal });
   assert.equal((await execute("owned_preexisting_probe")).value, "preexisting native result");
   const result = await execute("owned_native_probe");
   assert.notEqual(result.isError, true, JSON.stringify(result)); assert.equal(result.value, "native capability result");
-  assert.equal((await execute("write")).isError, true); assert.equal((await execute("edit")).isError, true);
   assert.equal(bodies, 2); assert.equal(approvals, 0); assert.equal(f.bodies.length, 0);
 });
 

@@ -35,7 +35,7 @@ test("static agent preset files exactly match role render helpers", () => {
 for (const toolTopology of ["per-role", "parameterized"] as const) {
   test(`native preset delegation schemas and delivery follow admitted ${toolTopology} topology, routes and role ceilings`, async () => {
     const primary = { provider: "fixture", model: "preset-review", reasoningEffort: "max" };
-    const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true }, subagents: { toolTopology }, roles: { "dsmm-oracle": false },
+    const f = await nativeRoutingFixture({ subagents: { toolTopology }, roles: { "dsmm-oracle": false },
       skills: { "writing-plans": false }, roleRouting: { "dsmm-reviewer": { primary } } }, {
       nativePresets: true, nativeFs: true, nativeJobs: true, async beforeDsmm(ctx) {
         const denied = async (): Promise<never> => { throw new Error("fixture forbids external web/shell/subprocess work"); };
@@ -100,14 +100,17 @@ for (const toolTopology of ["per-role", "parameterized"] as const) {
       assert.equal(f.subagents.getProvider("dsmm-role-oracle"), undefined);
       assert.equal(f.adapter.calls.length, 1);
       assert.deepEqual(f.agents.list(), [root]);
-      const planner = await f.create({ agentPreset: "dsmm-planner" });
-      const plannerTools = f.ctx.get("agentPresets")!.serviceFor(planner, "tools") ?? planner.ctx.tools;
-      const sentinel = join(f.profileDir, "planner-denied-sentinel");
-      const write = await plannerTools.execute({ agent: planner, name: "write", arguments: { file_path: sentinel, content: "not permitted" },
-        callId: ToolCallId(`planner-write-${toolTopology}`), signal: new AbortController().signal });
-      assert.equal(write.isError, true);
-      assert.equal(existsSync(sentinel), false);
-      assert.equal(f.adapter.calls.length, 1);
+      const planner = await f.createAuxiliary("dsmm-planner", undefined, "one-shot", root);
+      try {
+        const plannerTools = f.ctx.get("agentPresets")!.serviceFor(planner, "tools") ?? planner.ctx.tools;
+        const sentinel = join(f.profileDir, "planner-denied-sentinel");
+        const before = f.adapter.calls.length;
+        const write = await plannerTools.execute({ agent: planner, name: "write", arguments: { file_path: sentinel, content: "not permitted" },
+          callId: ToolCallId(`planner-write-${toolTopology}`), signal: new AbortController().signal });
+        assert.equal(write.isError, true);
+        assert.equal(existsSync(sentinel), false);
+        assert.equal(f.adapter.calls.length, before, "a denied child write never reaches the model");
+      } finally { await f.releaseAuxiliary(planner); }
       await assert.rejects(f.subagents.startActivation({ provider: "dsmm-role-oracle", label: "Disabled oracle", delivery: "caller",
         request: { parent: root, prompt: [] }, signal: new AbortController().signal }), { code: "NO_PROVIDER" });
     } finally { await f.dispose(); }

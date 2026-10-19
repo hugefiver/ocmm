@@ -187,8 +187,7 @@ test("default settings keep deepwork opt-in", () => {
     roleRouting: {},
     runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
     presets: {
-      materialize: false,
-      plannerRootEnabled: false
+      materialize: false
     },
     subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
@@ -233,8 +232,7 @@ test("resolveConfig overlays plugin config on defaults", () => {
     roleRouting: {},
     runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
     presets: {
-      materialize: false,
-      plannerRootEnabled: false
+      materialize: false
     },
     subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
     workflow: DEFAULT_WORKFLOW_SETTINGS,
@@ -447,10 +445,9 @@ test("resolveConfig supports preset materialization settings", () => {
 
   assert.deepEqual(settings.presets, {
     materialize: true,
-    plannerRootEnabled: false,
     root: "/tmp/dsmm-presets"
   });
-  assert.deepEqual(resolveConfig({ presets: { materialize: true } }).presets, { materialize: true, plannerRootEnabled: false });
+  assert.deepEqual(resolveConfig({ presets: { materialize: true } }).presets, { materialize: true });
 });
 
 test("restart-scoped Config is the only deployment input, even on a legacy-shaped host", () => {

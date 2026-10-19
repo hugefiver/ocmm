@@ -1,6 +1,6 @@
 {
   "name": "@dsmm/dsmm",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "DeepSeek Harness deepwork mode bundle for ocmm-style agentic workflows.",
   "author": "Hugefiver",
   "license": "LicenseRef-AAAPL",
@@ -23,10 +23,6 @@
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {
-    "./history-support": {
-      "types": "./lib/history-support.d.ts",
-      "default": "./lib/history-support.js"
-    },
     "./managed-settings": {
       "types": "./lib/managed-settings.d.ts",
       "default": "./lib/managed-settings.js"

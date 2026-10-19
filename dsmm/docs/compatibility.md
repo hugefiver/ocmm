@@ -24,11 +24,7 @@ Stores use separate CAS and atomic-write boundaries. Committed saves aren't roll
 
 ### Native history composition
 
-History protection requires the matching Session/Agent-loop, Gateway, aggregate `api-remotes` browser descriptor and workspace/subagent UI patches, not only the DSMM plugin. The bundle mounts `@dsmm/dsmm/history-support` independently of Core. It supplies `__DSMM_HISTORY_REQUIRED__` through native `webserver/index-inject` before Client initialization; Core failure does not remove that bootstrap. Non-browser integrations must supply `historyRequired: true` when initializing both patched Gateway and Session Clients.
-
-Required Clients obtain generation-bound readiness and an opaque full-address lease before retention. The actual receiving Host validates protected RPC/stream requests before native lookup; unsupported Hosts and missing or retired readiness owners fail closed without falling back to ordinary follow. Main navigation waits for a ready replacement before releasing the old reference, and child sidebar resources prepare before retaining. These preparations authorize only browsing, not migration, continuation or execution.
-
-Empty-browser component coverage uses the native Renderer, workspace navigation, child resource and failure Toast with test-owned layout, controls and a logical carrier. Separate loopback HTTP/WebSocket coverage exercises socket-wait guard retirement, native Session transport retry under a separately owned stable Connection generation, and actual receiving-Host replacement with native authentication and reconnect. Full application/Desktop carrier verification remains outstanding; see the [roadmap](roadmap.md).
+DSMM runs against the unpatched native DSH packages: it installs no Host-side patches and injects no bootstrap flags. Historical sessions stay readable through native history surfaces, and a persisted DSMM session resumes with a fresh admission built from the current deployment; persisted mode choices remain user intent, while old delegation authority never survives.
 
 ### Execution ownership
 
@@ -36,7 +32,7 @@ Role calls wait for native activation results by default; only `completed` is no
 
 Queue/Steer/interrupt apply only to supported live direct children under exact-parent/operator authority. Descendant views are read-only. Missing native capability disables that operation with a reason; unknown sends aren't automatically resent. Requested role/model data isn't actual execution identity. See [Agent presets](agent-presets.md).
 
-DSMM cold resume without trusted live admission is unsupported, including direct/Gateway resume paths. Configuration, PluginRecord metadata, labels or child IDs can't reconstruct authorization. Preserve readable history; don't substitute a persona, reset a session or import old data automatically. DSMM history inspection doesn't resume Agents. Native factory load/repair can precede the created guard, so refusal doesn't promise the log was never opened. Clear/compact can retain policy only with the exact live object and admission, not inferred lineage.
+Resuming a persisted DSMM session builds a fresh admission from the current deployment and validates its mounted composition again; configuration, PluginRecord metadata, labels or child IDs never reconstruct authorization. A resumed child without its exact live parent stays refused: delegated authority exists only on the live parent that admitted it. Preserve readable history; don't substitute a persona, reset a session or import old data automatically. Native factory load/repair can precede the created guard, so a refusal doesn't promise the log was never opened. Clear/compact can retain policy only with the exact live object and admission, not inferred lineage.
 
 Standard supported model calls use native prepared calls. Raw/custom and Pi-AI stop-only calls use the minimal public completions seam for self-contained literal or explicit model-mapping configurations. Catalog-backed raw combinations that can't be reliably reproduced are rejected for both native and DSMM parameter sources, without disabling standard Coding. Native effort encoding/capability metadata isn't rewritten. See [model routing](model-routing.md).
 

@@ -8,7 +8,7 @@ test("the native generic delegation tool cannot bypass a controlled parent's pen
   const f = await nativeRoutingFixture({ defaultActive: false }, { nativePresets: true,
     async beforeDsmm(ctx) { await ctx.plugin(NativeSubagentTool, { provider: "spawn" }).await(); } });
   try {
-    const parent = await f.create({ agentPreset: "dsmm-builder" });
+    const parent = await f.create({ agentPreset: "dsmm-orchestrator" });
     const result = await parent.ctx.tools.execute({ agent: parent, name: "subagent", callId: ToolCallId("native-spawn-refusal"),
       arguments: { description: "generic bypass", prompt: "must not start" }, signal: new AbortController().signal });
     assert.equal(result.isError, true);

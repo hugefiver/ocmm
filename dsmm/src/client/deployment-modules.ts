@@ -7,7 +7,7 @@ export function moduleFor(path: string): Exclude<ConfigModule, "state"> {
   const key = path.split(".")[0];
   if (["defaultActive", "modules", "modelParameters", "runtime"].includes(key)) return "run";
   if (["roleRouting", "runtimePolicy", "runtimeRecovery"].includes(key)) return "routes";
-  if (["workflow", "roles", "skills", "presets", "businessLocale", "locale", "promptOrder", "plannerRootEnabled"].includes(key)) return "workflow";
+  if (["workflow", "roles", "skills", "presets", "businessLocale", "locale", "promptOrder"].includes(key)) return "workflow";
   if (key === "subagents") return "subagents";
   if (["permissionControl", "guards"].includes(key)) return "permissions";
   return "other";

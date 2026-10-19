@@ -205,7 +205,8 @@ function registerRoleTool(agent: DshAgent, agentCtx: Context, tools: ToolRuntime
        return admission.duringCall(parent, exec.signal, async (signal): Promise<Extract<ToolExecutionResult, { isError: false }>["value"]> => {
        const invocation = await resolveRoleInvocation(parent, role.id, current, signal, { ...(args.level === undefined ? {} : { level: args.level }), ...(args.route === undefined ? {} : { route: args.route }) } as DsmmInvocationOptions);
        const capturedProvider = provider;
-       const request: Omit<SubagentStartRequest, "signal"> = { parent, agentPreset: role.id, prompt: [{ type: "text", text: args.prompt }],
+       const parentComposition = (parent.ctx as DshContext).get?.<{ composedPreset(ctx: unknown): string | undefined }>("agentPresets")?.composedPreset(parent.ctx);
+        const request: Omit<SubagentStartRequest, "signal"> = { parent, ...(parentComposition === undefined ? {} : { agentPreset: parentComposition }), prompt: [{ type: "text", text: args.prompt }],
         agentOptions: invocationAgentOptions(invocation), maxDepth: subagents.resolveMaxDepth(current.subagents.maxDepth) };
       const assertCurrent = (): void => {
         if (policy.assertDelegation(parent as unknown as DshAgent, role.id).epoch !== admitted.epoch) throw new SubagentError("DSMM parent admission changed before delegation", "UNAUTHORIZED");

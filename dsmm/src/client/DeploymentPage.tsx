@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { HostObservable, PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
-import type { TemporaryPermissionRemote } from "../permission-temporary-types.js";
+import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ConfigForms } from "@deepseek-ai/dsh-client-ui-settings/client";
 import type { DsmmConfigRemote } from "../profile-remote.js";
 import type { SubagentRuntimeAdmissionView } from "../profile-types.js";
@@ -14,7 +13,7 @@ import type { ConfigModule } from "./deployment-modules.js";
 import { at, inspectorPaths, scopeSchema, visibleDeploymentPath } from "./deployment-data.js";
 import { Field, displayValue, permissionText } from "./DeploymentFields.js";
 import { configurationVersionState } from "./configuration-display.js";
-import { PermissionPanelEntry } from "./PermissionPanelEntry.js";
+import { PermissionsPanel } from "./PermissionsPanel.js";
 import { permissionEn } from "./permission-locales.js";
 import type { PermissionLocaleKey } from "./permission-locales.js";
 
@@ -25,7 +24,6 @@ export interface DeploymentPageProps extends Locale {
   remote: DsmmConfigRemote;
   workspace?: DeploymentWorkspace;
   permissions?: PermissionController;
-  temporaryPermissions?: HostObservable<TemporaryPermissionRemote | undefined>;
   permissionsT?: PropsLocale<"settings.dsmm-permissions">["t"];
   forms?: ConfigForms;
 }
@@ -128,7 +126,7 @@ export function DeploymentPage(props: DeploymentPageProps) {
             {active === "run" && controller.layer === "profile" && <NativeRuntimeState value={state.snapshot.subagentRuntime} t={t} />}
           </div>}
           {scopeActions}
-           {active === "permissions" && <section className="dsmm-zone"><h3>{t("rootRules")}</h3><p className="dsmm-hint">{t("rootRulesHint")}</p>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionPanelEntry controller={workspace.permissions} temporary={props.temporaryPermissions} t={props.permissionsT ?? (key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key)} />}</section>}
+           {active === "permissions" && <section className="dsmm-zone"><h3>{t("rootRules")}</h3><p className="dsmm-hint">{t("rootRulesHint")}</p>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionsPanel controller={workspace.permissions} t={props.permissionsT ?? (key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key)} />}</section>}
         </>}
       </aside>}
     </div>

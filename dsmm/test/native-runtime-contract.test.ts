@@ -99,15 +99,15 @@ test("actual isolated prompt realm has no Host service and preserves literal/ord
   } finally { await f.dispose(); }
 });
 
-test("A regression: role persona survives but durable explicit off wins over role common", async () => {
-  const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true }, roles: { ...noRoles, "dsmm-planner": true } }, { nativePresets: true, nativeFs: true });
+test("role persona survives while durable explicit off wins over role common", async () => {
+  const f = await nativeRoutingFixture({ roles: { ...noRoles, "dsmm-orchestrator": true } }, { nativePresets: true, nativeFs: true });
   try {
-    const agent = await f.create({ agentPreset: "dsmm-planner" });
+    const agent = await f.create({ agentPreset: "dsmm-orchestrator" });
     assert.equal(scopeOf(agent.ctx), agent); assert.notEqual(scopeParentOf(agent), agent);
     const skills = agent.ctx.get("skills")!, tools = agent.ctx.get("tools")!;
     const view = { scope: agent, cwd: agent.session.header.cwd };
     const render = () => f.ctx.systemPrompt.assemble({ scope: agent }).then(renderPrompt);
-    const persona = DSMM_ROLES.find((role) => role.id === "dsmm-planner")!.persona;
+    const persona = DSMM_ROLES.find((role) => role.id === "dsmm-orchestrator")!.persona;
     assert.ok((await render()).includes(persona)); assert.match(await render(), /DEEPWORK MODE ENABLED!/);
     assert.doesNotMatch(await render(), /# Brainstorming|# Writing Plans|<dsmm-skill/);
     assert.deepEqual((await skills.list(view)).map((skill) => skill.name).sort(), [...DSMM_SKILL_NAMES].sort());
@@ -118,24 +118,18 @@ test("A regression: role persona survives but durable explicit off wins over rol
     assert.equal(disabled.deepwork!.active, false); assert.equal(disabled.deepwork!.locked, false);
     assert.ok((await render()).includes(persona)); assert.doesNotMatch(await render(), /DEEPWORK MODE ENABLED!|# Brainstorming/);
     assert.equal(await skills.get("brainstorming", view), undefined);
-    const sentinel = join(f.profileDir, "planner-off-write-sentinel.txt");
+    const sentinel = join(f.profileDir, "role-off-write-sentinel.txt");
     const writeArgs = { file_path: sentinel, content: "native authorized write control\n" };
     assert.equal(existsSync(sentinel), false);
-    assert.equal(tools.get("write", agent), undefined, "off retains the planner's scoped write restriction");
-    const denied = await tools.execute({ callId: ToolCallId("role-off-deny"), name: "write", arguments: writeArgs, agent, signal: new AbortController().signal });
-    assert.equal(denied.isError, true, "off never removes persona's read-only restriction");
-    assert.equal(existsSync(sentinel), false, "a rejected planner write must not create the file");
-    const writer = await f.create({ agentPreset: "standard" });
-    const writableTools = writer.ctx.get("tools")!;
-    assert.ok(writableTools.get("write", writer));
-    const allowed = await writableTools.execute({ callId: ToolCallId("role-off-write-control"), name: "write", arguments: writeArgs, agent: writer, signal: new AbortController().signal });
-    assert.equal(allowed.isError, false, "the same arguments succeed through an authorized native write tool");
+    assert.ok(tools.get("write", agent), "off keeps the write-capable role composition");
+    const allowed = await tools.execute({ callId: ToolCallId("role-off-write"), name: "write", arguments: writeArgs, agent, signal: new AbortController().signal });
+    assert.equal(allowed.isError, false, "off only removes the common workflow, never the admitted role composition");
     assert.equal(readFileSync(sentinel, "utf8"), writeArgs.content);
   } finally { await f.dispose(); }
 });
 
 test("real Cordis Loader shares preset but Agent skills/mode/cwd stay private; blank rebind disposes old providers", async () => {
-  const f = await nativeRoutingFixture({ presets: { plannerRootEnabled: true }, roles: { ...noRoles, "dsmm-planner": true } }, { nativePresets: true, spawn: false, managedRuntime: true });
+  const f = await nativeRoutingFixture({ roles: { ...noRoles, "dsmm-orchestrator": true } }, { nativePresets: true, spawn: false, managedRuntime: true });
   try {
     const a = await f.create({ agentPreset: "standard", cwd: f.profileDir }), b = await f.create({ agentPreset: "standard", cwd: join(f.profileDir, "other") });
     assert.equal(scopeParentOf(a), scopeParentOf(b)); assert.notEqual(scopeOf(a.ctx), scopeOf(b.ctx));
@@ -150,7 +144,7 @@ test("real Cordis Loader shares preset but Agent skills/mode/cwd stay private; b
     assert.equal(loaded.resourceBase?.kind, "directory");
     if (loaded.resourceBase?.kind === "directory") assert.match(await readFile(join(loaded.resourceBase.path, "references/scripts/dap.mjs"), "utf8"), /node/);
     let changes = 0; const stop = f.ctx.on("skills/change", () => { changes++; });
-    for (const preset of ["dsmm-planner", "standard", "dsmm-planner", "standard"]) {
+    for (const preset of ["dsmm-orchestrator", "standard", "dsmm-orchestrator", "standard"]) {
       await f.ctx.agentPresets.select(b, preset);
       await f.ctx.get("dsmmNativeAdmission")!.ensure(b);
       assert.equal((await runtime.getSession(adapterAgent(b))).deepwork?.active, preset !== "standard");

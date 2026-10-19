@@ -29,7 +29,7 @@ async function presetHostServices(ctx: import("@deepseek-ai/cordis").Context): P
   ctx.provide("shellEnv", { resolve: denied });
 }
 
-test("real native root Builder owns formal planning; native plan review returns complete Markdown without upgrading planner file permissions", async () => {
+test("real native root orchestrator owns formal planning; native plan review returns complete Markdown without upgrading planner file permissions", async () => {
   const reviews: string[] = [];
   const plan = "# Native complete plan\n\n- [ ] Implement bounded change\n- [ ] Verify result\n";
   let planner: import("@deepseek-ai/dsh-agent").Agent | undefined;
@@ -62,8 +62,8 @@ test("real native root Builder owns formal planning; native plan review returns 
       else if (step === 1) yield* call("write", { file_path: path, content: plan });
       else yield* answer("Native coordinator persisted the reviewed plan");
     };
-    const root = await f.create({ agentPreset: "dsmm-builder", cwd: f.profileDir });
-    assert.equal(f.ctx.get("agentPresets")!.composedPreset(root.ctx), "dsmm-builder");
+    const root = await f.create({ agentPreset: "dsmm-orchestrator", cwd: f.profileDir });
+    assert.equal(f.ctx.get("agentPresets")!.composedPreset(root.ctx), "dsmm-orchestrator");
     await runFixtureTurn(root);
     assert.deepEqual(reviews, [plan]);
     assert.ok(planner);
@@ -75,21 +75,24 @@ test("real native root Builder owns formal planning; native plan review returns 
   } finally { await f.dispose(); }
 });
 
-test("native blank preset rebind refreshes actual tool realm while planner remains read-only and permitted utilities remain callable", async () => {
-  const f = await nativeRoutingFixture({ roles: { "dsmm-planner": true, "dsmm-quick": true }, presets: { plannerRootEnabled: true }, subagents: { maxDepth: 3 } }, { nativePresets: true });
+test("native blank preset rebind refreshes the actual tool realm, admits only the dispatcher and fails closed on other roles", async () => {
+  const f = await nativeRoutingFixture({ roles: { "dsmm-planner": true, "dsmm-quick": true }, subagents: { maxDepth: 3 } }, { nativePresets: true });
   try {
-    const root = await f.create({ agentPreset: "dsmm-builder", cwd: f.profileDir });
+    const root = await f.create({ agentPreset: "standard", cwd: f.profileDir });
     const presets = f.ctx.get("agentPresets")!;
-    await presets.select(root, "dsmm-planner");
+    await presets.select(root, "dsmm-orchestrator");
     await f.ctx.get("systemPrompt")!.assemble({ scope: root });
     const tools = presets.serviceFor(root, "tools") ?? root.ctx.get("tools")!;
     assert.ok(tools.get("dsmm_code_search", root));
-    const denied = await tools.execute({ agent: root, name: "write", callId: ToolCallId("rebound-planner-write"), arguments: { file_path: join(f.profileDir, "sentinel"), content: "not allowed" }, signal: new AbortController().signal });
-    assert.equal(denied.isError, true);
-    const utility = await tools.execute({ agent: root, name: "dsmm_code_search", callId: ToolCallId("rebound-planner-utility"), arguments: { description: "Read-only utility proof", prompt: "Return a useful local result" }, signal: new AbortController().signal });
+    const utility = await tools.execute({ agent: root, name: "dsmm_code_search", callId: ToolCallId("rebound-orchestrator-utility"), arguments: { description: "Read-only utility proof", prompt: "Return a useful local result" }, signal: new AbortController().signal });
     assert.equal(utility.isError, false); assert.match(JSON.stringify(utility), /fixture complete/);
-    const illegal = await tools.execute({ agent: root, name: "dsmm_category", callId: ToolCallId("rebound-planner-quick"), arguments: { category: "dsmm-quick", description: "Forbidden quick", prompt: "No write permission" }, signal: new AbortController().signal });
-    assert.equal(illegal.isError, true);
+    // Delegation roles are not registered presets. A bound root cannot switch
+    // to one (the registry roster only offers the dispatcher), so the admitted
+    // dispatcher composition keeps executing; the roster refusal itself is
+    // covered by the root-eligibility suite.
+    const kept = await tools.execute({ agent: root, name: "dsmm_code_search", callId: ToolCallId("rebound-planner-refused"), arguments: { description: "Kept composition", prompt: "Return a useful local result" }, signal: new AbortController().signal });
+    assert.equal(kept.isError, false);
+    assert.equal(f.adapter.calls.length, 2);
   } finally { await f.dispose(); }
 });
 

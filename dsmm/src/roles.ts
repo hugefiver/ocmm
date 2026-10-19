@@ -13,6 +13,8 @@ export const DSMM_ROLE_IDS = [
 ] as const;
 
 export type DsmmRoleId = (typeof DSMM_ROLE_IDS)[number];
+/** The one user-selectable composition; every other role is an internal delegation target. */
+export const DSMM_DISPATCHER_ROLE: DsmmRoleId = "dsmm-orchestrator";
 export type DsmmRoleMode = "primary" | "all" | "subagent";
 export type DsmmDelegationGroup = "primary-coordinator" | "utility-leaf" | "read-only-workflow" | "standard-workflow" | "local-coordinator";
 

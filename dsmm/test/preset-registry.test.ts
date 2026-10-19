@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { registerRolePresets } from "../lib/preset-registry.js";
-import { DSMM_ROLES, isRootRole } from "../lib/roles.js";
+import { DSMM_ROLES } from "../lib/roles.js";
 import type { RolePluginRow } from "../lib/roles.js";
-import { DEFAULT_DSMM_SETTINGS, resolveConfig } from "../lib/settings.js";
+import { DEFAULT_DSMM_SETTINGS, isRootRoleEnabled, resolveConfig } from "../lib/settings.js";
 import type { DshContext } from "../lib/dsh-types.js";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
 import { nativeRoutingFixture, headerRoutes, runFixtureTurn } from "./native-routing-fixture.ts";
 
-test("native DSH registration makes every enabled role discoverable while root admission remains qualified", async () => {
+test("native DSH registration exposes only selectable compositions while delegated children keep role behavior", async () => {
   const definitions: Array<{ id: string; name: string; plugins: RolePluginRow[] }> = [];
   const registry = {
     async register(definition: typeof definitions[number]) {
@@ -28,17 +28,19 @@ test("native DSH registration makes every enabled role discoverable while root a
   assert.ok(installer);
   await installer({ get: (name) => (name === "agentPresets" ? registry : name === "agents" ? { list: () => [], get: () => undefined } : { guard: () => () => {} }) as never, on() {} });
 
-  const enabledDefinitions = DSMM_ROLES.filter((role) => DEFAULT_DSMM_SETTINGS.roles[role.id]);
+  const enabledDefinitions = DSMM_ROLES.filter((role) => isRootRoleEnabled(DEFAULT_DSMM_SETTINGS, role.id));
   assert.deepEqual(definitions.map((item) => item.id), enabledDefinitions.map((role) => role.id));
   assert.deepEqual(definitions.map((item) => item.name), enabledDefinitions.map((role) => role.name));
-  assert.ok(definitions.some((item) => DSMM_ROLES.some((role) => role.id === item.id && !isRootRole(role))));
+  assert.equal(enabledDefinitions.length, 1);
   const orchestrator = definitions.find((item) => item.id === "dsmm-orchestrator");
   assert.ok(orchestrator);
   assert.equal(orchestrator.plugins.some((item) => item.name === "@dsmm/dsmm/permission-fs"), true);
   assert.equal("roots" in orchestrator, false);
   const f = await nativeRoutingFixture();
   try {
-    await assert.rejects(f.create({ agentPreset: "dsmm-reviewer" }), /not eligible.*root/iu);
+    // Delegation roles are not registered presets, so forcing one as a root
+    // fails closed at the native registry before any admission runs.
+    await assert.rejects(f.create({ agentPreset: "dsmm-reviewer" }), /not-found|Unknown agent preset|not eligible.*root/iu);
     const root = await f.create({ agentPreset: "dsmm-orchestrator" });
     const enabled = DSMM_ROLES.filter(role => role.id !== "dsmm-orchestrator" && DEFAULT_DSMM_SETTINGS.roles[role.id]);
     const schemas = root.ctx.tools.schemas(root).filter(row => row.name.startsWith("dsmm_"));
@@ -64,48 +66,27 @@ test("native DSH registration makes every enabled role discoverable while root a
   } finally { await f.dispose(); }
 });
 
-test("disabled roles have neither native preset declarations nor callable child tools", async () => {
-  const definitions: Array<{ id: string; plugins: RolePluginRow[] }> = [];
-  let installer: ((ctx: DshContext) => unknown) | undefined;
-  registerRolePresets({ inject(_deps, callback) { installer = callback; } }, () => ({
-    ...DEFAULT_DSMM_SETTINGS,
-    roles: { ...DEFAULT_DSMM_SETTINGS.roles, "dsmm-builder": false, "dsmm-oracle": false }
-  }));
-  assert.ok(installer);
-  await installer({
-    get: (name) => (name === "agentPresets" ? {
-      async register(definition: typeof definitions[number]) { definitions.push(definition); return async () => {}; },
-      composedPreset() { return undefined; }
-    } : name === "agents" ? { list: () => [], get: () => undefined } : { guard: () => () => {} }) as never,
-    on() {}
-  });
-  assert.equal(definitions.some((item) => item.id === "dsmm-builder" || item.id === "dsmm-oracle"), false);
-  assert.deepEqual(definitions.map((item) => item.id), DSMM_ROLES.filter((role) => role.id !== "dsmm-builder" && role.id !== "dsmm-oracle"
-    && DEFAULT_DSMM_SETTINGS.roles[role.id]).map((role) => role.id));
-  const orchestrator = definitions.find((item) => item.id === "dsmm-orchestrator");
-  assert.ok(orchestrator);
-  assert.equal(orchestrator.plugins.some((item) => !Array.isArray(item.config) && (item.config?.toolName === "dsmm_builder" || item.config?.toolName === "dsmm_oracle")), false);
-});
-
-test("enabled auxiliary roles remain discoverable without becoming root-eligible", async () => {
-  const definitions: Array<{ id: string }> = [];
+test("only the dispatcher registers as a selectable preset while delegation targets need none", async () => {
+  const definitions: Array<{ id: string; plugins?: Array<{ config?: { toolName?: string } }> }> = [];
   let installer: ((ctx: DshContext) => unknown) | undefined;
   const settings = resolveConfig({
-    roles: { "dsmm-orchestrator": false, "dsmm-planner": false, "dsmm-builder": false }
+    roles: { "dsmm-orchestrator": true, "dsmm-planner": true, "dsmm-builder": true, "dsmm-oracle": false }
   });
   registerRolePresets({ inject(_deps, callback) { installer = callback; } }, () => settings);
   assert.ok(installer);
   await installer({
     get: (name) => (name === "agentPresets" ? {
-      async register(definition: { id: string }) { definitions.push(definition); return async () => {}; },
+      async register(definition: { id: string; plugins?: Array<{ config?: { toolName?: string } }> }) { definitions.push(definition); return async () => {}; },
       composedPreset() { return undefined; }
     } : name === "agents" ? { list: () => [], get: () => undefined } : undefined) as never,
     on() {}
   });
-  const expected = DSMM_ROLES.filter((role) => settings.roles[role.id]);
-  assert.deepEqual(definitions.map((definition) => definition.id), expected.map((role) => role.id));
-  assert.ok(expected.length > 0);
-  assert.equal(expected.some(isRootRole), false);
+  // Delegation targets share their parent's standing composition instead of
+  // owning registered presets, so the roster stays selectable-only.
+  assert.deepEqual(definitions.map((definition) => definition.id), ["dsmm-orchestrator"]);
+  // A disabled role contributes no callable tool row to the standing composition.
+  const orchestrator = definitions[0];
+  assert.equal(orchestrator.plugins?.some((item) => !Array.isArray(item.config) && (item.config?.toolName === "dsmm_builder" || item.config?.toolName === "dsmm_oracle")), false);
 });
 
 test("read-only restriction follows native blank preset switches without sticking to a write role", async () => {

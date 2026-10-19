@@ -168,7 +168,10 @@ export class ProfilesController {
       this.generation += 1;
       this.sessionGeneration += 1;
       this.modelSelectorGeneration += 1;
-      this.publish({ session: null, sessionBusy: null, sessionNotice: null, sessionUnconfirmed: this.current.currentSessionId !== null,
+      // A replaced connection only discards what it observed. It never records a
+      // durable refusal for the session: an unread configuration is read again
+      // by the next refresh, and typing stays available in the meantime.
+      this.publish({ session: null, sessionBusy: null, sessionNotice: null, sessionUnconfirmed: false,
         sessionViewEpoch: this.current.sessionViewEpoch + 1, busy: null, issue: { kind: "transport", code: "unavailable" } });
     };
     if (replacement || source === null || this.connectionBaseline === undefined) invalidate();

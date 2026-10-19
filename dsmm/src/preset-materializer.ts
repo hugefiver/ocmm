@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { DSMM_ROLES, DSMM_ROLE_IDS, renderAgentCordis, renderPresetMetadata } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
-import { isRoleEnabled } from "./settings.js";
+import { isRoleEnabled, isRootRoleEnabled } from "./settings.js";
 import type { DsmmSettings } from "./settings.js";
 import { enabledSkillNames } from "./skills.js";
 
@@ -112,13 +112,13 @@ export function reconcileRolePresets({ root, settings, filesystem: filesystemOve
   });
 
   for (const knownDirectory of knownDirectories) {
-    if (settings.presets.materialize && isRoleEnabled(settings, knownDirectory.role.id) && knownDirectory.ownership === "foreign") {
+    if (settings.presets.materialize && isRootRoleEnabled(settings, knownDirectory.role.id) && knownDirectory.ownership === "foreign") {
       throw new Error(`dsmm preset directory is foreign and will not be claimed: ${knownDirectory.directory}`);
     }
   }
 
   for (const knownDirectory of knownDirectories) {
-    if (settings.presets.materialize && isRoleEnabled(settings, knownDirectory.role.id)) {
+    if (settings.presets.materialize && isRootRoleEnabled(settings, knownDirectory.role.id)) {
       if (knownDirectory.ownership === "absent") {
         publishNewRoleDirectory(canonicalRoot, root, knownDirectory.role.id, settings, filesystem);
       } else {

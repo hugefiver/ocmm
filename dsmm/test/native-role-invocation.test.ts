@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { ToolCallId } from "@deepseek-ai/dsh-llm";
@@ -150,25 +151,13 @@ test("auxiliary preset roots and blank switches cannot execute tools or requests
     await assert.rejects(f.create({ agentPreset: "dsmm-coding" }));
     await assert.rejects(f.create({ agentPreset: "dsmm-reviewer" }));
     const parent = await f.create();
-    await f.ctx.get("agentPresets")!.select(parent, "dsmm-coding");
-    const denied = await parent.ctx.tools.execute({ agent: parent, name: "write", callId: ToolCallId(randomUUID()), arguments: { file_path: "refused", content: "refused" }, signal: new AbortController().signal });
-    assert.equal(denied.isError, true);
+    // Delegation roles are not registered presets: the switch itself is refused
+    // and the admitted dispatcher composition keeps its native authority.
+    await assert.rejects(f.ctx.get("agentPresets")!.select(parent, "dsmm-coding"), /not-found|Unknown agent preset/u);
+    const kept = await parent.ctx.tools.execute({ agent: parent, name: "write", callId: ToolCallId(randomUUID()), arguments: { file_path: join(f.profileDir, "kept-composition"), content: "kept" }, signal: new AbortController().signal });
+    assert.equal(kept.isError, false, JSON.stringify(kept));
     await runFixtureTurn(parent);
-    assert.equal(f.adapter.calls.length, 0);
-  } finally { await f.dispose(); }
-});
-
-test("legal blank root rebind retains read-only policy and useful native role tools", async () => {
-  const f = await nativeRoutingFixture({ defaultActive: true, presets: { plannerRootEnabled: true }, subagents: { maxDepth: 3 } }, { nativePresets: true });
-  try {
-    const parent = await f.create();
-    await f.ctx.get("agentPresets")!.select(parent, "dsmm-planner");
-    await f.ctx.get("dsmmNativeAdmission")!.ensure(parent);
-    const denied = await parent.ctx.tools.execute({ agent: parent, name: "write", callId: ToolCallId(randomUUID()), arguments: { file_path: "refused", content: "refused" }, signal: new AbortController().signal });
-    assert.equal(denied.isError, true);
-    const useful = await parent.ctx.tools.execute({ agent: parent, name: "dsmm_code_search", callId: ToolCallId(randomUUID()), arguments: { description: "Read-only native utility", prompt: "Return the useful local result" }, signal: new AbortController().signal });
-    assert.equal(useful.isError, false, JSON.stringify(useful));
-    assert.match(JSON.stringify(useful), /fixture complete/);
+    assert.equal(f.adapter.calls.length, 1, "the kept dispatcher composition executes its turn normally");
   } finally { await f.dispose(); }
 });
 

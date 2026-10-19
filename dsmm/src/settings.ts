@@ -2,7 +2,7 @@ import Schema from "@deepseek-ai/schemastery";
 import type { DshAgent, DshContext } from "./dsh-types.js";
 import { DEFAULT_DSMM_LSP_SETTINGS, resolveLspSettings } from "./lsp.js";
 import type { DsmmLspSettings } from "./lsp.js";
-import { DSMM_ROLES, DSMM_ROLE_IDS, isRootRole } from "./roles.js";
+import { DSMM_DISPATCHER_ROLE, DSMM_ROLES, DSMM_ROLE_IDS } from "./roles.js";
 import type { DsmmRoleId } from "./roles.js";
 import { DSMM_SKILL_NAMES } from "./skills.js";
 import type { DsmmSkillName } from "./skills.js";
@@ -43,8 +43,6 @@ export interface DsmmWorkflowSettings {
 
 export interface DsmmPresetSettings {
   materialize: boolean;
-  /** Startup-pinned root exposure only; workflow Planner delegation stays enabled. */
-  plannerRootEnabled: boolean;
   root?: string;
 }
 
@@ -230,8 +228,7 @@ export const DEFAULT_DSMM_SETTINGS: DsmmSettings = {
   roleRouting: {},
   runtimePolicy: DEFAULT_DSMM_RUNTIME_POLICY,
   presets: {
-    materialize: false,
-    plannerRootEnabled: false
+    materialize: false
   },
   subagents: { enableRunInBackground: false, backgroundMode: "one-shot", toolTopology: "per-role", allowRouteOverride: false },
   workflow: {
@@ -335,7 +332,6 @@ const ROLE_ROUTING_VALIDATION_SCHEMA = Schema.transform(Schema.any(), (input: un
 
 const PRESETS_SCHEMA = Schema.object({
   materialize: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.presets.materialize),
-  plannerRootEnabled: Schema.boolean().default(DEFAULT_DSMM_SETTINGS.presets.plannerRootEnabled),
   root: Schema.string()
 });
 const SUBAGENTS_SCHEMA = Schema.object({
@@ -797,18 +793,15 @@ export function isRoleEnabled(settings: DsmmSettings, role: DsmmRoleId): boolean
   return settings.roles[role];
 }
 
-/** Native standing-root availability is independent of child role enablement. */
+/** Only the dispatcher is a selectable standing root; every other role stays an internal delegation target. */
 export function isRootRoleEnabled(settings: DsmmSettings, id: DsmmRoleId): boolean {
-  const role = DSMM_ROLES.find(role => role.id === id)!;
-  return settings.modules.deepwork.enabled && settings.roles[id] && isRootRole(role)
-    && (id !== "dsmm-planner" || settings.presets.plannerRootEnabled);
+  return id === DSMM_DISPATCHER_ROLE && settings.modules.deepwork.enabled && settings.roles[id];
 }
 
 function resolvePresetSettings(config: DsmmPluginConfig["presets"]): DsmmPresetSettings {
   if (config !== undefined) validateShape(config, PRESETS_SCHEMA, ["presets"]);
   return {
     materialize: config?.materialize ?? DEFAULT_DSMM_SETTINGS.presets.materialize,
-    plannerRootEnabled: config?.plannerRootEnabled ?? DEFAULT_DSMM_SETTINGS.presets.plannerRootEnabled,
     ...(config?.root === undefined ? {} : { root: config.root })
   };
 }
