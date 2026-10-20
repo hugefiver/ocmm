@@ -1,22 +1,50 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { ModuleKind, transpileModule } from "typescript";
-import { BASE_ROLES, CATEGORIES, DSH_TOOL_CONTRACT, EXCLUSIONS, SKILL_SOURCES, WORKFLOW_VARIANTS } from "./source-inventory.mjs";
+import { BASE_ROLES, CATEGORIES, DSH_TOOL_CONTRACT, EXCLUSIONS, SKILL_SOURCES, SOURCE_INPUT_FILES, WORKFLOW_VARIANTS, excludedSourceResource } from "./source-inventory.mjs";
 import { ADAPTATION_RULES, adaptLocale, adaptPrompt, adaptSkill, adaptTerminal, section } from "./source-adaptations.mjs";
 import { FRONTEND_PINS, frontendAttribution, frontendRecipe } from "./frontend-recipe.mjs";
 import { checkFrontendAssets } from "./materialize-frontend.mjs";
-import { loadSourceInputs } from "./source-inputs.mjs";
 import { skillResourceProblems } from "./source-input-resources.mjs";
 
 const dsmmRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const repositoryRoot = dirname(dsmmRoot);
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 
-export function sourceOutputs({ root = dsmmRoot, inputRoot = join(root, "source-inputs"), inputs = loadSourceInputs(inputRoot) } = {}) {
+function regularSourcePath(root, path, directory = false) {
+  const base = resolve(root), target = resolve(base, path);
+  if (target !== base && !target.startsWith(`${base}${sep}`)) throw new Error(`source input escapes repository root: ${path}`);
+  for (let current = target; ; current = dirname(current)) {
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink() || !(current === target && !directory ? stat.isFile() : stat.isDirectory())) throw new Error(`linked or non-regular source input: ${path}`);
+    if (current === base) break;
+  }
+  return target;
+}
+
+function loadRepositoryInputs(root) {
+  const files = new Map(SOURCE_INPUT_FILES.map((path) => [path, readFileSync(regularSourcePath(root, path))]));
+  for (const source of Object.values(SKILL_SOURCES)) {
+    const directory = regularSourcePath(root, source, true);
+    const resources = (current, prefix = "") => readdirSync(current).sort().flatMap((name) => {
+      const path = `${prefix}${name}`;
+      if (excludedSourceResource(source, path)) return [];
+      const target = join(current, name), stat = lstatSync(target);
+      if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) throw new Error(`linked or non-regular source input: ${source}/${path}`);
+      return stat.isDirectory() ? resources(target, `${path}/`) : [`${source}/${path}`];
+    });
+    for (const path of resources(directory)) files.set(path, readFileSync(join(root, path)));
+  }
+  return files;
+}
+
+export function sourceOutputs({ packageRoot = dsmmRoot, sourceRoot = repositoryRoot } = {}) {
+  const inputs = loadRepositoryInputs(sourceRoot);
   const consumed = new Set();
   const readInput = (path) => {
-    const bytes = inputs.files.get(path);
+    const bytes = inputs.get(path);
     if (bytes === undefined) throw new Error(`missing source input: ${path}`);
     consumed.add(path);
     return bytes;
@@ -117,7 +145,7 @@ export function sourceOutputs({ root = dsmmRoot, inputRoot = join(root, "source-
 
   const descriptions = {};
   for (const [name, source] of Object.entries(SKILL_SOURCES)) {
-    for (const file of [...inputs.files.keys()].filter((path) => path.startsWith(`${source}/`)).sort()) {
+    for (const file of [...inputs.keys()].filter((path) => path.startsWith(`${source}/`)).sort()) {
       const path = file.slice(source.length + 1);
       const input = readInput(file);
       const content = extname(file) === ".md" ? adaptSkill(source, path, input.toString("utf8")) : input;
@@ -134,28 +162,28 @@ export function sourceOutputs({ root = dsmmRoot, inputRoot = join(root, "source-
   add("skills/frontend/.npmignore", "# Override .gitignore: every fixed-pin materialized body/data/script/inventory must pack.\n__pycache__/\n**/__pycache__/\n*.pyc\nnode_modules/\n.DS_Store\n", "scripts/frontend-recipe.mjs: full resource distribution policy", "npm package files; no missing materialized references allowed");
   const index = outputs.get("skills/frontend/references/design/_INDEX.md");
   if (index === undefined) throw new Error("missing generated frontend index");
-  const recipe = frontendRecipe(root, index.toString("utf8"));
-  const frontend = checkFrontendAssets(root, recipe);
+  const recipe = frontendRecipe(packageRoot, index.toString("utf8"));
+  const frontend = checkFrontendAssets(packageRoot, recipe);
   if (frontend.outcome !== "ready") throw new Error(`frontend resource closure drift: ${frontend.errors.join("; ")}`);
   const collisions = recipe.filter((row) => outputs.has(`skills/frontend/${row.target}`));
   if (collisions.length) throw new Error(`source/frontend resource collision: ${collisions.map((row) => row.target).join(",")}`);
   for (const row of frontend.files) trace.push({ source: `${FRONTEND_PINS[row.upstream].repository}@${FRONTEND_PINS[row.upstream].commit}/${row.source}`, artifact: `skills/frontend/${row.target}`, consumer: "frontend native resourceBase; verbatim read/reference/Python resource (no build execution)", rules: ["verbatim fixed-pin bytes; path mapping only"], ...(row.blob === undefined ? {} : { blob: row.blob }), test: "test/source-sync.test.ts; test/frontend-materialization.test.ts; packed inventory gate" });
   trace.push({ source: "scripts/frontend-recipe.mjs immutable path/blob provenance", artifact: "skills/frontend/.frontend-materialized.json", consumer: "offline completeness/integrity and package gate", rules: ["explicit-only network synchronization"] });
-  const skillsSource = readFileSync(join(root, "src/skills.ts"), "utf8").replaceAll("\r\n", "\n");
+  const skillsSource = readFileSync(join(packageRoot, "src/skills.ts"), "utf8").replaceAll("\r\n", "\n");
   const begin = "// BEGIN SOURCE SKILL METADATA", end = "// END SOURCE SKILL METADATA";
   const metadata = `export const DSMM_SKILL_DESCRIPTIONS: Record<DsmmAvailableSkillName, string> = ${JSON.stringify(descriptions, null, 2)};\n`;
   outputs.set("src/skills.ts", Buffer.from(skillsSource.replace(section(skillsSource, begin, end, "src/skills.ts"), `${begin}\n${metadata}`)));
-  const unused = [...inputs.files.keys()].filter((path) => !consumed.has(path));
+  const unused = [...inputs.keys()].filter((path) => !consumed.has(path));
   if (unused.length) throw new Error(`unused source inputs outside generator closure: ${unused.join(",")}`);
-  const resources = skillResourceProblems(root, outputs);
+  const resources = skillResourceProblems(packageRoot, outputs);
   if (resources.length) throw new Error(`source resource closure drift: ${JSON.stringify(resources)}`);
-  add("prompts/source/manifest.json", json({ sourceRef: inputs.provenance.rootBaselineCommit, sourceInput: "DSMM-owned source-inputs/root snapshot; sourceRef is the Root baseline, overlayPaths are raw-byte differences including uncommitted/untracked inputs or checkout byte conversion, not a fabricated Root commit", sourceProvenance: inputs.provenance, host: "DSH 0.2.0-rc.2", license: "LicenseRef-AAAPL; full package LICENSE applies to OCMM-derived modifications; original third-party notices retained per skill", attribution: "OCMM Hugefiver; v1 workflow forks retain obra/superpowers lineage; standalone notices/licenses copied recursively", rules: ADAPTATION_RULES, anchors, roles: rows.map(({ id, sourceId, catalogSource, promptSource, promptArtifact, terminalArtifact }) => ({ id, sourceId, catalogSource, promptSource, promptArtifact, terminalArtifact, consumer: "src/roles.ts persona + active src/prompts.ts calibration", test: "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts" })), skills: SKILL_SOURCES, exclusions: EXCLUSIONS, files: trace }), "scripts/source-inventory.mjs and validated source-inputs/manifest.json", "maintenance sync/check; test/source-sync.test.ts");
+  add("prompts/source/manifest.json", json({ sourceRoot: "..", sourceInventory: "scripts/source-inventory.mjs", host: "DSH 0.2.1-rc.2", license: "LicenseRef-AAAPL; full package LICENSE applies to OCMM-derived modifications; original third-party notices retained per skill", attribution: "OCMM Hugefiver; v1 workflow forks retain obra/superpowers lineage; standalone notices/licenses copied recursively", rules: ADAPTATION_RULES, anchors, roles: rows.map(({ id, sourceId, catalogSource, promptSource, promptArtifact, terminalArtifact }) => ({ id, sourceId, catalogSource, promptSource, promptArtifact, terminalArtifact, consumer: "src/roles.ts persona + active src/prompts.ts calibration", test: "test/source-sync.test.ts; test/prompts.test.ts; test/roles.test.ts" })), skills: SKILL_SOURCES, exclusions: EXCLUSIONS, files: trace }), "repository root inputs declared by scripts/source-inventory.mjs", "maintenance sync/check; test/source-sync.test.ts");
   return outputs;
 }
 
-export function syncSourceAssets({ check = false, root = dsmmRoot, sourceRoot = dsmmRoot, inputRoot = join(sourceRoot, "source-inputs") } = {}) {
-  const outputs = sourceOutputs({ root: sourceRoot, inputRoot }), differences = [];
-  const frontend = frontendRecipe(sourceRoot, outputs.get("skills/frontend/references/design/_INDEX.md").toString("utf8")).map((row) => `skills/frontend/${row.target}`);
+export function syncSourceAssets({ check = false, root = dsmmRoot, packageRoot = dsmmRoot, sourceRoot = repositoryRoot } = {}) {
+  const outputs = sourceOutputs({ packageRoot, sourceRoot }), differences = [];
+  const frontend = frontendRecipe(packageRoot, outputs.get("skills/frontend/references/design/_INDEX.md").toString("utf8")).map((row) => `skills/frontend/${row.target}`);
   const allowed = new Set([...outputs.keys(), ...frontend, "skills/frontend/.frontend-materialized.json"]);
   for (const directory of ["prompts/source", ...Object.keys(SKILL_SOURCES).map((name) => `skills/${name}`)]) {
     if (!existsSync(join(root, directory))) continue;

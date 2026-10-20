@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,9 +8,24 @@ import { DSMM_ROLES, DSMM_ROLE_IDS } from "../lib/roles.js";
 import { DSMM_SKILL_NAMES, readBundledSkill } from "../lib/skills.js";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const repositoryRoot = dirname(root);
 const maintenance = await import(new URL("../scripts/sync-source-assets.mjs", import.meta.url).href);
 const adaptation = await import(new URL("../scripts/source-adaptations.mjs", import.meta.url).href);
 const checks = await import(new URL("../scripts/check-source-assets.mjs", import.meta.url).href);
+const inventory = await import(new URL("../scripts/source-inventory.mjs", import.meta.url).href);
+
+function sourceFixture() {
+  const directory = mkdtempSync(join(tmpdir(), "dsmm-root-source-"));
+  for (const path of inventory.SOURCE_INPUT_FILES as string[]) {
+    mkdirSync(dirname(join(directory, path)), { recursive: true });
+    cpSync(join(repositoryRoot, path), join(directory, path));
+  }
+  for (const source of Object.values(inventory.SKILL_SOURCES) as string[]) {
+    mkdirSync(dirname(join(directory, source)), { recursive: true });
+    cpSync(join(repositoryRoot, source), join(directory, source), { recursive: true });
+  }
+  return directory;
+}
 
 test("native skills expose their bundled bodies and resource directories", async () => {
   const expected: Map<string, Buffer> = maintenance.sourceOutputs();
@@ -42,6 +57,12 @@ test("sync is idempotent and check reports missing resources without writing", (
     const result = maintenance.syncSourceAssets({ root: temporary, check: true });
     assert.deepEqual(result.differences, ["skills/brainstorming/SKILL.md"]);
     assert.equal(existsSync(target), false);
+    maintenance.syncSourceAssets({ root: temporary });
+    const extra = "skills/debugging/references/scripts/injected.mjs";
+    writeFileSync(join(temporary, extra), "export default 1;\n");
+    assert.ok(maintenance.syncSourceAssets({ root: temporary, check: true }).differences.includes(extra));
+    assert.throws(() => maintenance.syncSourceAssets({ root: temporary }), /unexpected prepared source resources/u);
+    assert.equal(readFileSync(join(temporary, extra), "utf8"), "export default 1;\n");
     assert.throws(() => adaptation.adaptPrompt("prompts/v1/agents/orchestrator.md", "missing source anchor"), /anchor drift/u);
   } finally {
     assert.equal(readFileSync(join(temporary, ".run-owner"), "utf8"), "source-sync.test.ts\n");
@@ -68,5 +89,42 @@ test("package-independent resource layout preserves meaningful fixtures and refu
   } finally {
     assert.equal(readFileSync(join(temporary, ".run-owner"), "utf8"), "source-layout.test.ts\n");
     rmSync(temporary, { recursive: true });
+  }
+});
+
+test("sync reads declared repository-root inputs and rejects unsafe or incomplete resources", () => {
+  const sourceRoot = sourceFixture();
+  try {
+    const skill = "skills/v1/brainstorming/SKILL.md";
+    const original = readFileSync(join(sourceRoot, skill), "utf8");
+    const description = "A direct repository source metadata change.";
+    writeFileSync(join(sourceRoot, skill), original.replace(/^description:.*$/mu, `description: ${JSON.stringify(description)}`));
+    const outputs: Map<string, Buffer> = maintenance.sourceOutputs({ sourceRoot });
+    assert.ok(outputs.get("src/skills.ts")!.toString("utf8").includes(JSON.stringify(description)));
+    assert.ok(outputs.get("skills/brainstorming/SKILL.md")!.toString("utf8").includes(description));
+
+    const policy = "src/hooks/config.ts", policyBytes = readFileSync(join(sourceRoot, policy));
+    writeFileSync(join(sourceRoot, policy), policyBytes.toString("utf8").replace("The role prompt above is authoritative for this agent's scope, permissions, and output contract.", "Removed authority boundary."));
+    assert.throws(() => maintenance.sourceOutputs({ sourceRoot }), /source anchor drift/u);
+    writeFileSync(join(sourceRoot, policy), policyBytes);
+
+    rmSync(join(sourceRoot, "skills/debugging/references/tools/dap.md"));
+    assert.throws(() => maintenance.sourceOutputs({ sourceRoot }), /source resource closure drift/u);
+    cpSync(join(repositoryRoot, "skills/debugging/references/tools/dap.md"), join(sourceRoot, "skills/debugging/references/tools/dap.md"));
+
+    const frontendIndex = "skills/frontend/references/design/_INDEX.md";
+    const indexBytes = readFileSync(join(sourceRoot, frontendIndex));
+    const changedIndex = indexBytes.toString("utf8").replace("### Mood-based shortcuts", "| `source-only-brand.md` | Required input brand |\n\n### Mood-based shortcuts");
+    assert.notEqual(changedIndex, indexBytes.toString("utf8"));
+    writeFileSync(join(sourceRoot, frontendIndex), changedIndex);
+    assert.throws(() => maintenance.sourceOutputs({ sourceRoot }), /missing frontend resource: references\/design\/source-only-brand\.md/u);
+    writeFileSync(join(sourceRoot, frontendIndex), indexBytes);
+
+    const intent = join(sourceRoot, "src/intent");
+    rmSync(intent, { recursive: true });
+    symlinkSync(join(repositoryRoot, "src/intent"), intent, process.platform === "win32" ? "junction" : "dir");
+    assert.throws(() => maintenance.sourceOutputs({ sourceRoot }), /linked or non-regular source input/u);
+  } finally {
+    rmSync(sourceRoot, { recursive: true });
   }
 });
