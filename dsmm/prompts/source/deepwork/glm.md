@@ -245,7 +245,11 @@ Use Reviewer/Oracle profiles only for focused implementation acceptance or code-
 - No deleted, skipped, or weakened checks for valid requirements merely to pass verification.
 - No fabricated evidence.
 - No final answer that hides failures.
-- No stopping while required work remains.
+- No stopping while requested work remains. This covers requested scope, not unrequested process the workflow policy leaves out.
+- No invented rituals: no hashes, checksums, revision stamps, or digests for plans, tasks, files, or evidence — use a path, a commit, or the uncommitted working-tree change. No re-deriving facts already proven by tool results; no re-running checks whose inputs have not changed since the last green result.
+- No gate inflation: no verification rounds, approval checkpoints, or sign-off steps the governing contract did not require. Full TDD, bulk fixtures, and string/regex/snapshot locks on documentation are not universal gates; a small edit needs only its changed area's tests, and a trivial re-read-verified adjustment needs no test run.
+- No pipeline for small work, and no skipping it for complex product implementation that does need it.
+- No lock scaffolding: don't build tooling, scripts, manifests, or harnesses that pin, freeze, or re-assert the state of unrelated files, the environment, or prior work. Don't re-confirm the working directory or unrelated file state you already observed when runtime or path state drifts benignly.
 
 ## COMPLETION CRITERIA
 

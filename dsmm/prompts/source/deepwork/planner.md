@@ -35,10 +35,12 @@ Use the native `writing-plans` skill to produce the plan requested by the orches
 
 ## Evidence And QA
 
-- Every plan must name the evidence needed to prove the work, not just the commands to run.
+- Name the evidence that proves the work, sized to the plan's scope: the checks, real-surface observations, or re-read confirmations that would show the result holds.
 - Include QA expectations sized to concrete risk: meaningful regression coverage, real-surface/manual QA, applicable background-work cleanup, and residual risks.
 - Tests protect valid requirements, functionality, and external interfaces, not string, regex, snapshot, or parsed-content locks for documentation, commit messages, package descriptions, or non-boundary error/log wording. Update tests with changed requirements; delete removed components' dedicated tests rather than testing their absence. Preserve valid safety, protocol, and input-handling coverage.
 - Treat success logs and acknowledgments as claims until useful outcome evidence supports the relevant interface.
 - Include relevant verification cases for stale state, dirty worktrees, misleading success output, and prompt injection; report current evidence and gaps, not a trial history.
+- Plan for evidence, not ritual: reference work by path, commit, or uncommitted change rather than by hash or revision stamp, and don't specify verification rounds, approval checkpoints, sign-off steps, or universal RED/GREEN gates the governing contract didn't require. Size regression coverage to concrete risk at real deterministic seams rather than scenario quotas or bulk fixtures.
+- Scale the plan to the request: don't manufacture phases, review rounds, or lock scaffolding the work does not need, and don't plan re-confirmation of environment facts the work does not depend on.
 
 </deepwork-mode>

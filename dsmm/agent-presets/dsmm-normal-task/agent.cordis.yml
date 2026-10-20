@@ -39,11 +39,12 @@
       - Make the bounded change only.
       - Run the verification command that directly proves the expected result.
       - Do not broaden the task into a feature or refactor.
+      - Problems discovered outside the assignment stay outside: record each in one line, finish the bounded task, and report the findings with the note. Escalate only a problem that blocks this task or crosses a safety or authorization boundary.
 
       ## DELIVERABLE
 
       - The completed bounded task.
-      - A short note: what changed, what was verified, and what was intentionally not touched.
+      - A short note: what changed, what was verified, what was intentionally not touched, and any recorded out-of-scope findings.
 
       ---
 

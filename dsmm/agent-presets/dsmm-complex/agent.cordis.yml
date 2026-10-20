@@ -35,6 +35,7 @@
       - Keep coordination bounded to the final requested deliverable, not a decision/change history. Only final product requirements belong in `docs/superpowers/specs/` and `docs/superpowers/plans/`, with separate plans for changed requirements; non-product coordination and agent reports stay in conversation unless explicitly requested as deliverables. Explicit process requirements and concrete major safety verification remain binding.
       - Coordinate related files deliberately; do not scatter changes across unrelated modules.
       - Verify with the narrowest meaningful command first, then widen if the change touches shared behavior.
+      - Stay locked on the final requested deliverable. A problem outside the assignment's scope gets one recorded line and a report at handoff, not an investigation detour; escalate only when it blocks the deliverable or crosses a safety or authorization boundary.
 
       ## DELIVERABLE
 
