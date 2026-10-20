@@ -14,7 +14,7 @@ import { DSMM_LOCALES } from "./profile-locale.js";
 import type { DsmmLocale } from "./profile-locale.js";
 import { normalizeModelRouteJson, validateModelRouteFieldName } from "./route-json.js";
 import type { ModelRouteJson } from "./route-json.js";
-import { DEFAULT_PERMISSION_CONTROL, permissionControlSchema, resolvePermissionControl } from "./permission-settings.js";
+import { DEFAULT_PERMISSION_CONTROL, nativeCommandMatchSchema, permissionControlSchema, resolvePermissionControl } from "./permission-settings.js";
 import type { PermissionControlSchemaInput, PermissionControlSettings } from "./permission-settings.js";
 
 export { DSMM_LOCALES } from "./profile-locale.js";
@@ -478,6 +478,8 @@ export function deploymentEditorSchema(native = false): DeploymentSchemaNode {
 /** Transport nodes carry no business defaults. Only deployment input is volatile. */
 function sparseSchema(schema: Schema): Schema {
   if (schema === permissionControlSchema && schema.type === "transform") return sparseSchema(schema.inner!);
+  // Whole command entries are never partial overlays; retain the match's required fields.
+  if (schema === nativeCommandMatchSchema) return schema;
   const { default: _default, required: _required, ...meta } = schema.meta;
   return new Schema({ ...schema, meta,
     ...(schema.dict === undefined ? {} : { dict: Object.fromEntries(Object.entries(schema.dict).map(([key, child]) => [key, sparseSchema(child)])) }),

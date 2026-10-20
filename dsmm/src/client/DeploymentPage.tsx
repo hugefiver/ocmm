@@ -8,7 +8,7 @@ import type { DeploymentController } from "./deployment-controller.js";
 import type { PermissionController } from "./permission-controller.js";
 import { deploymentWorkspace } from "./deployment-workspace.js";
 import type { ConfigScope, DeploymentWorkspace } from "./deployment-workspace.js";
-import { CONFIG_MODULES, moduleFields, moduleFor, moduleTitle } from "./deployment-modules.js";
+import { NAVIGATION_MODULES, moduleFields, moduleFor, moduleTitle } from "./deployment-modules.js";
 import type { ConfigModule } from "./deployment-modules.js";
 import { at, inspectorPaths, scopeSchema, visibleDeploymentPath } from "./deployment-data.js";
 import { Field, displayValue, permissionText } from "./DeploymentFields.js";
@@ -30,7 +30,7 @@ export interface DeploymentPageProps extends Locale {
 export function ScopeSave({ controller, workspace, refreshOnly = false, t }: Locale & { controller: DeploymentController; workspace?: DeploymentWorkspace; refreshOnly?: boolean }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const pending = [...new Set(controller.pendingPaths().map(moduleFor))];
-  return <section className="dsmm-scope-save" aria-label={t(refreshOnly ? "refresh" : "saveScope")}>
+  return <section className="dsmm-scope-save" aria-label={t("saveScope")}>
     <p className="dsmm-status" role="status" aria-live="polite">{refreshOnly ? state.busy ? t("loading") : "" : state.busy ? t("saving") : state.refreshRequired ? t("savedRefreshRequired") : state.saved ? t("saved") : state.dirty ? t("dirty") : ""}</p>
     {!refreshOnly && pending.length > 0 && <p>{t("pendingModules")}: {pending.map(module => t(moduleTitle(module))).join(" · ")}</p>}
     {state.issue !== null && <p className="dsmm-issue" role="alert">{t(state.issue)}</p>}
@@ -84,6 +84,10 @@ export function DeploymentPage(props: DeploymentPageProps) {
   const { t } = props, snapshot = state.snapshot ?? core.snapshot, active = navigation.module;
   useEffect(() => { if (props.view === "page") void props.core.refresh(); }, [props.core, props.view]);
   useEffect(() => { if (props.forms !== undefined) workspace.bindForms(props.forms); }, [workspace, props.forms]);
+  // First visit opens the first section with editable fields (or Configuration state).
+  useEffect(() => {
+    if (navigation.module === null && core.snapshot !== null) workspace.request({ scope: navigation.scope, module: null });
+  }, [core.snapshot, navigation.module, navigation.scope, workspace]);
   useEffect(() => {
     if (active !== null) heading.current?.focus(); else if (previous.current !== null) triggers.current.get(previous.current)?.focus();
     previous.current = active;
@@ -99,37 +103,41 @@ export function DeploymentPage(props: DeploymentPageProps) {
   }, [navigation.pending, navigation.scope, active]);
   if (props.view === "summary") return <span>{t("summary")}</span>;
   const fields = snapshot === null || active === null ? [] : moduleFields(scopeSchema(snapshot, controller.layer), active, controller.layer);
-  const modules = CONFIG_MODULES.filter(module => module === "state" || module === "permissions" || snapshot === null || moduleFields(snapshot.schema, module, "global").length + moduleFields(scopeSchema(snapshot, "profile"), module, "profile").length > 0);
+  const tabs = NAVIGATION_MODULES.filter(module => module !== "other" || snapshot === null
+    || moduleFields(snapshot.schema, "other", "global").length + moduleFields(scopeSchema(snapshot, "profile"), "other", "profile").length > 0);
+  const select = (module: ConfigModule) => workspace.request({ scope: navigation.scope, module });
+  const onTabKey = (event: { key: string; preventDefault(): void }, index: number) => {
+    const last = tabs.length - 1, move = (target: number) => { const next = tabs[(target + tabs.length) % tabs.length]; triggers.current.get(next)?.focus(); };
+    if (event.key === "ArrowRight") move(index + 1);
+    else if (event.key === "ArrowLeft") move(index - 1);
+    else if (event.key === "Home") move(0);
+    else if (event.key === "End") move(last);
+    else return;
+    event.preventDefault();
+  };
   const scopeActions = <ScopeSave controller={active === "state" ? props.core : controller} workspace={workspace} refreshOnly={active === "state" || workspace.controller() === null} t={t} />;
   return <section className="dsmm-profiles dsmm-deployment" data-dsmm-page aria-label={t("title")}>
     <p className="dsmm-hint">{t("boundaries")}</p>
     <div className="dsmm-field"><label htmlFor={`${id}-scope`}>{t("scope")}</label><select ref={scopeControl} id={`${id}-scope`} value={navigation.scope} disabled={state.busy || navigation.pending !== null} onChange={event => {
-      const scope = event.currentTarget.value; if (scope === "global" || scope === "profile") workspace.request({ scope, module: active });
+      const scope = event.currentTarget.value; if (scope === "global" || scope === "profile") workspace.request({ scope, module: null });
     }}><option value="global">{t("global")}</option><option value="profile">{t("profile")}</option></select></div>
     <p className="dsmm-hint">{t(navigation.scope === "global" ? "globalHint" : "profileHint")}</p>
     {navigation.scope === "profile" && (navigation.native === null || !navigation.native.canWriteProfile()) && <p className="dsmm-hint">{t("unavailableForm")}</p>}
-    <div className="dsmm-deployment-frame" data-drawer-open={active !== null}>
-      <nav className="dsmm-module-list" aria-label={t("modules")}>
-        {modules.map(module => <Button key={module} ref={element => { if (element !== null) triggers.current.set(module, element); }} type="button" variant="outline" disabled={navigation.pending !== null} aria-expanded={active === module} aria-controls={`${id}-drawer`} onClick={() => workspace.request({ scope: navigation.scope, module })}>{t(moduleTitle(module))}</Button>)}
-      </nav>
-      {active !== null && <aside id={`${id}-drawer`} className="dsmm-module-drawer" aria-labelledby={`${id}-heading`} data-dsmm-module={active} onKeyDown={event => {
-        if (event.key !== "Escape" || event.defaultPrevented) return;
-        const target = event.target as HTMLElement;
-        if (target.tagName === "SELECT" && (!globalThis.CSS?.supports("selector(select:open)") || target.matches("select:open"))) return;
-        event.preventDefault(); if (navigation.pending !== null) workspace.continueEditing(); else workspace.request({ scope: navigation.scope, module: null });
-      }}>
-        <div className="dsmm-drawer-heading"><h2 id={`${id}-heading`} ref={heading} tabIndex={-1}>{t(moduleTitle(active))}</h2><Button type="button" variant="outline" disabled={state.busy} onClick={() => workspace.request({ scope: navigation.scope, module: null })}>{t("close")}</Button></div>
-        {active === "state" ? <><StateInspector controller={props.core} t={t} />{scopeActions}</> : <>
-          {navigation.scope === "profile" && navigation.native === null ? <p>{t("unavailableForm")}</p> : state.snapshot === null ? <p>{t(state.busy ? "loading" : "unavailable")}</p> : <div data-dsmm-layer={controller.layer} aria-busy={state.busy} className="dsmm-structured">
-            {fields.length === 0 && <p className="dsmm-hint">{t("noModuleFields")}</p>}
-            {fields.map(([key, schema]) => <Field key={`${navigation.scope}:${key}`} schema={schema} path={[key]} controller={controller} initiallyOpen={fields.length === 1 && active !== "permissions"} disclosures={disclosures.current[navigation.scope]} t={t} />)}
-            {active === "run" && controller.layer === "profile" && <NativeRuntimeState value={state.snapshot.subagentRuntime} t={t} />}
-          </div>}
-          {scopeActions}
-           {active === "permissions" && <section className="dsmm-zone"><h3>{t("rootRules")}</h3><p className="dsmm-hint">{t("rootRulesHint")}</p>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionsPanel controller={workspace.permissions} t={props.permissionsT ?? (key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key)} />}</section>}
-        </>}
-      </aside>}
-    </div>
+    <div className="dsmm-section-tabs" role="tablist" aria-label={t("modules")}>{tabs.map((module, index) => <Button key={module} ref={element => { if (element !== null) triggers.current.set(module, element); else triggers.current.delete(module); }} role="tab" type="button"
+      id={`${id}-tab-${module}`} aria-selected={active === module} aria-controls={`${id}-panel`} tabIndex={active === module ? 0 : -1} data-dsmm-tab={module}
+      onKeyDown={event => onTabKey(event, index)} onClick={() => select(module)}>{t(moduleTitle(module))}</Button>)}</div>
+    {active !== null && <section id={`${id}-panel`} role="tabpanel" className="dsmm-section-panel" aria-labelledby={`${id}-tab-${active}`} data-dsmm-module={active}>
+      <div className="dsmm-panel-heading"><h2 id={`${id}-heading`} ref={heading} tabIndex={-1}>{t(moduleTitle(active))}</h2></div>
+      {active === "state" ? <><StateInspector controller={props.core} t={t} />{scopeActions}</> : <>
+        {navigation.scope === "profile" && navigation.native === null ? <p>{t("unavailableForm")}</p> : state.snapshot === null ? <p>{t(state.busy ? "loading" : "unavailable")}</p> : <div data-dsmm-layer={controller.layer} aria-busy={state.busy} className="dsmm-structured">
+          {fields.length === 0 && <p className="dsmm-hint">{t("noModuleFields")}</p>}
+          {fields.map(([key, schema]) => <Field key={`${navigation.scope}:${key}`} schema={schema} path={[key]} controller={controller} initiallyOpen={fields.length === 1 && active !== "permissions"} disclosures={disclosures.current[navigation.scope]} t={t} />)}
+          {active === "run" && controller.layer === "profile" && <NativeRuntimeState value={state.snapshot.subagentRuntime} t={t} />}
+        </div>}
+        {scopeActions}
+        {active === "permissions" && <section className="dsmm-zone dsmm-rules-transaction" aria-label={t("rootRules")}><h3>{t("rootRules")}</h3><p className="dsmm-hint">{t("rootRulesHint")}</p>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionsPanel controller={workspace.permissions} t={props.permissionsT ?? (key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key)} />}</section>}
+      </>}
+    </section>}
     {navigation.pending !== null && <section className="dsmm-confirm" role="group" aria-label={t("leaveDraft")} onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); workspace.continueEditing(); } }}><p>{t("leaveDraft")}</p><div className="dsmm-actions">
       <Button ref={confirmation} type="button" variant="primary" onClick={() => workspace.continueEditing()}>{t("continueEditing")}</Button>
       <Button type="button" variant="outline" onClick={() => workspace.keepAndNavigate()}>{t("keepDraft")}</Button>

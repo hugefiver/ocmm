@@ -79,13 +79,8 @@ export async function apply(input: DshContext, config: Config = {}, startupOptio
   const deployment = new DsmmDeploymentConfig(ctx, config);
   const lifetime = new AbortController();
   scopeLifetime(ctx, "dsmm: retire Core", () => lifetime.abort());
-  // Install a startup execution fence before asynchronous configuration reads.
   let admission: NativeAdmission | undefined;
   const assert = (agent: Agent) => { lifetime.signal.throwIfAborted(); if (!admission) throw new Error("DSMM initialization is incomplete"); return admission.assert(agent); };
-  ctx.on("agent/created", () => { lifetime.signal.throwIfAborted(); if (!admission?.isReady) throw new Error("DSMM initialization is incomplete"); }, { global: true, prepend: true });
-  ctx.on("agent/pre-step", async (frame, next) => { await admission?.ensure(frame.agent); assert(frame.agent); return next(); }, { global: true, prepend: true });
-  ctx.on("agent/request", async (frame, next) => { await admission?.ensure(frame.agent); assert(frame.agent); return next(); }, { global: true, prepend: true });
-  ctx.on("tools/pre-execute", async (exec, next) => { if (exec.agent) { await admission?.ensure(exec.agent); assert(exec.agent); } return next(); }, { global: true, prepend: true });
   const startup = await deployment.readDesired(); lifetime.signal.throwIfAborted();
   const getSettings: DsmmSettingsGetter = agent => agent === undefined ? startup.settings : admission!.configuration(agent as Agent).settings;
   getSettings.admission = agent => agent === undefined ? profiles.admission() : admission!.configuration(agent as Agent);
@@ -107,6 +102,7 @@ export async function apply(input: DshContext, config: Config = {}, startupOptio
   ctx.provide("dsmmProfileRuntime", profiles);
   ctx.provide("dsmmDeploymentConfig", deployment);
   ctx.provide("dsmmCoreLlmOwner", { async admit(frame) {
+    if (!admission!.owns(frame.agent)) return undefined;
     const captured = assert(frame.agent), full = nativeStandingFullAccess(ctx, frame.agent);
     const permissions = ctx.get("dsmmPermissionController");
     if (!full && captured.settings.permissionControl.enabled && permissions === undefined) throw new DsmmProfileError("unavailable", "Core permission authority is not ready.");

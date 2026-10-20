@@ -23,11 +23,11 @@ Native call views show the target in collapsed rows, distinguish requested from 
 | Profile selection in a new session | The working tree supports choosing a profile or deployment defaults before the first turn. | Preserve first-request, child-routing and draft behavior through supported native Client integration. |
 | Live overlay Apply | Unavailable. Save/select a future default for a new session; ordinary model and mode actions retain independent capabilities. | Exact configuration/call/approval binding without cross-call authority reuse. See [approval boundaries](deferred-native-approval-risk.md). |
 | Running-call background handoff | Unavailable. Select waiting or native parent delivery before starting; don't restart a task to simulate transfer. | A supported same-activation ownership/delivery handoff. |
-| DSMM cold resume | Patched Host supports read-only history and explicit continuation with fresh admission. Native Client/bootstrap/navigation enforce generation-bound preparation. | Verify the complete browser/Desktop carrier and socket-retry paths before claiming supported deployment. |
+| Restricted-role continuation after restoration | Native history and restoration remain available under DSH's rules; historical metadata does not grant current DSMM role authority. DSMM-specific restrictions are not guaranteed across restoration. | Supported Host lifecycle hooks that preserve the required readonly, tool and depth restrictions without a global restoration gate. |
 | Non-disruptive hot update | No uninterrupted live-session guarantee. Retire admissions and let native owners cancel/dispose owned work; guards remain fail-closed. | Native lifecycle support that preserves active task/approval boundaries. |
 | Catalog-backed raw combinations | Rejected where the complete composition can't be reliably reproduced, regardless of native or DSMM parameter source. Standard calls aren't affected. | A public seam that can reproduce the full catalog composition and preserve native capability/effort semantics. |
 | Repeated read-only Git approval | Keep native approval; don't expand Allow rules based on an unexplained prompt. | Exact triggering command, working directory and approval reason. |
-| Shell Fake-IP access | Rejection source remains unknown; don't guess a sandbox or permission change. | Concrete command/error/runner evidence identifying the actual rejection layer. See [network boundaries](web-fetch-fakeip.md). |
+| PowerShell Fake-IP access | Verified HTTPS through the current Mihomo Fake-IP route with Node/OpenSSL in native and DSMM `workspace-write`; Windows curl/Schannel fails in both sandbox paths. | Upstream Windows sandbox/Schannel compatibility; configured proxy-environment propagation remains unverified. See [network limitations](runtime-recovery.md#powershell-in-a-fake-ip-environment). |
 | External LSP | DSMM automatic mounting isn't delivered. DSH native definition/references/implementation/hover and independently configured MCP remain separate. | Supported APIs and explicit permissions for additional operations; no automatic external remount or scope expansion. |
 
 Search/Fetch retain the explicitly configured native provider. DSMM doesn't automatically enable a direct API, change credentials or forward the recent human question. HTTP Fake-IP behavior and network limits are maintained in [Fake-IP fetch](web-fetch-fakeip.md).
@@ -62,9 +62,36 @@ Sessions created by DSMM `0.2.x` must remain loadable under the supported curren
 
 - Register only the dispatcher as a selectable native preset. Delegation targets are not registered compositions: a delegated child shares its parent's standing composition, and the admitted invocation carries its role, identity and restrictions.
 - Blank preset switches to any other DSMM role are refused by the native registry; the admitted composition keeps executing.
-- DSMM installs no Host package patches. Persisted sessions resume with a fresh admission from the current deployment: history stays readable user intent, while delegation authority and child residency are never reconstructed from logs.
+- DSMM installs no Host package patches. Native restoration does not enroll reconstructed Agents in DSMM admission; history stays readable, while delegation authority and child residency are never reconstructed from logs.
 
 Existing [Fake-IP fetch](web-fetch-fakeip.md) protections remain in force.
+
+## Current: command-pattern allowlists
+
+- Use command patterns as the sole native-command rule format. `go build|test` matches either subcommand with variable trailing arguments. Legacy exact-command configuration is rejected without migration or silent permission expansion. See the [implementation plan](superpowers/plans/2026-10-21-command-pattern-only.md).
+- Match parsed command tokens rather than shell-string prefixes. A matching command does not authorize an additional pipeline, chained command or substitution. Variable arguments can still invoke the selected program's own scripts or subprocess features; sandbox and role restrictions remain necessary.
+- Preserve native deny/never, readonly, current ownership, approval consumption and configuration CAS. Pattern matching does not itself widen the sandbox or create remembered session approval.
+
+## Planned: session-scoped approval reuse
+
+- Implementation is deferred pending reassessment of a newer DSH release. Prefer native remembered approvals if available; otherwise decide whether a DSMM-scoped extension is warranted. The goals below do not select an implementation or authorize Host changes.
+- Let the model propose a command/subcommand pattern or supported path scope together with a reason. The operator chooses between approving once and remembering that explicit scope for the current session; the model cannot grant itself permission.
+- Keep remembered grants in memory for the current live session and Host run, with a visible revoke action. Do not save them as Global/profile configuration, restore them from history, or automatically share them with other sessions or delegated Agents. Session disposal, Host restart or plugin retirement invalidates them.
+- Display the approved command scope and sandbox mode separately. Reuse approval only for matching calls and the explicitly approved mode through the native approval service; native never/deny and readonly/role ceilings remain effective.
+- A remembered `danger-full-access` approval, if supported, must explicitly disclose the broader OS-permitted write scope. It is not a directory-only grant. Approving one command once must not silently disable confinement for later commands.
+- Verify reuse, non-matching calls, revocation and lifetime expiry through the supported approval path. This capability is planned, not part of the command-pattern implementation.
+
+## Planned: external-path and temporary-directory grants
+
+- Reassess the available public DSH interfaces before choosing an implementation. This capability remains deferred rather than blocking command-pattern or configuration improvements.
+- Target independent read and write permissions for exact paths or directory trees: normal workspace writes, configured external reads, and writes only to explicitly authorized external locations. A dedicated system-temp `dsh` subtree is a useful opt-in scope for creating, editing and cleaning Agent-owned temporary files; it must not grant access to the entire system temp directory or authorize deleting unrelated files.
+- DSH `0.2.1-rc.2` has no additional writable-root field in its standard execution policy. Its Windows backend supplies a private per-session/workspace `dsh-*` directory through child-process `TMP`/`TEMP`; this is neither a configurable fixed `temp/dsh` grant nor proof that native file tools share the same allowance.
+- Broader support depends on public Host path-grant interfaces consumed consistently by native file tools and shell confinement. Preserve readonly, resolve path/link boundaries, and verify that adjacent unapproved locations remain unwritable. Do not expose a nonfunctional setting, substitute full access, or implement a private ACL framework in DSMM.
+
+## Upstream follow-up: Windows Git Schannel
+
+- Track the sandbox/Schannel incompatibility reproduced with DSH `0.2.1-rc.2`; an upstream fix is not yet confirmed. Details and the explicit per-command OpenSSL workaround are in [runtime limitations](runtime-recovery.md#known-host-limitation-windows-sandbox-and-git-schannel).
+- On a candidate DSH update, verify Git HTTPS with Schannel through both native and DSMM-managed `workspace-write` execution, while retaining denial of unauthorized external writes. Do not disable certificate validation, silently change TLS backends or relax sandbox restrictions to obtain a passing result.
 
 ## Publication and Desktop installation
 

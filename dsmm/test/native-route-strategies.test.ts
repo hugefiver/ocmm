@@ -121,7 +121,10 @@ test("adapter-proven unknown model may advance, but generic NO_ADAPTER and other
     try {
       fixture.adapter.beforeStream = async (call) => { if (call.model === primary.model) throw new LlmError("deterministic classified failure", code); };
       const agent = await fixture.createAuxiliary("dsmm-reviewer"); await runFixtureTurn(agent);
-      assert.deepEqual(fixture.adapter.calls.map(({ model }) => model), code === "UNKNOWN_MODEL" ? [primary.model, backup.model] : [primary.model]);
+      const requests = fixture.adapter.calls.filter(({ purpose }) => purpose !== "compaction");
+      assert.deepEqual(requests.map(({ model }) => model), code === "UNKNOWN_MODEL" ? [primary.model, backup.model] : [primary.model]);
+      assert.ok(fixture.adapter.calls.filter(({ purpose }) => purpose === "compaction").every(({ model }) => model === primary.model));
+      assert.deepEqual(headerRoutes(agent), code === "UNKNOWN_MODEL" ? [primary, backup] : [primary]);
     } finally { await fixture.dispose(); }
   }
 });

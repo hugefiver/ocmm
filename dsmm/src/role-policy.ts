@@ -1,8 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { SubagentError, delegationDepthOf } from "@deepseek-ai/dsh-subagent";
 import type { Agent } from "@deepseek-ai/dsh-agent";
-import { symbols } from "@deepseek-ai/cordis";
-import type { Context } from "@deepseek-ai/cordis";
+import { Context, symbols } from "@deepseek-ai/cordis";
 import type { ToolRestriction, ToolRuntime, ToolDefinition, ToolExecution } from "@deepseek-ai/dsh-tools";
 import type { DshAgent, DshContext, DshAgentsRegistry } from "./dsh-types.js";
 import { DSMM_ROLES, allowedRoleChildren, isDsmmRoleId } from "./roles.js";
@@ -24,6 +23,7 @@ export interface DsmmRoleIdentity {
   readonly parent?: DshAgent;
   readonly readOnly?: boolean;
   readonly toolFilter?: ToolRestriction;
+  readonly preset?: string;
 }
 const liveIdentities = new WeakMap<DshAgent, DsmmRoleIdentity>();
 const toolIdentities = new WeakMap<DshAgent, { realm: object; definitions: Map<string, ToolDefinition> }>();
@@ -40,7 +40,15 @@ export function inheritToolFilter(parent?: ToolRestriction, requested?: ToolRest
   return Object.freeze({ ...(allow === undefined ? {} : { allow: Object.freeze([...allow]) }), deny: Object.freeze([...new Set([...parent?.deny ?? [], ...requested?.deny ?? []])]) });
 }
 export function resolveAdmittedDsmmRole(agent: DshAgent, settings: DsmmSettings, active: boolean): DsmmRoleId | undefined {
-  return liveIdentities.get(agent)?.role ?? resolveEffectiveDsmmRole(agent, settings, active);
+  const identity = liveIdentities.get(agent);
+  if (identity !== undefined) return identity.role;
+  if (Context.is(agent.ctx)) {
+    if (!settings.modules.deepwork.enabled || !agent.ctx.get("dsmmNativeAdmission")?.owns(agent as Agent) || agent.session.header?.origin === "subagent") return undefined;
+    const preset = agent.ctx.get("agentPresets")?.composedPreset(agent.ctx);
+    const role = isDsmmRoleId(preset) ? preset : active ? "dsmm-orchestrator" : undefined;
+    return role !== undefined && settings.roles[role] ? role : undefined;
+  }
+  return resolveEffectiveDsmmRole(agent, settings, active);
 }
 interface ToolCall {
   readonly agent: Agent; readonly context: Context; readonly registry: object; readonly realm?: object;
@@ -57,7 +65,9 @@ export class DsmmRolePolicy {
   constructor(private readonly ctx: DshContext, private readonly getSettings: DsmmSettingsGetter, private readonly mode: DeepworkModeController) {}
   private agents(): DshAgentsRegistry { const agents = this.ctx.get?.<DshAgentsRegistry>("agents"); if (!agents) throw new SubagentError("Native registry unavailable", "UNAUTHORIZED"); return agents; }
   assertLive(agent: DshAgent): void { if (!agent.id || this.agents().get(agent.id) !== agent) throw new SubagentError("Exact live Agent required", "UNAUTHORIZED"); }
-  private selected(agent: DshAgent): string | undefined { return (agent.ctx as Context).get("agentPresets")?.composedPreset(agent.ctx as Context) ?? resolveSelectedAgentPreset(agent.session); }
+  private selected(agent: DshAgent): string | undefined {
+    return Context.is(agent.ctx) ? agent.ctx.get("agentPresets")?.composedPreset(agent.ctx) : resolveSelectedAgentPreset(agent.session);
+  }
   validateRootRole(agent: DshAgent, admission: DsmmProfileAdmission): void {
     this.assertLive(agent);
     const selected = this.selected(agent);
@@ -68,11 +78,20 @@ export class DsmmRolePolicy {
     if (!this.agents().isOwnedBy(agent.id!, parent) || agent.session.header?.parentSession !== parent.id || this.selected(agent) !== this.selected(parent)) throw new SubagentError("Child lineage or composition mismatch", "UNAUTHORIZED");
     if (maximum !== undefined && delegationDepthOf(agent as Agent) > maximum) throw new SubagentError("Delegation depth exceeded", "UNAUTHORIZED");
     const upstream = this.identity(parent);
-    liveIdentities.set(agent, Object.freeze({ role: invocation.target, child: true, parent, epoch: admission.epoch,
+    liveIdentities.set(agent, Object.freeze({ role: invocation.target, child: true, parent, preset: this.selected(agent), epoch: admission.epoch,
       readOnly: this.readOnly(upstream) || DSMM_ROLES.find(row => row.id === invocation.target)!.access === "read-only",
       toolFilter: inheritToolFilter(inheritToolFilter(upstream.toolFilter, toolFilter), this.visibleToolCeiling(parent)) }));
     bindRoleInvocation(agent, invocation);
     captureRoleRuntimePolicy(admission.settings, invocation.target, invocation.policy);
+  }
+  /** Ordinary native inheritance captures ceilings without inventing a role invocation. */
+  bindInheritedChild(agent: DshAgent, parent: DshAgent, admission: DsmmProfileAdmission): void {
+    this.assertLive(agent); this.assertModuleAdmission(parent);
+    const upstream = this.identity(parent), preset = this.selected(agent);
+    if (upstream.role !== undefined || preset?.startsWith("dsmm-") || !this.agents().isOwnedBy(agent.id!, parent)
+      || agent.session.header?.origin !== "subagent" || agent.session.header.parentSession !== parent.id) throw new SubagentError("Ordinary inheritance requires its exact non-controlled parent", "UNAUTHORIZED");
+    liveIdentities.set(agent, Object.freeze({ child: true, parent, preset, epoch: admission.epoch,
+      readOnly: this.readOnly(upstream), toolFilter: inheritToolFilter(upstream.toolFilter, this.visibleToolCeiling(parent)) }));
   }
   release(agent: DshAgent): void { liveIdentities.delete(agent); toolIdentities.delete(agent); }
   assertModuleAdmission(agent: DshAgent): void {
@@ -80,7 +99,8 @@ export class DsmmRolePolicy {
     const settings = this.getSettings(agent), identity = liveIdentities.get(agent), selected = this.selected(agent);
     if (identity?.child) {
       this.assertLive(identity.parent!);
-      if (!this.agents().isOwnedBy(agent.id!, identity.parent!) || selected !== this.selected(identity.parent!)) throw new SubagentError("Child admission no longer matches composition", "UNAUTHORIZED");
+      if (!this.agents().isOwnedBy(agent.id!, identity.parent!) || selected !== identity.preset
+        || identity.role !== undefined && selected !== this.selected(identity.parent!)) throw new SubagentError("Child admission no longer matches composition", "UNAUTHORIZED");
     } else if (agent.session.header?.origin !== "subagent") this.validateRootRole(agent, this.getSettings.admission!(agent));
     const role = identity?.role ?? (isDsmmRoleId(selected) ? selected : undefined);
     if (role && (!settings.modules.deepwork.enabled || !settings.roles[role])) throw new SubagentError("Role is disabled in the immutable admission", "UNAUTHORIZED");

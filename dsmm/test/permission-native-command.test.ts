@@ -9,9 +9,9 @@ import type { PermissionShellIdentity } from "../src/permission-shell.ts";
 const workspace = resolve("native-command-workspace");
 const powershell: PermissionShellIdentity = { executable: "pwsh", dialect: "powershell", commandField: "command", cwdField: "workdir" };
 const posix: PermissionShellIdentity = { executable: "bash", dialect: "posix", commandField: "script", cwdField: "cwd" };
-function settings(args: readonly string[], changes: Partial<NativeCommandEntry["match"]> = {}): NativeCommandsSettings {
-  return { enabled: true, entries: [{ id: "exact", mode: "allow", sandboxMode: "danger-full-access", match: {
-    tool: "pwsh", executable: "go", subcommand: "test", args, workingDirectory: workspace, ...changes,
+function settings(changes: Partial<NativeCommandEntry["match"]> = {}): NativeCommandsSettings {
+  return { enabled: true, entries: [{ id: "pattern", mode: "allow", sandboxMode: "danger-full-access", match: {
+    tool: "pwsh", commandPattern: "go test", workingDirectory: workspace, ...changes,
   } }] };
 }
 const matchedId = (value: ReturnType<typeof nativeCommandMatch>) => typeof value === "object" ? value.id : value;
@@ -19,7 +19,7 @@ const matchedId = (value: ReturnType<typeof nativeCommandMatch>) => typeof value
 test("PowerShell doubled double quotes cannot match an argv with the quote removed", () => {
   const command = 'go test "a""b"';
   assert.equal(literalCommand(command, "powershell"), undefined);
-  assert.equal(nativeCommandMatch(settings(["ab"]), "pwsh", powershell, { command }, workspace), undefined);
+  assert.equal(nativeCommandMatch(settings(), "pwsh", powershell, { command }, workspace), undefined);
   assert.deepEqual(literalCommand('go test "ab"', "powershell"), ["go", "test", "ab"]);
 });
 
@@ -30,8 +30,8 @@ test("unquoted tilde and non-shell whitespace cannot create literal matches", ()
     }
     assert.deepEqual(literalCommand("go\ttest '~'", dialect), ["go", "test", "~"]);
   }
-  assert.equal(nativeCommandMatch(settings(["~"], { tool: "bash" }), "bash", posix, { script: "go test ~" }, workspace), undefined);
-  assert.ok(nativeCommandMatch(settings(["~"], { tool: "bash" }), "bash", posix, { script: "go test '~'" }, workspace));
+  assert.equal(nativeCommandMatch(settings({ tool: "bash" }), "bash", posix, { script: "go test ~" }, workspace), undefined);
+  assert.ok(nativeCommandMatch(settings({ tool: "bash" }), "bash", posix, { script: "go test '~'" }, workspace));
 });
 
 test("static quoting preserves argument case, order, Unicode, and supported empty arguments", () => {
@@ -62,16 +62,15 @@ test("unsupported expansion, operators, wrappers, and malformed syntax stay unkn
   }
 });
 
-test("native matching requires exact executable, subcommand, argv order, tool, and effective cwd", () => {
-  const policy = settings(["Case", "two words"]);
+test("native patterns require exact executable, subcommand, tool and cwd while accepting static argv tails", () => {
+  const policy = settings();
   const match = (command: string, workdir?: string) => nativeCommandMatch(policy, "pwsh", powershell, { command, workdir }, workspace);
-  assert.equal(matchedId(match('go test Case "two words"')), "exact");
-  assert.equal(matchedId(match("go test Case 'two words'", ".")), "exact");
-  for (const command of ['Go test Case "two words"', 'go Test Case "two words"', 'go test case "two words"', 'go test "two words" Case', 'go test Case "two words" extra', "go test Case"]) assert.equal(match(command), undefined);
+  for (const command of ["go test", 'go test Case "two words"', 'go test case "two words"', 'go test "two words" Case', 'go test Case "two words" extra', "go test Case"]) assert.equal(matchedId(match(command)), "pattern");
+  assert.equal(matchedId(match("go test Case 'two words'", ".")), "pattern");
+  for (const command of ['Go test Case "two words"', 'go Test Case "two words"', "go build", "go"]) assert.equal(match(command), undefined);
   assert.equal(match('go test Case "two words"', "nested"), undefined);
   assert.equal(nativeCommandMatch(policy, "bash", posix, { script: 'go test Case "two words"' }, workspace), undefined);
-  assert.equal(matchedId(match('go test Case "two words"', join(workspace, "nested", ".."))), "exact");
-  assert.equal(matchedId(nativeCommandMatch(settings(["test", "Case"], { subcommand: undefined }), "pwsh", powershell, { command: "go test Case" }, workspace)), "exact");
+  assert.equal(matchedId(match('go test Case "two words"', join(workspace, "nested", ".."))), "pattern");
   assert.equal(nativeCommandMatch({ ...policy, enabled: false }, "pwsh", powershell, { command: 'go test Case "two words"' }, workspace), undefined);
   const ask: NativeCommandEntry = { ...policy.entries[0], id: "ask", mode: "ask" };
   assert.equal(matchedId(nativeCommandMatch({ ...policy, entries: [...policy.entries, ask] }, "pwsh", powershell, { command: 'go test Case "two words"' }, workspace)), "ask");

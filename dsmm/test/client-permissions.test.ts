@@ -9,6 +9,7 @@ import { deferred } from "./permission-fixture.ts";
 import { nativeConfigRun } from "./permission-deployment-fixture.ts";
 import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
+import { RemoteAccessService } from "@deepseek-ai/dsh-api-remote-access";
 import * as Connection from "@deepseek-ai/dsh-client-connection";
 import { PermissionController, permissionChanges } from "../src/client/permission-controller.ts";
 import { PermissionClientError } from "../src/client/permission-client.ts";
@@ -28,7 +29,7 @@ async function fixture() {
   const profile = await run.createProfile("root-rules-client"), ctx = profile.ctx, root = await profile.create();
   let writable = true, notify = async (_snapshot: PermissionRuleSnapshot): Promise<void> => {};
   class MemoryCredentials extends CredentialProvider { async modifyRecord(_key: string, modify: (value: unknown) => Promise<unknown>) { return modify(undefined); } }
-  for (const [plugin, config] of [[TypertRegistry], [TypertGatewayService, {}], [MemoryCredentials], [Connection]] as const) await ctx.plugin(plugin as never, config as never).await();
+  for (const [plugin, config] of [[TypertRegistry], [RemoteAccessService], [TypertGatewayService, {}], [MemoryCredentials], [Connection]] as const) await ctx.plugin(plugin as never, config as never).await();
   ctx.provide("webServer", { host: "127.0.0.1" });
   const backend = installDeploymentPermissionRules(ctx, { deployment: profile.deployment, assertWritable(root) { assert.equal(ctx.agents.get(root.id), root); if (!writable) throw new Error("Owned readonly"); }, revoke() {}, notify: value => notify(value) });
   await ctx.plugin({ name: "owned-native-permission-rules-rpc", inject: ["typert", "connection"], apply(scope: typeof ctx) { registerNativePermissionRulesRpc(scope, backend, backend.runtime); } }).await();
@@ -84,13 +85,102 @@ test("late read from a replaced connection cannot publish its policy or rebase a
   c.bindConnection(null); held.reject(new PermissionClientError("cancelled")); await pending;
   assert.equal(c.store.getSnapshot().rules, null); assert.equal(c.store.getSnapshot().reading, false); assert.equal(c.canSave(before), false); c.dispose();
 });
+const policyResult = (outsideReads: "inherit" | "allow" | "ask" | "deny", revision: string) => ({
+  snapshot: { revision, policy: { ...resolvePermissionControl(), outsideReads } },
+  runtime: { savedRevision: revision, runtimeRevision: revision, state: "synced" as const, mounted: true, restartRequired: false },
+}) as PermissionValue<"describeRules">;
+test("background revalidation of a trusted policy stays invisible, keeps the draft and is invalidated by save", async () => {
+  const c = new PermissionController(), owner = {};
+  const held = deferred<ReturnType<typeof policyResult>>();
+  let describes = 0, saves = 0;
+  const invoke = (async (method: string) => {
+    if (method === "describeRules") { describes++; return describes === 1 ? policyResult("inherit", "r0") : held.promise; }
+    saves++; return policyResult("ask", "r2");
+  }) as PermissionInvoker;
+  c.bindConnection(invoke, {}); c.bindScope("owned-root", owner, "root");
+  const stop = c.watch();
+  try {
+    for (let round = 0; round < 100 && c.store.getSnapshot().rules === null; round++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(describes, 1); assert.equal(c.store.getSnapshot().reading, false);
+    const generation = c.store.getSnapshot().generation;
+    c.edit(generation, { outsideReads: "deny" }); assert.equal(c.canSave(generation), true);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    const revalidating = c.store.getSnapshot();
+    assert.equal(describes, 2, "the silent revalidation is in flight");
+    assert.equal(revalidating.reading, false, "silent revalidation never shows the reading state");
+    assert.equal(revalidating.revalidating, true);
+    assert.equal(revalidating.draft!.outsideReads, "deny");
+    assert.equal(c.canSave(generation), true, "a pending background read never blocks saving");
+    await c.save(generation);
+    assert.equal(saves, 1); assert.equal(c.store.getSnapshot().notice, "saved");
+    held.resolve(policyResult("allow", "stale"));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(c.store.getSnapshot().draft!.outsideReads, "ask", "the invalidated read cannot overwrite the save result");
+    assert.equal(c.store.getSnapshot().base!.revision, "r2");
+  } finally { stop(); c.dispose(); }
+});
+test("a replaced owner with the same session ID invalidates the old base but keeps the draft", async () => {
+  const c = new PermissionController(), first = {}, second = {};
+  c.bindConnection((async () => policyResult("inherit", "r0")) as PermissionInvoker, {}); c.bindScope("owned-root", first, "root");
+  const generation = c.store.getSnapshot().generation; await c.refresh(generation);
+  c.edit(generation, { outsideReads: "deny" }); assert.equal(c.canSave(generation), true);
+  c.bindScope("owned-root", second, "root");
+  const replaced = c.store.getSnapshot();
+  assert.equal(replaced.sessionId, "owned-root"); assert.equal(replaced.base, null);
+  assert.equal(replaced.rules, null); assert.equal(replaced.draft!.outsideReads, "deny");
+  assert.equal(c.canSave(generation), false); assert.equal(c.canSave(replaced.generation), false, "no trusted policy yet for the new owner");
+  c.dispose();
+});
+test("a replaced owner observes new policy without visible churn or regaining save authority", async () => {
+  const c = new PermissionController(), first = {}, second = {};
+  const replacement = deferred<ReturnType<typeof policyResult>>(), later = deferred<ReturnType<typeof policyResult>>();
+  let describes = 0;
+  const invoke = (async (method: string) => {
+    if (method !== "describeRules") throw new Error("unexpected save");
+    describes++;
+    return describes === 1 ? policyResult("inherit", "r0") : describes === 2 ? replacement.promise : later.promise;
+  }) as PermissionInvoker;
+  c.bindConnection(invoke, {}); c.bindScope("owned-root", first, "root");
+  const stop = c.watch();
+  const waitFor = async (predicate: () => boolean) => { for (let round = 0; round < 300 && !predicate(); round++) await new Promise(resolve => setTimeout(resolve, 5)); };
+  try {
+    await waitFor(() => c.store.getSnapshot().rules !== null);
+    const generation = c.store.getSnapshot().generation;
+    c.edit(generation, { outsideReads: "deny" });
+    c.bindScope("owned-root", second, "root");
+    const fenced = c.store.getSnapshot();
+    assert.equal(fenced.sessionId, "owned-root"); assert.equal(fenced.base, null); assert.equal(fenced.rules, null);
+    assert.equal(fenced.draft!.outsideReads, "deny");
+    // Nothing is observed for the replaced owner yet, so its first read stays visible.
+    await waitFor(() => c.store.getSnapshot().reading);
+    assert.equal(c.store.getSnapshot().reading, true);
+    replacement.resolve(policyResult("inherit", "r1"));
+    await waitFor(() => c.store.getSnapshot().rules !== null);
+    const observed = c.store.getSnapshot();
+    assert.equal(observed.reading, false); assert.equal(observed.rules!.snapshot.revision, "r1");
+    assert.equal(observed.base, null, "an observation under a replaced owner is not a CAS base");
+    assert.equal(observed.draft!.outsideReads, "deny"); assert.equal(observed.rulesIssue, "stale");
+    assert.equal(c.canSave(observed.generation), false, "the old base remains non-authoritative");
+    // Later background revalidation stays invisible but keeps its dirty-draft conflict.
+    await waitFor(() => describes === 3);
+    const silent = c.store.getSnapshot();
+    assert.equal(silent.reading, false); assert.equal(silent.revalidating, true);
+    assert.equal(c.canSave(silent.generation), false);
+    later.resolve(policyResult("ask", "r2"));
+    await waitFor(() => !c.store.getSnapshot().revalidating);
+    const updated = c.store.getSnapshot();
+    assert.equal(updated.rules!.snapshot.revision, "r2"); assert.equal(updated.base, null);
+    assert.equal(updated.draft!.outsideReads, "deny"); assert.equal(updated.rulesIssue, "stale");
+    assert.equal(updated.reading, false); assert.equal(c.canSave(updated.generation), false);
+  } finally { stop(); c.dispose(); }
+});
 test("strict client result decoding preserves valid Windows and POSIX Host cwd without browser-side normalization", async () => {
   const bundle = await build({ entryPoints: [fileURLToPath(new URL("../src/permission-remote.ts", import.meta.url))], bundle: true, platform: "browser", format: "iife", globalName: "PermissionWire", write: false });
   const browser = createContext({ raw: "" }); new Script(bundle.outputFiles[0].text).runInContext(browser);
   const decode = new Script("PermissionWire.parsePermissionRulesResult(JSON.parse(raw))");
   const result = (workingDirectory: unknown) => ({ snapshot: { revision: "owned-source", policy: { ...resolvePermissionControl(),
     nativeCommands: { enabled: true, entries: [{ id: "host-command", mode: "ask", sandboxMode: "workspace-write",
-      match: { tool: "pwsh", executable: "go", subcommand: "test", args: ["."], workingDirectory } }] } } },
+      match: { tool: "pwsh", workingDirectory, commandPattern: "go test" } }] } } },
     runtime: { savedRevision: "owned-source", runtimeRevision: "owned-source", state: "synced", mounted: true, restartRequired: false } });
   for (const cwd of ["/owned/workspace", "C:\\owned\\workspace", "\\\\server\\share\\workspace"]) {
     browser.raw = JSON.stringify(result(cwd));

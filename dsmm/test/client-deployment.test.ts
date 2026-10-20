@@ -13,6 +13,7 @@ import type { DsmmConfigRemote } from "../src/profile-remote.js";
 import type { DeploymentAdmissionView, DeploymentEditorSnapshot, SessionProfileSnapshot } from "../src/profile-types.js";
 import type { DeploymentPageProps } from "../src/client/DeploymentPage.js";
 import { deploymentEn, deploymentZh } from "../src/client/deployment-locales.js";
+import { permissionEn } from "../src/client/permission-locales.ts";
 import { deploymentEditorSchema, resolveConfig } from "../src/settings.js";
 import { DeploymentController } from "../src/client/deployment-controller.js";
 import type { NativePageForm } from "../src/client/deployment-controller.js";
@@ -83,7 +84,7 @@ async function compiledNativePage(remote: DsmmConfigRemote) {
     const node = elements(tree()).find(node => typeof node.type === "function" && node.type.name === "StateInspector")!;
     assert.ok(node); return (node.type as (props: unknown) => unknown)(node.props);
   };
-  return { core, inspector, open, tree: (translate?: DeploymentPageProps["t"]) => render(tree(translate)), workspace: injected.workspace!, dispose() { injected.workspace!.dispose(); core.dispose(); } };
+  return { core, component: (overrides: Partial<DeploymentPageProps> = {}) => component({ ...injected, view: "page", t, ...overrides }), inspector, open, tree: (translate?: DeploymentPageProps["t"]) => render(tree(translate)), workspace: injected.workspace!, dispose() { injected.workspace!.dispose(); core.dispose(); } };
 }
 function render(tree: unknown): unknown {
   if (Array.isArray(tree)) return tree.map(render);
@@ -101,15 +102,16 @@ function text(tree: unknown): string {
   return isValidElement<Record<string, unknown>>(tree) ? text(tree.props.children) : typeof tree === "string" || typeof tree === "number" ? String(tree) : "";
 }
 
-test("single-section drawer opens controls initially and keeps the user's collapse through save, locale and reopening", async () => {
+test("one flat section tablist keeps the user's group collapse through save, locale and reopening", async () => {
   const f = fixture(), page = await compiledNativePage(f.remote);
   const group = (path: string, translate?: DeploymentPageProps["t"]) => {
     const node = elements(page.tree(translate)).find(node => node.type === "details" && node.props["data-field"] === path);
     assert.ok(node, path); return node;
   };
   try {
-    page.open(deploymentEn["module:subagents"]);
-    assert.equal(group("subagents").props.open, true);
+    page.open(deploymentEn["module:workflow"]);
+    assert.equal(group("subagents").props.open ?? false, false, "multi-field sections keep nested groups collapsed");
+    (group("subagents").props.onToggle as (event: unknown) => void)({ currentTarget: { open: true } });
     const field = elements(group("subagents")).find(node => node.props["data-field"] === "subagents.maxDepth");
     assert.ok(field);
     const input = elements(field).find(node => node.type === "input"); assert.ok(input);
@@ -121,7 +123,7 @@ test("single-section drawer opens controls initially and keeps the user's collap
     assert.equal(group("subagents").props.open, false);
     assert.equal(group("subagents", key => deploymentZh[key as keyof typeof deploymentZh] ?? key).props.open, false);
     page.workspace.request({ scope: "global", module: null });
-    page.open(deploymentEn["module:subagents"]);
+    page.open(deploymentEn["module:workflow"]);
     assert.equal(group("subagents").props.open, false);
     (group("subagents").props.onToggle as (event: unknown) => void)({ currentTarget: { open: true } });
     assert.equal(group("subagents").props.open, true);
@@ -130,6 +132,31 @@ test("single-section drawer opens controls initially and keeps the user's collap
     assert.equal(group("modelParameters").props.open, false);
     page.open(deploymentEn["module:routes"]);
     assert.equal(group("roleRouting").props.open ?? false, false, "advanced JSON stays collapsed");
+    const tabs = elements(page.tree()).filter(node => node.props.role === "tab");
+    assert.deepEqual(tabs.map(node => node.props["data-dsmm-tab"]), ["run", "routes", "workflow", "permissions", "state"]);
+    assert.equal(tabs.filter(node => node.props["aria-selected"] === true).length, 1);
+    assert.equal(tabs.filter(node => node.props.tabIndex === 0).length, 1);
+    assert.equal(tabs.find(node => node.props["data-dsmm-tab"] === "routes")!.props["aria-selected"], true);
+    const panel = elements(page.tree()).find(node => node.props.role === "tabpanel");
+    assert.equal(panel?.props["aria-labelledby"], tabs.find(node => node.props["data-dsmm-tab"] === "routes")!.props.id);
+    page.workspace.request({ scope: "global", module: "state" });
+    assert.deepEqual(elements(page.tree()).filter(node => node.props.role === "tab").map(node => node.props.tabIndex), [-1, -1, -1, -1, 0]);
+  } finally { page.dispose(); }
+});
+
+test("scope switching restores each scope's remembered section instead of pinning the current one", async () => {
+  const f = fixture(), page = await compiledNativePage(f.remote);
+  try {
+    page.workspace.request({ scope: "global", module: "workflow" });
+    page.workspace.request({ scope: "profile", module: "routes" });
+    assert.deepEqual([page.workspace.getSnapshot().scope, page.workspace.getSnapshot().module], ["profile", "routes"]);
+    const scope = elements(page.tree()).find(node => node.type === "select" && String(node.props.id).endsWith("-scope"));
+    assert.ok(scope);
+    (scope.props.onChange as (event: unknown) => void)({ currentTarget: { value: "global" } });
+    assert.deepEqual([page.workspace.getSnapshot().scope, page.workspace.getSnapshot().module, page.workspace.getSnapshot().pending], ["global", "workflow", null]);
+    const back = elements(page.tree()).find(node => node.type === "select" && String(node.props.id).endsWith("-scope"))!;
+    (back.props.onChange as (event: unknown) => void)({ currentTarget: { value: "profile" } });
+    assert.deepEqual([page.workspace.getSnapshot().scope, page.workspace.getSnapshot().module, page.workspace.getSnapshot().pending], ["profile", "routes", null]);
   } finally { page.dispose(); }
 });
 
@@ -149,7 +176,38 @@ test("a lone JSON editor opens without expanding its optional schema and inherit
   } finally { page.dispose(); }
 });
 
-test("source-bundled native drawer distinguishes known admission-unavailable and includes sorted named-only next/session fields", async () => {
+test("Permissions and safety keeps configuration editing independent from unavailable Global rules", async () => {
+  const f = fixture(), page = await compiledNativePage(f.remote);
+  const { PermissionController } = await import("../src/client/permission-controller.ts");
+  const { DeploymentWorkspace } = await import("../src/client/deployment-workspace.ts");
+  const permissions = new PermissionController();
+  const workspace = new DeploymentWorkspace(page.core, permissions);
+  try {
+    workspace.request({ scope: "global", module: "permissions" });
+    for (let round = 0; round < 100 && page.core.getSnapshot().busy; round++) await setImmediate();
+
+    const tree = render(page.component({ workspace, permissions, permissionsT: key => permissionEn[key as keyof typeof permissionEn] }));
+    const nodes = elements(tree);
+    // The configuration transaction stays editable without a Root.
+    const guard = nodes.find(node => node.props["data-field"] === "guards.scope");
+    assert.ok(guard, "configuration guard fields render");
+    const guardSelect = elements(guard).find(node => node.type === "select");
+    assert.equal(guardSelect?.props.disabled, false);
+    // The Global-rules transaction renders inside the same section but owns its own controls.
+    const rulesPanel = nodes.find(node => node.props["data-dsmm-permissions"] !== undefined);
+    assert.ok(rulesPanel, "rules transaction renders");
+    assert.equal(elements(rulesPanel).filter(node => node.type === "select").length, 0, "no trusted policy: no rule controls are presented as current");
+    const rulesText = text(rulesPanel);
+    assert.ok(rulesText.includes(permissionEn.noRoot), "the rules transaction explains its refusal");
+    // A legal configuration edit still saves while the rules transaction is unavailable.
+    (guardSelect!.props.onChange as (event: unknown) => void)({ currentTarget: { value: '"always"' } });
+    const after = elements(render(page.component({ workspace, permissions, permissionsT: key => permissionEn[key as keyof typeof permissionEn] })));
+    const configSave = after.find(node => node.type === "button" && text(node) === deploymentEn.saveGlobal && node.props.disabled === false);
+    assert.ok(configSave, "configuration Save is not disabled by the rules transaction");
+    assert.equal(page.core.getSnapshot().dirty, true);
+  } finally { workspace.dispose(); permissions.dispose(); page.dispose(); }
+});
+test("source-bundled native page distinguishes known admission-unavailable and includes sorted named-only next/session fields", async () => {
   const f = fixture(), page = await compiledNativePage(f.remote);
   const session: SessionProfileSnapshot = { sessionId: "known-native-root", admissionEpoch: "epoch-new", scope: "session-override", switchAllowed: true,
     canSelectModel: false, selectModelUnavailableReason: "model-unconfigured",
@@ -179,7 +237,7 @@ test("source-bundled native drawer distinguishes known admission-unavailable and
   } finally { page.dispose(); }
 });
 
-test("first configuration read failure exposes a disabled Save and explicit Refresh in the same drawer after connection recovery", async () => {
+test("first configuration read failure exposes a disabled Save and explicit Refresh in the same section after connection recovery", async () => {
   const f = fixture(); let unavailable = true;
   f.intercept(async () => { if (unavailable) throw new Error("fixture disconnected"); });
   const page = await compiledNativePage(f.remote);

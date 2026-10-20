@@ -4,7 +4,9 @@ import * as Persona from "@deepseek-ai/dsh-persona";
 import { DSMM_ROLES } from "../src/roles.ts";
 import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.ts";
 
-const reviewerIdentity = DSMM_ROLES.find(role => role.id === "dsmm-reviewer")!.persona.split(/\r?\n/u)[0];
+const reviewer = DSMM_ROLES.find(role => role.id === "dsmm-reviewer")!;
+const reviewerIdentity = reviewer.persona.split(/\r?\n/u)[0];
+const planner = DSMM_ROLES.find(role => role.id === "dsmm-planner")!;
 const orchestratorIdentity = DSMM_ROLES.find(role => role.id === "dsmm-orchestrator")!.persona.split(/\r?\n/u)[0];
 
 for (const nativePersona of [false, true]) {
@@ -22,8 +24,14 @@ for (const nativePersona of [false, true]) {
       assert.equal(f.adapter.calls.length, before + 1);
       const request = f.adapter.calls.at(-1)!;
       const system = JSON.stringify(request.messages.filter(message => message.role === "system"));
-      assert.ok(system.includes(reviewerIdentity), "the actual model request must identify the admitted reviewer");
+      assert.ok(system.includes(JSON.stringify(reviewer.persona).slice(1, -1)), "the first queued child request must carry the complete generated reviewer persona");
       assert.equal(system.includes(orchestratorIdentity), false, "a child must not inherit its parent's role identity");
+      const sibling = await f.createAuxiliary("dsmm-planner", undefined, "one-shot", parent);
+      await runFixtureTurn(sibling);
+      const siblingSystem = JSON.stringify(f.adapter.calls.at(-1)!.messages.filter(message => message.role === "system"));
+      assert.ok(siblingSystem.includes(JSON.stringify(planner.persona).slice(1, -1)));
+      assert.equal(siblingSystem.includes(reviewerIdentity), false, "a child's persona must not leak into its sibling");
+      assert.equal(siblingSystem.includes(orchestratorIdentity), false);
       await runFixtureTurn(parent);
       const nextParentSystem = JSON.stringify(f.adapter.calls.at(-1)!.messages.filter(message => message.role === "system"));
       assert.equal(nextParentSystem.includes(reviewerIdentity), false);

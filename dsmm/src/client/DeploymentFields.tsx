@@ -3,18 +3,25 @@ import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { DeploymentSchemaNode } from "../profile-types.js";
 import type { NativeCommandEntry } from "../permission-settings.js";
+import type { PermissionRule } from "../permission-rules.js";
 import type { DeploymentController } from "./deployment-controller.js";
 import { at, enumValues, equal, mergeLayer, parseAdvanced, validateEditorValue } from "./deployment-data.js";
 import { deploymentFieldLabels } from "./deployment-locales.js";
 import { permissionEn, permissionZh } from "./permission-locales.js";
 import type { PermissionLocaleKey } from "./permission-locales.js";
 import { NativeCommandEntries } from "./NativeCommandEntries.js";
+import { PermissionRuleEntries } from "./PermissionRuleEntries.js";
 
 type Locale = PropsLocale<"plugins.dsmm">;
 export const permissionText = (t: Locale["t"]) => (key: PermissionLocaleKey): string => (t("global") === "DSMM 全局配置" ? permissionZh : permissionEn)[key];
 export function fieldLabel(path: readonly string[], t: Locale["t"]): string {
   const key = path.at(-1)!;
   if (path[0] === "permissionControl" && ["outsideReads", "webSearch", "webFetch", "rules", "nativeCommands", "rule"].includes(key)) return permissionText(t)(key as PermissionLocaleKey);
+  if (path[0] === "guards") {
+    const guard: Partial<Record<string, PermissionLocaleKey>> = { scope: "guardScope", shellCommandSafety: "shellSafety", gitWriteGuard: "gitWrite", toolOutputTruncation: "toolOutputTruncation", planFormatValidation: "planValidation", questionLabelHelper: "questionLabels", todoDisciplineHelper: "todoDiscipline",
+      enabled: "enabled", maxInlineBytes: "maxInlineBytes", maxLabelChars: "maxLabelChars" };
+    const mapped = guard[key]; if (mapped !== undefined) return permissionText(t)(mapped);
+  }
   const item = deploymentFieldLabels[key];
   return item === undefined ? key.replace(/^dsmm-/u, "").replace(/([a-z])([A-Z])/gu, "$1 $2") : item[t("global") === "DSMM 全局配置" ? 1 : 0];
 }
@@ -44,13 +51,14 @@ export function AdvancedField({ schema, path, controller, inherited, upper, expa
 export function ScalarField({ schema, path, controller, inherited, t }: Locale & { schema: DeploymentSchemaNode; path: string[]; controller: DeploymentController; inherited: unknown }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot), id = useId(), name = path.join(".");
   const value = at(state.draft, path), raw = state.raw[name], bad = raw?.invalid === true;
+  const units = name === "guards.toolOutputTruncation.maxInlineBytes" ? ` · ${permissionText(t)("unitBytes")}` : name === "guards.questionLabelHelper.maxLabelChars" ? ` · ${permissionText(t)("unitChars")}` : "";
   return <><label htmlFor={id}>{fieldLabel(path, t)}</label><div className="dsmm-actions">
     <Input className="dsmm-input" id={id} type="text" inputMode={schema.type === "number" ? "decimal" : undefined} value={raw?.text ?? String(value ?? inherited ?? "")} disabled={!controller.canEdit()} aria-invalid={bad} aria-describedby={`${id}-error`} onChange={event => {
       const text = event.currentTarget.value, candidate = schema.type === "number" ? Number(text) : text;
       const valid = (schema.type !== "number" || text.trim() !== "") && validateEditorValue(candidate, schema);
       controller.setRaw(name, text, !valid); if (valid) controller.edit(path, candidate);
     }} /><Button type="button" variant="outline" data-dsmm-unset={name} disabled={!controller.canEdit() || value === undefined && raw === undefined} onClick={() => { controller.clearRaw(name); controller.edit(path, undefined); }}>{t("unset")}</Button>
-  </div><p id={`${id}-error`} className="dsmm-hint">{bad ? t("invalid") : ""}{schema.type === "number" && (schema.min !== undefined || schema.max !== undefined) ? ` ${schema.min ?? "—"} – ${schema.max ?? "—"}` : ""}</p></>;
+  </div><p id={`${id}-error`} className="dsmm-hint">{bad ? t("invalid") : ""}{schema.type === "number" && (schema.min !== undefined || schema.max !== undefined) ? ` ${schema.min ?? "—"} – ${schema.max ?? "—"}` : ""}{units}</p></>;
 }
 export function Field({ schema, path, controller, initiallyOpen = false, disclosures, t }: Locale & { schema: DeploymentSchemaNode; path: string[]; controller: DeploymentController; initiallyOpen?: boolean; disclosures?: Map<string, boolean> }) {
   if (schema.type === "transform" && schema.inner !== undefined) schema = schema.inner;
@@ -60,6 +68,7 @@ export function Field({ schema, path, controller, initiallyOpen = false, disclos
   const explicit = at(state.draft, path), inherited = controller.layer === "global" ? at(snapshot.defaults, path) : at(mergeLayer(mergeLayer(snapshot.defaults, snapshot.global), snapshot.nativeForm?.base ?? {}), path);
   const choices = enumValues(schema), disabled = !controller.canEdit();
   if (name === "permissionControl.nativeCommands.entries") return <div data-field={name}><NativeCommandEntries controller={controller} value={explicit as readonly NativeCommandEntry[] | undefined} inherited={(inherited ?? []) as readonly NativeCommandEntry[]} disabled={disabled} onChange={value => controller.edit(path, value)} setInvalid={(key, bad) => controller.setInvalid(key, bad)} t={permissionText(t)} /></div>;
+  if (name === "permissionControl.rules") return <div data-field={name}><PermissionRuleEntries controller={controller} value={explicit as readonly PermissionRule[] | undefined} inherited={(inherited ?? []) as readonly PermissionRule[]} disabled={disabled} onChange={value => controller.edit(path, value)} expanded={open} onExpandedChange={expand} t={permissionText(t)} /></div>;
   if (schema.type === "object" && schema.fields !== undefined && path[0] !== "roleRouting") return <details className="dsmm-deployment-group" data-field={name} open={open} onToggle={event => expand(event.currentTarget.open)}><summary>{fieldLabel(path, t)}</summary><div>
     {name === "permissionControl" && <p className="dsmm-hint">{permissionText(t)("configPolicyHint")}</p>}
     <p className="dsmm-hint">{t(explicit === undefined ? "inherit" : "explicit")}</p>

@@ -5,6 +5,10 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { isDsmmRoleId } from "./roles.js";
 import type { SessionDeepworkState } from "./profile-types.js";
+import type { Agent } from "@deepseek-ai/dsh-agent";
+import type { NativeAdmission } from "./native-admission.js";
+import { capturedRoleInvocation } from "./role-invocation.js";
+import { Context } from "@deepseek-ai/cordis";
 
 export const DEEPWORK_MODE_EVENT = "deepwork/mode";
 export type DeepworkSelectionOutcome = "committed" | "unchanged";
@@ -15,7 +19,10 @@ function activeFromEvent(event: DshSessionEvent): boolean | undefined {
 }
 
 export function isDeepworkActive(events: readonly DshSessionEvent[] = [], defaultActive = false, selectedPreset?: string): boolean {
-  let active = isDsmmRoleId(selectedPreset) || (selectedPreset !== "minimal" && defaultActive);
+  return foldModeIntent(events, isDsmmRoleId(selectedPreset) || (selectedPreset !== "minimal" && defaultActive));
+}
+
+function foldModeIntent(events: readonly DshSessionEvent[], active: boolean): boolean {
   for (const event of events) active = activeFromEvent(event) ?? active;
   return active;
 }
@@ -32,7 +39,7 @@ export function hasOpenTurn(events: readonly DshSessionEvent[] = []): boolean {
 export class DeepworkModeController {
   private readonly listeners = new Set<(agent: DshAgent) => void>();
   private readonly versions = new WeakMap<DshAgent, Map<boolean, { fields: unknown; revision: string }>>();
-  constructor(_ctx: DshContext, private readonly moduleEnabled: (agent: DshAgent) => boolean = () => true,
+  constructor(private readonly ctx: DshContext, private readonly moduleEnabled: (agent: DshAgent) => boolean = () => true,
     private readonly runtimeReady: () => boolean = () => true) {}
 
   watch(listener: (agent: DshAgent) => void): () => void {
@@ -44,13 +51,35 @@ export class DeepworkModeController {
   changed(agent: DshAgent): void { for (const listener of this.listeners) listener(agent); }
 
   active(agent: DshAgent | undefined, defaultActive: boolean): boolean {
-    return agent !== undefined && this.moduleEnabled(agent) && isDeepworkActive(sessionEvents(agent.session), defaultActive, resolveSelectedAgentPreset(agent.session));
+    return agent !== undefined && this.moduleEnabled(agent) && foldModeIntent(sessionEvents(agent.session),
+      this.childDefaultActive(agent) || isDeepworkActive([], defaultActive, this.selectedPreset(agent)));
+  }
+
+  private selectedPreset(agent: DshAgent): string | undefined {
+    return Context.is(agent.ctx) ? agent.ctx.get("agentPresets")?.composedPreset(agent.ctx) : resolveSelectedAgentPreset(agent.session);
+  }
+
+  private childDefaultActive(agent: DshAgent): boolean {
+    const invocation = capturedRoleInvocation(agent), admission = this.ctx.get?.<NativeAdmission>("dsmmNativeAdmission");
+    if (invocation === undefined || admission?.isReady !== true) return false;
+    try {
+      if (admission.get(agent as Agent) === undefined) {
+        // bindChild precedes installation; only its current admission candidate may supply this default.
+        admission.configuration(agent as Agent);
+        admission.policy.assertModuleAdmission(agent);
+      } else {
+        if (admission.invocation(agent as Agent) !== invocation) return false;
+        admission.assert(agent as Agent);
+      }
+      const identity = admission.policy.identity(agent);
+      return identity.child && identity.role === invocation.target;
+    } catch { return false; }
   }
 
   describe(agent: DshAgent, defaultActive: boolean): SessionDeepworkState {
-    const events = sessionEvents(agent.session), preset = resolveSelectedAgentPreset(agent.session);
+    const events = sessionEvents(agent.session), preset = this.selectedPreset(agent);
     const intents = events.map(activeFromEvent).filter((value) => value !== undefined);
-    const fields = { preset, defaultActive, intents, enabled: this.moduleEnabled(agent),
+    const fields = { preset, defaultActive, intents, enabled: this.moduleEnabled(agent), childDefaultActive: this.childDefaultActive(agent),
       presetChanges: events.filter((event) => event.type === "agent-preset/selected").length };
     let defaults = this.versions.get(agent);
     if (defaults === undefined) { defaults = new Map(); this.versions.set(agent, defaults); }
@@ -59,7 +88,7 @@ export class DeepworkModeController {
       version = { fields, revision: `mode-v1-${randomUUID()}` };
       defaults.set(defaultActive, version);
     }
-    return { active: this.active(agent, defaultActive), explicit: intents.length > 0, locked: false,
+    return { active: fields.enabled && foldModeIntent(events, fields.childDefaultActive || isDeepworkActive([], defaultActive, preset)), explicit: intents.length > 0, locked: false,
       revision: version.revision };
   }
 

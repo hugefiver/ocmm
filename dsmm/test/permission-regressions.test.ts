@@ -7,7 +7,7 @@ import { classifyPermissionShell } from "../src/permission-shell.ts";
 import { importPermissionRules } from "../src/permission-rules.ts";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 useIsolatedDshEnvironment();
-const entry = { id: "write", mode: "ask" as const, sandboxMode: "danger-full-access" as const, match: { tool: "pwsh" as const, executable: "Write-Output", args: ["owned"], workingDirectory: process.cwd() } };
+const entry = { id: "go", mode: "ask" as const, sandboxMode: "danger-full-access" as const, match: { tool: "pwsh" as const, commandPattern: "go test", workingDirectory: process.cwd() } };
 test("registration and owner identity changes, controller disposal and caller cancellation prevent native body entry", async t => {
   for (const change of ["registration", "authority", "controller", "abort"] as const) await t.test(change, async () => {
     const f = await permissionFixture(2000, { settings: { nativeCommands: { enabled: true, entries: [entry] } } });
@@ -21,7 +21,7 @@ test("registration and owner identity changes, controller disposal and caller ca
         else f.authorities.set(f.root, { ...f.authorities.get(f.root)!, ownerGeneration: 2 });
         return next();
       }, { global: true });
-      assert.equal((await f.execute("Write-Output owned", {}, abort.signal)).isError, true); assert.equal(f.starts(), 0);
+      assert.equal((await f.execute("go test", {}, abort.signal)).isError, true); assert.equal(f.starts(), 0);
     } finally { await f.dispose(); }
   });
 });
@@ -29,9 +29,9 @@ test("delegated native never is not answered by its Root's configured command al
   const f = await permissionFixture(2000, { settings: { nativeCommands: { enabled: true, entries: [{ ...entry, mode: "allow" }] } } });
   try {
     await f.mountManagedShell(); const child = await f.create(f.root); f.setPolicy("never", child);
-    assert.equal((await f.execute("Write-Output owned", {}, undefined, ToolCallId("child-owned"), child)).isError, true);
+    assert.equal((await f.execute("go test", {}, undefined, ToolCallId("child-owned"), child)).isError, true);
     assert.equal(f.starts(), 0); assert.equal(f.nativeAnswers(), 0);
-    assert.equal((await f.execute("Write-Output owned")).isError, false); assert.equal(f.starts(), 1);
+    assert.equal((await f.execute("go test")).isError, false); assert.equal(f.starts(), 1);
   } finally { await f.dispose(); }
 });
 test("literal enhancement grammar never recognizes PowerShell smart quotes, dynamic handlers or interpreter wrappers", () => {

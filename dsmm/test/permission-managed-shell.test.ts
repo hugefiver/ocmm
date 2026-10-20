@@ -12,7 +12,7 @@ import type { NativeCommandEntry } from "../src/permission-settings.ts";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 useIsolatedDshEnvironment();
 const command = "go test -count=1 .";
-export const commandEntry = (mode: "allow" | "ask", tool: "bash" | "pwsh" = "pwsh"): NativeCommandEntry => ({ id: "go", mode, sandboxMode: "danger-full-access", match: { tool, executable: "go", subcommand: "test", args: ["-count=1", "."], workingDirectory: process.cwd() } });
+export const commandEntry = (mode: "allow" | "ask", tool: "bash" | "pwsh" = "pwsh"): NativeCommandEntry => ({ id: "go", mode, sandboxMode: "danger-full-access", match: { tool, commandPattern: "go test", workingDirectory: process.cwd() } });
 const shellRule = (action: "ask" | "allow" | "deny") => importPermissionRules([{ id: "bounded", action, match: { kind: "shell", executable: "pwsh.exe", command, workingDirectory: process.cwd() } }], "direct-file", 1);
 
 test("default/off/unknown native once and configured allow use original body without DSMM peer", async () => {
@@ -74,9 +74,9 @@ test("outer middleware allow preserves the exact target authorized by the origin
   } finally { await f.dispose(); }
 });
 test("same-level official mode preserves rule and command asks without widening their native target", async t => {
-  const raw = "Write-Output owned", explicit = { sandbox_permissions: "workspace-write", justification: "Use the current native workspace policy" };
+  const raw = "go test", explicit = { sandbox_permissions: "workspace-write", justification: "Use the current native workspace policy" };
   const rules = importPermissionRules([{ id: "owned-purpose", action: "ask", match: { kind: "shell", executable: "pwsh.exe", command: raw, workingDirectory: process.cwd() } }], "owned configuration", 1);
-  for (const settings of [{ rules }, { nativeCommands: { enabled: true, entries: [{ ...commandEntry("ask"), match: { tool: "pwsh" as const, executable: "Write-Output", args: ["owned"], workingDirectory: process.cwd() } }] } }]) {
+  for (const settings of [{ rules }, { nativeCommands: { enabled: true, entries: [commandEntry("ask")] } }]) {
     await t.test(settings.rules === undefined ? "command ask" : "shell rule ask", async () => {
       const f = await permissionFixture(2000, { settings });
       try {
@@ -173,7 +173,7 @@ test("an approved target cannot transfer through changed invocation arguments or
       f.ctx.on("tools/pre-execute", async (_exec, next) => { await next(); return { kind: "ask", reason: "Native exact target" }; }, { global: true });
       f.ctx.on("tools/execute", async (exec, next) => {
         if (replacement === "registration") await mounted.dispose();
-        else Reflect.set(exec, "arguments", { ...(exec.arguments as Record<string, unknown>), command: "Write-Output changed" });
+        else Reflect.set(exec, "arguments", { ...(exec.arguments as Record<string, unknown>), command: "go test changed" });
         return next();
       }, { global: true });
       assert.equal((await f.execute(command)).isError, true); assert.equal(f.nativeAnswers(), 1); assert.equal(f.starts(), 0);

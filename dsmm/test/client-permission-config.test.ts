@@ -102,7 +102,7 @@ async function fixture() {
     async cleanup() { lifetime.abort(); global.dispose(); native.dispose(); await run.dispose(); } };
 }
 
-test("permission config form edits, saves, rereads and Unsets both durable layers without broadening exact matches", async () => {
+test("command patterns: the config form edits, saves, rereads and Unsets both durable layers without broadening inherited rules", async () => {
   const f = await fixture();
   const rules = [{ id: "web-deny", action: "deny", match: { kind: "webFetch" }, source: { kind: "user-import", label: "fixture" }, revision: 0, revoked: false }];
   const entriesPath = "permissionControl.nativeCommands.entries";
@@ -118,13 +118,12 @@ test("permission config form edits, saves, rereads and Unsets both durable layer
       }
       click(nodes(entries()).find(node => node.type === "button" && text(node) === permissionEn.addEntry)!);
       const input = (key: string) => nodes(entries()).find(node => node.type === "input" && String(node.props.id).endsWith(`-${key}`))!;
-      event(input("id"), "exact-go-test"); event(input("executable"), "go"); event(input("subcommand"), "test"); event(input("workingDirectory"), f.run.root);
+      event(input("id"), "pattern-go-test"); event(input("pattern"), "go test"); event(input("workingDirectory"), f.run.root);
       event(nodes(entries()).find(node => node.type === "select" && String(node.props.id).endsWith("-tool"))!, "pwsh");
-      event(nodes(entries()).find(node => node.type === "textarea")!, '["./pkg","-count=1"]');
       event(nodes(details(f.page(c), "permissionControl.rules")).find(node => node.type === "textarea")!, JSON.stringify(rules));
       await c.save(); assert.deepEqual({ layer: c.layer, saved: c.getSnapshot().saved, issue: c.getSnapshot().issue }, { layer: c.layer, saved: true, issue: null });
       const stored = c === f.global ? (await f.profile.deployment.readGlobal()).config : f.profile.persistedConfig();
-      assert.deepEqual(stored.permissionControl?.nativeCommands, { enabled: true, entries: [{ id: "exact-go-test", mode: "ask", sandboxMode: "workspace-write", match: { tool: "pwsh", executable: "go", subcommand: "test", args: ["./pkg", "-count=1"], workingDirectory: f.run.root } }] });
+      assert.deepEqual(stored.permissionControl?.nativeCommands, { enabled: true, entries: [{ id: "pattern-go-test", mode: "ask", sandboxMode: "workspace-write", match: { tool: "pwsh", workingDirectory: f.run.root, commandPattern: "go test" } }] });
       assert.equal(stored.permissionControl?.rules?.[0].source.kind, "user-import");
       assert.equal(f.backend.runtime.status().mounted, true); assert.equal(f.backend.runtime.status().restartRequired, true);
       assert.equal(f.backend.runtime.status().state, "synced");
@@ -147,24 +146,159 @@ test("permission config form edits, saves, rereads and Unsets both durable layer
   } finally { await f.cleanup(); }
 });
 
-test("exact command invalid drafts lock Save; correcting optional subcommand and args preserves exact bytes", async () => {
+test("command patterns: real handlers round-trip pattern rows through both layers and Unset them without broadening inherited rules", async () => {
+  const f = await fixture();
+  try {
+    const path = "permissionControl.nativeCommands.entries";
+    const group = (c: Controller) => details(f.page(c), path);
+    const input = (c: Controller, key: string) => nodes(group(c)).find(node => node.type === "input" && String(node.props.id).endsWith(`-${key}`))!;
+    const add = (c: Controller) => click(nodes(group(c)).find(node => node.type === "button" && text(node) === permissionEn.addEntry)!);
+
+    add(f.global);
+    event(input(f.global, "id"), "pattern-go"); event(input(f.global, "pattern"), "go build|test *"); event(input(f.global, "workingDirectory"), f.run.root);
+    await f.global.save();
+    assert.equal(f.global.getSnapshot().saved, true);
+    const globalMatch = () => f.profile.deployment.readGlobal().then(value => value.config.permissionControl?.nativeCommands?.entries?.[0]?.match);
+    assert.deepEqual(await globalMatch(), { tool: "bash", workingDirectory: f.run.root, commandPattern: "go build|test *" });
+    await f.global.refresh(true);
+    assert.equal(input(f.global, "pattern").props.value, "go build|test *");
+
+    // The native layer stores its own replacement pattern, leaving the Global rule untouched.
+    await f.attach(); await f.native.refresh(true);
+    const remove = nodes(group(f.native)).find(node => node.type === "button" && text(node).trim() === `${permissionEn.removeEntry} 1`)!;
+    click(remove); add(f.native);
+    event(input(f.native, "id"), "pattern-native"); event(input(f.native, "pattern"), "go test"); event(input(f.native, "workingDirectory"), f.run.root);
+    await f.native.save(); assert.equal(f.native.getSnapshot().saved, true);
+    assert.deepEqual(f.profile.persistedConfig().permissionControl?.nativeCommands?.entries?.[0]?.match, { tool: "bash", workingDirectory: f.run.root, commandPattern: "go test" });
+    assert.deepEqual(await globalMatch(), { tool: "bash", workingDirectory: f.run.root, commandPattern: "go build|test *" });
+
+    // Native Unset restores the Global rule rather than default-filling one.
+    click(nodes(group(f.native)).find(node => node.props["data-dsmm-unset"] === path)!);
+    await f.native.save(); await f.native.refresh(true);
+    assert.equal(f.profile.persistedConfig().permissionControl?.nativeCommands?.entries, undefined);
+    assert.equal(input(f.native, "pattern").props.value, "go build|test *", "profile shows the inherited Global pattern");
+    click(nodes(group(f.global)).find(node => node.props["data-dsmm-unset"] === path)!);
+    await f.global.save(); await f.global.refresh(true);
+    assert.equal((await f.profile.deployment.readGlobal()).config.permissionControl?.nativeCommands?.entries, undefined);
+    assert.equal((await f.profile.deployment.readDesired()).settings.permissionControl.nativeCommands.entries.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("command patterns: invalid drafts lock Save, raw text stays per row, and stale CAS never persists", async () => {
+  const f = await fixture();
+  try {
+    const path = "permissionControl.nativeCommands.entries", c = f.global;
+    const group = () => details(f.page(c), path);
+    const patternRow = (row: number) => nodes(group()).filter(node => node.type === "input" && String(node.props.id).endsWith("-pattern"))[row]!;
+    const input = (row: number, key: string) => nodes(group()).filter(node => node.type === "input" && String(node.props.id).endsWith(`-${key}`))[row]!;
+    for (let row = 0; row < 2; row++) click(nodes(group()).find(node => node.type === "button" && text(node) === permissionEn.addEntry)!);
+    event(input(0, "id"), "invalid-pattern"); event(patternRow(0), "go build test"); event(input(0, "workingDirectory"), f.run.root);
+    assert.equal(c.getSnapshot().raw[`${path}.0.commandPattern`]?.invalid, true);
+    assert.equal(patternRow(0).props.value, "go build test", "invalid pattern bytes stay visible");
+    await c.save(); assert.equal(f.writes.length, 0);
+
+    // Correcting the first row leaves the second row's own draft and edits intact.
+    event(patternRow(0), "go build|test");
+    assert.equal(c.getSnapshot().raw[`${path}.0.commandPattern`]?.invalid, false);
+    event(input(1, "id"), "second-row");
+    assert.equal(c.getSnapshot().raw[`${path}.1.commandPattern`], undefined, "the untouched row keeps its own draft state");
+    assert.equal(c.canSave(), false, "the second row is still incomplete");
+
+    // A conflicting Global revision is detected before any write and keeps both rows' edits.
+    event(patternRow(1), "go build|test"); event(input(1, "workingDirectory"), f.run.root);
+    assert.equal(c.canSave(), true, "both rows are now valid");
+    const raw = structuredClone(c.getSnapshot().raw);
+    await f.profile.deployment.saveGlobal({ expectedRevision: (await f.profile.deployment.readGlobal()).revision, edits: [{ op: "set", path: ["defaultActive"], value: true }] }, () => {});
+    await c.save();
+    assert.equal(c.getSnapshot().issue, "conflict"); assert.equal(f.writes.length, 0); assert.equal(c.getSnapshot().saved, false);
+    assert.deepEqual(c.getSnapshot().raw, raw);
+    assert.equal((await f.profile.deployment.readGlobal()).config.permissionControl?.nativeCommands, undefined);
+
+    // Discarding the stale base and re-entering the pattern persists real bytes.
+    await c.refresh(true);
+    click(nodes(group()).find(node => node.type === "button" && text(node) === permissionEn.addEntry)!);
+    event(input(0, "id"), "pattern-fresh");
+    event(patternRow(0), "go build|test *");
+    event(input(0, "workingDirectory"), f.run.root);
+    await c.save(); assert.equal(c.getSnapshot().saved, true);
+    assert.deepEqual((await f.profile.deployment.readGlobal()).config.permissionControl?.nativeCommands?.entries, [
+      { id: "pattern-fresh", mode: "ask", sandboxMode: "workspace-write", match: { tool: "bash", workingDirectory: f.run.root, commandPattern: "go build|test *" } },
+    ]);
+  } finally { await f.cleanup(); }
+});
+
+test("command patterns: removing a row clears only that row's draft and reindexes the remaining draft", async () => {
+  const f = await fixture();
+  try {
+    const path = "permissionControl.nativeCommands.entries", c = f.global;
+    const group = () => details(f.page(c), path);
+    const add = () => click(nodes(group()).find(node => node.type === "button" && text(node) === permissionEn.addEntry)!);
+    const input = (row: number, key: string) => nodes(group()).filter(node => node.type === "input" && String(node.props.id).endsWith(`-${key}`))[row]!;
+    for (let row = 0; row < 2; row++) add();
+    event(input(0, "id"), "first"); event(input(0, "pattern"), "go build"); event(input(0, "workingDirectory"), f.run.root);
+    event(input(1, "id"), "second"); event(input(1, "pattern"), "go build test"); event(input(1, "workingDirectory"), f.run.root);
+    assert.equal(c.getSnapshot().raw[`${path}.1.commandPattern`]?.invalid, true);
+
+    click(nodes(group()).find(node => node.type === "button" && text(node) === `${permissionEn.removeEntry} 1`)!);
+    assert.equal(c.getSnapshot().raw[`${path}.1.commandPattern`], undefined, "the removed row's draft is gone");
+    assert.deepEqual(c.getSnapshot().raw[`${path}.0.commandPattern`], { text: "go build test", invalid: true }, "the surviving draft follows its row");
+    assert.equal(input(0, "id").props.value, "second"); assert.equal(input(0, "pattern").props.value, "go build test");
+    await c.save(); assert.equal(f.writes.length, 0, "the shifted invalid draft still locks Save");
+    event(input(0, "pattern"), "go test");
+    await c.save(); assert.equal(c.getSnapshot().saved, true);
+    assert.deepEqual((await f.profile.deployment.readGlobal()).config.permissionControl?.nativeCommands?.entries, [
+      { id: "second", mode: "ask", sandboxMode: "workspace-write", match: { tool: "bash", workingDirectory: f.run.root, commandPattern: "go test" } },
+    ]);
+  } finally { await f.cleanup(); }
+});
+
+test("command patterns: a saved full-access entry displays its restriction and the UI offers no way to create one", async () => {
+  const f = await fixture();
+  const path = "permissionControl.nativeCommands.entries";
+  try {
+    const entries = [{ id: "saved-full", mode: "allow", sandboxMode: "danger-full-access", match: { tool: "pwsh", workingDirectory: f.run.root, commandPattern: "go test" } }];
+    await f.profile.deployment.saveGlobal({ expectedRevision: (await f.profile.deployment.readGlobal()).revision, edits: [{ op: "set", path: ["permissionControl", "nativeCommands"], value: { enabled: true, entries } }] }, () => {});
+    const c = f.global; await c.refresh(true);
+    const group = () => details(f.page(c), path);
+    const sandbox = () => nodes(group()).find(node => node.type === "select" && String(node.props.id).endsWith("-sandbox"))!;
+    const options = nodes(sandbox()).filter(node => node.type === "option");
+    assert.equal(sandbox().props.value, "danger-full-access", "the saved value is displayed unchanged");
+    assert.deepEqual(options.map(node => [node.props.value, node.props.disabled === true, text(node)]), [
+      ["workspace-write", false, "workspace-write"],
+      ["danger-full-access", true, permissionEn.restrictedFullAccess],
+    ], "full access is retained but cannot be selected or created");
+
+    click(nodes(group()).find(node => node.type === "button" && text(node) === permissionEn.addEntry)!);
+    const created = nodes(group()).filter(node => node.type === "select" && String(node.props.id).endsWith("-sandbox"))[1]!;
+    assert.equal(created.props.value, "workspace-write");
+    assert.equal(nodes(created).filter(node => node.type === "option" && node.props.value === "danger-full-access").length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("command patterns: a new entry stays invalid until patterns are valid and Unset restores inheritance", async () => {
   const f = await fixture();
   try {
     const c = f.global, entry = emptyNativeEntry();
-    assert.equal(entry.mode, "ask"); assert.equal(entry.sandboxMode, "workspace-write");
+    assert.equal(entry.mode, "ask"); assert.equal(entry.sandboxMode, "workspace-write"); assert.deepEqual(entry.match, { tool: "bash", workingDirectory: "", commandPattern: "" });
     const path = "permissionControl.nativeCommands.entries", group = () => details(f.page(c), path);
     click(nodes(group()).find(node => node.type === "button" && text(node) === permissionEn.addEntry)!);
     await c.save(); assert.equal(f.writes.length, 0);
     const input = (key: string) => nodes(group()).find(node => node.type === "input" && String(node.props.id).endsWith(`-${key}`))!;
-    event(input("id"), "exact"); event(input("executable"), "go"); event(input("workingDirectory"), f.run.root);
-    event(input("subcommand"), "test"); event(input("subcommand"), "");
-    event(nodes(group()).find(node => node.type === "textarea")!, '["./two words", "--flag=value"]');
-    event(nodes(group()).find(node => node.type === "textarea")!, '["unterminated"');
-    await c.save(); assert.equal(f.writes.length, 0);
-    event(nodes(group()).find(node => node.type === "textarea")!, '["./two words", "--flag=value"]');
+    event(input("id"), "pattern-entry"); event(input("workingDirectory"), f.run.root);
+    for (const invalid of ["", "go", "go build test", "go build|", "go * test", "go test * *"]) {
+      event(input("pattern"), invalid);
+      assert.equal(c.getSnapshot().raw[`${path}.0.commandPattern`]?.invalid, true, invalid);
+      await c.save(); assert.equal(f.writes.length, 0, invalid);
+    }
+    event(input("pattern"), "go build|test *");
+    assert.equal(c.getSnapshot().raw[`${path}.0.commandPattern`]?.invalid, false);
     await c.save(); assert.equal(c.getSnapshot().saved, true);
     assert.deepEqual((await f.profile.deployment.readGlobal()).config.permissionControl?.nativeCommands?.entries?.[0].match,
-      { tool: "bash", executable: "go", args: ["./two words", "--flag=value"], workingDirectory: f.run.root });
+      { tool: "bash", workingDirectory: f.run.root, commandPattern: "go build|test *" });
+    click(nodes(group()).find(node => node.props["data-dsmm-unset"] === path)!);
+    await c.save(); await c.refresh(true);
+    assert.equal((await f.profile.deployment.readGlobal()).config.permissionControl?.nativeCommands?.entries, undefined);
+    assert.equal(c.getSnapshot().raw[`${path}.0.commandPattern`], undefined, "Unset clears the row's raw draft");
   } finally { await f.cleanup(); }
 });
 
@@ -240,9 +374,9 @@ test("module and scope transitions retain invalid raw drafts and save only the s
     assert.equal(native.canWriteProfile(), true);
     workspace.request({ scope: "global", module: "permissions" });
     event(nodes(details(f.page(f.global), "permissionControl.rules")).find(node => node.type === "textarea")!, "{unfinished");
-    workspace.request({ scope: "global", module: null }); assert.notEqual(workspace.getSnapshot().pending, null); workspace.continueEditing();
-    workspace.request({ scope: "global", module: null }); workspace.keepAndNavigate();
-    workspace.request({ scope: "global", module: "workflow" }); assert.equal(workspace.getSnapshot().pending, null);
+    workspace.request({ scope: "global", module: "run" }); assert.notEqual(workspace.getSnapshot().pending, null); workspace.continueEditing();
+    workspace.request({ scope: "global", module: "run" }); workspace.keepAndNavigate();
+    assert.equal(workspace.getSnapshot().pending, null); assert.equal(workspace.getSnapshot().module, "run");
     const numeric = nodes(f.page(f.global, "workflow")).find(node => node.props["data-field"] === "workflow.reviewCap")!;
     event(nodes(numeric).find(node => node.type === "input")!, "not-a-number");
     const raw = structuredClone(f.global.getSnapshot().raw);
@@ -256,8 +390,8 @@ test("module and scope transitions retain invalid raw drafts and save only the s
     assert.deepEqual(f.global.getSnapshot().raw, raw);
     assert.equal(nodes(details(f.page(f.global), "permissionControl.rules")).find(node => node.type === "textarea")!.props.value, "{unfinished");
     await workspace.save(); assert.equal(f.writes.length, 0);
-    workspace.request({ scope: "global", module: null }); await workspace.discardAndNavigate();
-    assert.equal(workspace.getSnapshot().module, null); assert.deepEqual(f.global.getSnapshot().raw, {}); assert.equal(f.global.getSnapshot().dirty, false);
+    workspace.request({ scope: "global", module: "run" }); await workspace.discardAndNavigate();
+    assert.equal(workspace.getSnapshot().module, "run"); assert.deepEqual(f.global.getSnapshot().raw, {}); assert.equal(f.global.getSnapshot().dirty, false);
     assert.equal((await f.profile.deployment.readDesired()).profile.permissionControl?.outsideReads, "deny");
   } finally { workspace.dispose(); await f.cleanup(); }
 });
@@ -289,6 +423,102 @@ test("unconfirmed native form result retains the draft and prevents replay until
     await f.native.refresh(); assert.equal(f.native.getSnapshot().dirty, true); assert.equal(f.native.canSave(), false);
     await f.attach(); await f.native.refresh(true); assert.equal(f.native.getSnapshot().dirty, false); assert.equal(f.native.canEdit(), true); assert.equal(mutations, 1);
   } finally { await f.cleanup(); }
+});
+
+test("imported configuration rules use the record list and honest Host provenance", async () => {
+  const f = await fixture();
+  try {
+    const c = f.global, name = "permissionControl.rules", group = () => details(f.page(c), name);
+    assert.equal((c.getSnapshot().draft.permissionControl as Record<string, unknown> | undefined)?.rules, undefined, "an untouched layer stays sparse");
+    click(nodes(group()).find(node => node.type === "button" && text(node) === permissionEn.addRule)!);
+    const input = (key: string) => nodes(group()).find(node => node.type === "input" && String(node.props.id).endsWith(`-${key}`))!;
+    const select = (key: string) => nodes(group()).find(node => node.type === "select" && String(node.props.id).endsWith(`-${key}`))!;
+    event(input("id"), "imported-denial"); event(select("action"), "deny");
+    event(input("path"), "C:\\owned\\outside"); event(select("scope"), "tree");
+    const draftRule = (c.getSnapshot().draft.permissionControl as { rules: readonly import("../src/permission-rules.ts").PermissionRule[] }).rules[0]!;
+    assert.deepEqual(draftRule.source, { kind: "user-import", label: "configuration" }, "the form never claims operator approval");
+    assert.equal(draftRule.revision, 0); assert.equal(draftRule.revoked, false);
+    await c.save(); assert.equal(c.getSnapshot().saved, true);
+    const stored = (await f.profile.deployment.readGlobal()).config.permissionControl?.rules?.[0];
+    assert.deepEqual(stored, { id: "imported-denial", action: "deny", match: { kind: "outside-read", path: "C:\\owned\\outside", scope: "tree" },
+      source: { kind: "user-import", label: "global-settings" }, revision: 0, revoked: false });
+    assert.equal(f.backend.runtime.status().state, "synced");
+    // Records keep real source, revision and revocation visible; the form never fabricates approval.
+    await c.refresh(true);
+    assert.ok(text(group()).includes(`${permissionEn.source}${permissionEn.imported}`));
+    assert.ok(text(group()).includes(`${permissionEn.recordVersion}0`));
+    const textarea = () => nodes(group()).find(node => node.type === "textarea")!;
+    event(textarea(), JSON.stringify([{ ...stored, revoked: true }])); await c.save(); await c.refresh(true);
+    assert.ok(text(group()).includes(permissionEn.revoked));
+    const storedRevoked = () => f.profile.deployment.readGlobal().then(value => value.config.permissionControl?.rules?.[0]);
+    assert.equal((await storedRevoked())?.revoked, true);
+    // A structured edit keeps the stored source, revision and revocation instead of fabricating them.
+    event(nodes(group()).find(node => node.type === "select" && node.props.value === "deny")!, "allow"); await c.save(); await c.refresh(true);
+    assert.deepEqual(await storedRevoked(), { ...stored, action: "allow", revoked: true }, "structured edits preserve real provenance");
+    // Invalid raw JSON keeps its bytes, disables structured edits and locks this transaction's Save.
+    const writes = f.writes.length;
+    event(textarea(), "{unfinished");
+    assert.equal(c.getSnapshot().raw[name]?.text, "{unfinished"); assert.equal(c.canSave(), false);
+    assert.equal(nodes(group()).filter(node => node.type === "input" || node.type === "select").every(node => node.props.disabled === true), true);
+    await c.save(); assert.equal(f.writes.length, writes);
+    event(textarea(), "[]");
+    assert.equal(c.canSave(), true); await c.save(); assert.equal((await f.profile.deployment.readGlobal()).config.permissionControl?.rules?.length, 0, "an explicit empty list replaces inherited records");
+    click(nodes(group()).find(node => node.props["data-dsmm-unset"] === name)!);
+    await c.save();
+    assert.equal((await f.profile.deployment.readGlobal()).config.permissionControl?.rules, undefined, "Unset removes only this layer's list");
+  } finally { await f.cleanup(); }
+});
+
+test("Global rules transaction offers a non-destructive Refresh and an explicit discard-and-reload", async () => {
+  const { PermissionController } = await import("../src/client/permission-controller.ts");
+  const { deferred } = await import("./permission-fixture.ts");
+  type Value = PermissionValue<"describeRules">;
+  const value = (revision: string, outsideReads: PermissionValue<"describeRules">["snapshot"]["policy"]["outsideReads"]): Value => ({
+    snapshot: { revision, policy: { ...DEFAULT_PERMISSION_CONTROL, outsideReads } },
+    runtime: { savedRevision: revision, runtimeRevision: revision, state: "synced", mounted: true, restartRequired: false },
+  });
+  const c = new PermissionController(), held = deferred<Value>();
+  let describes = 0;
+  const invoke: PermissionInvoker = async method => {
+    if (method !== "describeRules") throw new Error("unexpected write");
+    describes++;
+    return (describes === 4 ? await held.promise : describes >= 5 ? value("r2", "ask") : value("r0", "inherit")) as PermissionValue<typeof method>;
+  };
+  c.bindConnection(invoke, {}); c.bindScope("owned-root", {}, "root");
+  const stop = c.watch(), copy: Readonly<Record<string, string>> = permissionEn;
+  const tree = () => render(PermissionsPanel({ controller: c, t: key => copy[key] ?? key }));
+  const button = (label: string) => nodes(tree()).find(node => node.type === "button" && text(node) === label)!;
+  const settle = async (predicate: () => boolean) => { for (let round = 0; round < 300 && !predicate(); round++) await new Promise(resolve => setTimeout(resolve, 5)); };
+  try {
+    await settle(() => c.store.getSnapshot().rules !== null);
+    assert.equal(button(permissionEn.refresh).props.disabled, false);
+    assert.equal(button(permissionEn.discard).props.disabled, true, "a clean, non-conflicted draft has nothing to discard");
+    click(button(permissionEn.refresh));
+    assert.equal(c.store.getSnapshot().reading, true, "the rules transaction has its own visible refresh");
+    await settle(() => !c.store.getSnapshot().reading);
+    const generation = c.store.getSnapshot().generation;
+    c.edit(generation, { outsideReads: "deny" });
+    assert.equal(button(permissionEn.refresh).props.disabled, false); assert.equal(button(permissionEn.discard).props.disabled, false);
+    assert.equal(c.canSave(generation), true);
+    // A non-destructive refresh keeps the dirty draft and its base.
+    click(button(permissionEn.refresh)); await settle(() => !c.store.getSnapshot().reading);
+    assert.equal(c.store.getSnapshot().dirty, true); assert.equal(c.store.getSnapshot().draft!.outsideReads, "deny");
+    // Background revalidation stays invisible and never disables either control.
+    await settle(() => describes === 4);
+    const silent = c.store.getSnapshot();
+    assert.equal(silent.revalidating, true); assert.equal(silent.reading, false);
+    assert.equal(button(permissionEn.refresh).props.disabled, false); assert.equal(button(permissionEn.discard).props.disabled, false);
+    assert.equal(c.canSave(generation), true);
+    held.resolve(value("r1", "allow")); await settle(() => !c.store.getSnapshot().revalidating);
+    const stale = c.store.getSnapshot();
+    assert.equal(stale.base!.revision, "r0"); assert.equal(stale.rulesIssue, "stale");
+    assert.equal(stale.draft!.outsideReads, "deny"); assert.equal(c.canSave(generation), false);
+    click(button(permissionEn.discard)); await settle(() => !c.store.getSnapshot().reading);
+    const discarded = c.store.getSnapshot();
+    assert.deepEqual({ dirty: discarded.dirty, issue: discarded.rulesIssue, reads: discarded.draft!.outsideReads, base: discarded.base!.revision },
+      { dirty: false, issue: null, reads: "ask", base: "r2" });
+    assert.equal(button(permissionEn.discard).props.disabled, true);
+  } finally { stop(); c.dispose(); }
 });
 
 test("native runtime projection preserves execution readiness and unknown observations", () => {

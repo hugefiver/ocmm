@@ -45,8 +45,36 @@ Supported exact live children may receive Queue/Steer or interrupt through nativ
 
 ## Cold resume and lifetime
 
-DSMM cold resume without trusted live admission is unsupported. Old headers, configuration sidecars, role labels or PluginRecord display data don't revive retry state, policy or execution authority. Preserve history instead of copying current settings into it. DSMM read-only history queries don't call resume. Native factory load/repair may occur before the created guard rejects execution, so refusal isn't a guarantee that the log was never opened.
+Native history loading, reading, promotion, explicit/declarative restoration and durable restoration after provider unregistration follow DSH's own rules. DSMM doesn't add a global restoration gate or require an execution-admission SDK, owner slot or participant protocol. DSMM read-only history queries don't themselves call resume.
 
-Official Registry, Runtime and JSONL plugins own lifecycle and storage. DSMM scoped guards retain retirement checks; hot unload/reinstall doesn't promise uninterrupted live-session replacement. No custom owner, companion, cold migration or cross-process automatic retry is provided.
+DSMM uses public serial `agent/created` callbacks for fresh admission. A role's first creation requires its exact pending parent/provider/invocation, standing composition, scope, tool filter and depth ceiling. Role binding precedes Agent-scoped installation; publication rechecks current owner, exact parent, cancellation and composition after installation. Fresh ordinary children of a non-controlled admitted parent inherit its captured configuration and tool ceiling without acquiring a role invocation.
+
+Native `resume` doesn't enroll a reconstructed Agent in DSMM admission. Historical descriptors, role/preset labels, mode events and profile selections don't grant current DSMM role qualification. Fresh roots use current `prepareRoot` and root eligibility checks; saved profile-selection `admissionEpoch` and disk CAS retain their configuration-selection meaning, not execution authority. Old retry, approval and pending-call state isn't restored.
+
+Restricted-role continuation can lose DSMM-specific readonly, tool-filter and depth captures on restoration. The current Host doesn't provide a supported guarantee of safe DSMM restricted-role continuation across restoration, unload/reinstall or restart. That capability is deferred; a restored native request isn't proof of valid DSMM role admission or preserved restrictions. This limitation doesn't block native restoration or ordinary configuration/UI saves.
+
+Official Registry, Runtime and JSONL plugins own lifecycle and storage. DSMM live captures and callbacks retain their exact Agent and current owner checks; Agent-scoped guards remain fail-closed after that owner retires. They don't enroll other Agents or revoke native history globally. Ordinary unadmitted native tool calls, including managed shell calls, retain native approval/sandbox behavior and applicable permission rules through exact live registry, realm and lifetime checks, without acquiring DSMM role or configuration-write rights. Retired exact DSMM captures cannot use that native path. DSMM-specific entry points still require their applicable live admission and permission ceilings; native restoration doesn't provision those rights. No descriptor authorization ledger, persisted grant, cold migration, automatic history rewrite or cross-process automatic retry is provided.
 
 Diagnostics omit request/provider bodies, credentials and goal/todo text.
+
+## Known Host limitation: Windows sandbox and Git Schannel
+
+DSH `0.2.1-rc.2` with the `windows-acl` backend can fail HTTPS Git operations under `workspace-write` with `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS (0x8009030e)`. This was reproduced on 2026-10-21 using a public repository and isolated Git configuration, without account authentication.
+
+The same Git command succeeds outside the sandbox, fails through both the native DSH executor and the DSMM-managed native tool with unchanged effective sandbox policy, and succeeds inside the same sandbox when explicitly using OpenSSL. This isolates the failure to the Windows sandbox/Schannel interaction, not a DSMM-specific permission decision. The specific restricted-token flag, SID or integrity-level interaction remains undetermined; the error does not establish missing GitHub credentials.
+
+An explicit per-command workaround, where the installed Git supports OpenSSL and its certificate trust configuration is suitable, is:
+
+```powershell
+git -c http.sslBackend=openssl ls-remote https://github.com/git/git.git HEAD
+```
+
+This changes the TLS trust backend, not the sandbox policy, and keeps certificate verification enabled. DSMM must not inject it silently, change global Git configuration, disable TLS verification or switch to full access to hide the failure.
+
+Upstream fix status is unconfirmed. On a later DSH version, recheck the same read-only Git operation with Schannel through the native `workspace-write` executor and DSMM-managed path. A sandbox fix must also preserve denial of workspace-external writes; a successful full-access command is not a fix. No local Host or dependency patch is applied for this limitation.
+
+### PowerShell in a Fake-IP environment
+
+An isolated PowerShell 7 comparison on DSH `0.2.1-rc.2` confirmed HTTPS access to `https://example.com/` through a Mihomo route with a DNS answer in `198.18.0.0/16`. Node HTTPS/OpenSSL succeeded with certificate verification in the ordinary process, native `windows-acl` `workspace-write` executor and DSMM-managed pwsh tool. Windows curl/Schannel succeeded outside the sandbox but returned exit code 35 and `SEC_E_NO_CREDENTIALS` in both sandbox paths. These results establish connectivity for that Fake-IP route, not a general guarantee for every destination or proxy setup; they do not identify Fake-IP as the cause of the Schannel failure.
+
+The comparison had no `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` or `NO_PROXY` environment variables. Propagation of explicitly configured proxies remains unverified. The DSMM tool result preserves the native command's exit code; an outer `isError: false` alone does not mean the command succeeded. The opt-in [Fake-IP web provider](web-fetch-fakeip.md) affects `ctx.web`, not shell routing or TLS. No bash, WSL or Git Bash network verification is claimed.

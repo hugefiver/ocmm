@@ -2,6 +2,8 @@ import type { ConfigForms } from "@deepseek-ai/dsh-client-ui-settings/client";
 import type { DeploymentController } from "./deployment-controller.js";
 import type { PermissionController } from "./permission-controller.js";
 import type { ConfigModule } from "./deployment-modules.js";
+import { CONFIG_MODULES, moduleFields } from "./deployment-modules.js";
+import { scopeSchema } from "./deployment-data.js";
 export type ConfigScope = "global" | "profile";
 interface Destination { scope: ConfigScope; module: ConfigModule | null }
 interface WorkspaceView extends Destination { pending: Destination | null; native: DeploymentController | null; revision: number }
@@ -9,6 +11,7 @@ interface WorkspaceView extends Destination { pending: Destination | null; nativ
 export class DeploymentWorkspace {
   private state: WorkspaceView = { scope: "global", module: null, pending: null, native: null, revision: 0 };
   private listeners = new Set<() => void>();
+  private visited: Record<ConfigScope, ConfigModule | null> = { global: null, profile: null };
   private forms: ConfigForms | null = null;
   private profiles = new Map<string, DeploymentController>();
   private stopForm?: () => void;
@@ -53,24 +56,47 @@ export class DeploymentWorkspace {
     this.changed({ native });
   }
   controller(scope = this.state.scope): DeploymentController | null { return scope === "global" ? this.core : this.state.native; }
+  /** First visit opens the first section with editable fields; afterwards the last viewed section. */
+  private defaultSection(scope: ConfigScope): ConfigModule {
+    const restored = this.visited[scope];
+    if (restored !== null) return restored;
+    const snapshot = this.controller(scope)?.getSnapshot().snapshot;
+    if (snapshot !== null && snapshot !== undefined) {
+      const schema = scopeSchema(snapshot, scope);
+      for (const module of CONFIG_MODULES) if (module !== "state" && moduleFields(schema, module, scope).length > 0) return module;
+    }
+    return "state";
+  }
   hasPending(): boolean { return this.controller()?.getSnapshot().dirty === true || this.state.module === "permissions" && this.permissions?.store.getSnapshot().dirty === true; }
   request(destination: Destination): void {
     const switched = destination.scope !== this.state.scope;
-    const leaving = switched || this.state.module !== null && destination.module !== this.state.module;
-    if (leaving && this.hasPending()) this.changed({ pending: destination });
-    else { this.changed({ ...destination, pending: null }); if (switched) void this.controller()?.refresh(); }
+    const leaving = switched || this.state.module !== null && destination.module !== null && destination.module !== this.state.module;
+    if (leaving && this.hasPending()) { this.changed({ pending: destination }); return; }
+    const module = destination.module ?? this.defaultSection(destination.scope);
+    this.visited[destination.scope] = module;
+    this.changed({ scope: destination.scope, module, pending: null });
+    if (switched) void this.controller()?.refresh();
   }
   continueEditing(): void { this.changed({ pending: null }); }
-  keepAndNavigate(): void { const target = this.state.pending; if (target !== null) { const switched = target.scope !== this.state.scope; this.changed({ ...target, pending: null }); if (switched) void this.controller()?.refresh(); } }
+  /** Explicitly keep every draft and move anyway; the draft stays in contribution memory. */
+  keepAndNavigate(): void {
+    const target = this.state.pending; if (target === null) return;
+    const module = target.module ?? this.defaultSection(target.scope);
+    this.visited[target.scope] = module;
+    const switched = target.scope !== this.state.scope;
+    this.changed({ scope: target.scope, module, pending: null });
+    if (switched) void this.controller()?.refresh();
+  }
   async discardAndNavigate(): Promise<void> {
     const destination = this.state.pending; if (destination === null) return;
     const controller = this.controller();
     if (controller?.getSnapshot().dirty) { await controller.refresh(true); if (controller.getSnapshot().dirty || controller.getSnapshot().issue !== null) return; }
     if (this.state.module === "permissions" && this.permissions?.store.getSnapshot().dirty) {
-      await this.permissions.refresh(this.permissions.store.getSnapshot().generation, true);
+      const permissions = this.permissions.store.getSnapshot();
+      await this.permissions.refresh(permissions.generation, true);
       if (this.permissions.store.getSnapshot().dirty) return;
     }
-    if (this.state.pending === destination) this.changed({ ...destination, pending: null });
+    if (this.state.pending === destination) this.request(destination);
   }
   async save(): Promise<void> { const controller = this.controller(); if (controller === null) return; await controller.save(); if (controller !== this.core && controller.getSnapshot().saved) await this.core.refresh(); }
   dispose(): void { this.stopCore(); this.stopForm?.(); this.stopNative?.(); this.stopPermissions?.(); for (const controller of this.profiles.values()) controller.dispose(); this.listeners.clear(); }

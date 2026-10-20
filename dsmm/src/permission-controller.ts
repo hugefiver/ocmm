@@ -105,7 +105,7 @@ export class DsmmPermissionController extends Service {
       captureIntegrity: options.authority.captureIntegrity === undefined ? undefined : exec => options.authority.captureIntegrity!(exec),
       current: exec => options.authority.current(exec),
       assertCurrent: (current, exec) => {
-        options.authority.assertCurrent(options.authority.current(exec), exec);
+        options.authority.assertCurrent(current, exec);
         if (current.agent !== exec.agent || this.lifetime.signal.aborted) throw new PermissionRefusal("stale");
       },
     };

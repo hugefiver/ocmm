@@ -235,7 +235,7 @@ test("next actual native consumption refreshes direct-file edits and native whol
     const execute = () => profile.ctx.tools.execute({ name: definition.name, callId: ToolCallId(randomUUID()), arguments: {}, agent: owner.root, signal: new AbortController().signal });
     await owner.deployment.store.save("{}", "absent");
     assert.equal((await execute()).isError, false); const oldSignal = owner.backend.runtime.signal;
-    const entry = { id: "owned", mode: "allow", sandboxMode: "danger-full-access", match: { tool: "pwsh", executable: "go", subcommand: "test", args: ["."], workingDirectory: run.root } };
+    const entry = { id: "owned", mode: "allow", sandboxMode: "danger-full-access", match: { tool: "pwsh", commandPattern: "go test", workingDirectory: run.root } };
     writeFileSync(join(run.home, "plugins", "dsmm", "config.json"), JSON.stringify({ permissionControl: { webFetch: { enabled: false }, nativeCommands: { enabled: true, entries: [entry] } } }));
     assert.equal(owner.deployment.permissionSource().policy.nativeCommands.entries.length, 1);
     assert.equal((await execute()).isError, true); assert.equal(bodies, 1); assert.equal(oldSignal.aborted, true);
@@ -254,7 +254,7 @@ test("Host command cwd validation fences invalid source before publication and r
   try {
     const profile = await run.createProfile("permission-host-cwd"), owner = await bind(profile);
     const commands = (workingDirectory: string) => ({ enabled: true, entries: [{ id: "owned", mode: "allow", sandboxMode: "danger-full-access",
-      match: { tool: "pwsh", executable: "go", subcommand: "test", args: ["."], workingDirectory } }] });
+      match: { tool: "pwsh", commandPattern: "go test", workingDirectory } }] });
     const nonCanonical = `${run.root}/child/..`, invalidCwd = isAbsolute("C:/owned/workspace") ? "/owned/workspace" : "C:/owned/workspace";
     await owner.deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["permissionControl", "nativeCommands"], value: commands(nonCanonical) }] }, () => {});
     assert.equal(owner.backend.runtime.getPolicy().policy.nativeCommands.entries[0].match.workingDirectory, normalize(nonCanonical));
@@ -271,6 +271,104 @@ test("Host command cwd validation fences invalid source before publication and r
     await owner.backend.runtime.refresh(); assert.equal(owner.backend.runtime.status().state, "synced");
     assert.equal(owner.backend.runtime.getPolicy().policy.nativeCommands.entries[0].match.workingDirectory, normalize(nonCanonical));
     assert.equal(signal.aborted, true);
+  } finally { await run.dispose(); }
+});
+
+test("command patterns: durable global/native saves preserve pattern fields, CAS and whole-array Unset inheritance", async () => {
+  const run = nativeConfigRun({ managedPermissionSettings: true });
+  try {
+    const profile = await run.createProfile("permission-pattern-saves"), owner = await bind(profile);
+    const entry = { id: "global", mode: "ask", sandboxMode: "workspace-write", match: { tool: "pwsh", workingDirectory: run.root, commandPattern: " \tgo\tbuild|test *\t " } };
+    const globalCommands = { enabled: true, entries: [entry] };
+    await owner.deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["permissionControl", "nativeCommands"], value: globalCommands }] }, () => {});
+    const saved = await owner.deployment.readGlobal(), beforeNative = profile.descriptor();
+    const nativeCommands = { entries: [{ ...entry, id: "native", match: { ...entry.match, commandPattern: "go test" } }] };
+    await profile.settings.mutate(beforeNative.ns, [{ op: "set", path: ["permissionControl", "nativeCommands"], value: nativeCommands }], beforeNative.revision);
+    assert.deepEqual(profile.persistedConfig().permissionControl?.nativeCommands, nativeCommands);
+    let desired = await owner.deployment.readDesired();
+    assert.deepEqual(desired.global.permissionControl?.nativeCommands, globalCommands);
+    assert.deepEqual(desired.profile.permissionControl?.nativeCommands, nativeCommands);
+    assert.deepEqual(desired.settings.permissionControl.nativeCommands, { enabled: true, ...nativeCommands });
+    assert.equal(desired.sources["permissionControl.nativeCommands.entries"], "profile");
+    const snapshot = owner.backend.runtime.getPolicy(), descriptor = profile.descriptor();
+    await assert.rejects(owner.deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["permissionControl", "nativeCommands", "entries"], value: [] }] }, () => {}), { code: "conflict" });
+    await assert.rejects(profile.settings.mutate(beforeNative.ns, [{ op: "set", path: ["permissionControl", "nativeCommands", "entries"], value: [] }], beforeNative.revision));
+    assert.deepEqual(await owner.deployment.readGlobal(), saved);
+    assert.deepEqual(profile.persistedConfig().permissionControl?.nativeCommands, nativeCommands);
+    assert.equal(profile.descriptor().revision, descriptor.revision);
+    assert.equal(owner.backend.runtime.getPolicy().revision, snapshot.revision);
+    await profile.settings.mutate(descriptor.ns, [{ op: "set", path: ["permissionControl", "nativeCommands", "entries"], value: [] }], descriptor.revision);
+    assert.deepEqual(owner.backend.runtime.getPolicy().policy.nativeCommands, { enabled: true, entries: [] });
+    const unset = profile.descriptor();
+    await profile.settings.mutate(unset.ns, [{ op: "unset", path: ["permissionControl", "nativeCommands", "entries"] }], unset.revision);
+    desired = await owner.deployment.readDesired();
+    assert.deepEqual(desired.settings.permissionControl.nativeCommands, globalCommands);
+    assert.equal(desired.sources["permissionControl.nativeCommands.entries"], "global");
+    assert.deepEqual(owner.backend.runtime.getPolicy().policy.nativeCommands, globalCommands);
+  } finally { await run.dispose(); }
+});
+
+test("command patterns: legacy and mixed global/native saves fail without replacing durable data, revisions or runtime candidates", async () => {
+  const run = nativeConfigRun({ managedPermissionSettings: true });
+  try {
+    const profile = await run.createProfile("permission-pattern-reject-save"), owner = await bind(profile);
+    const match = { tool: "pwsh", workingDirectory: run.root, commandPattern: "go test" };
+    const entry = { id: "valid", mode: "ask", sandboxMode: "workspace-write", match };
+    const valid = { enabled: true, entries: [entry] };
+    await owner.deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["permissionControl", "nativeCommands"], value: valid }] }, () => {});
+    let descriptor = profile.descriptor();
+    await profile.settings.mutate(descriptor.ns, [{ op: "set", path: ["permissionControl", "nativeCommands"], value: valid }], descriptor.revision);
+    descriptor = profile.descriptor();
+    const saved = await owner.deployment.readGlobal(), native = profile.persistedConfig(), snapshot = owner.backend.runtime.getPolicy(), signal = owner.backend.runtime.signal, revokes = owner.revokes();
+    const legacy = { tool: "pwsh", workingDirectory: run.root, executable: "go", subcommand: "test", args: ["."] };
+    for (const invalidMatch of [legacy, { ...legacy, commandPattern: "go test" }]) for (const enabled of [false, true]) {
+      const value = { enabled, entries: [{ ...entry, match: invalidMatch }] };
+      await assert.rejects(owner.deployment.saveGlobal({ expectedRevision: saved.revision, edits: [{ op: "set", path: ["permissionControl", "nativeCommands"], value }] }, () => {}));
+      assert.deepEqual(await owner.deployment.readGlobal(), saved);
+      await assert.rejects(profile.settings.mutate(descriptor.ns, [{ op: "set", path: ["permissionControl", "nativeCommands"], value }], descriptor.revision));
+      assert.deepEqual(profile.persistedConfig(), native);
+      assert.equal(profile.descriptor().revision, descriptor.revision);
+      assert.deepEqual(owner.backend.runtime.getPolicy(), snapshot);
+      assert.equal(owner.backend.runtime.signal, signal); assert.equal(signal.aborted, false);
+      assert.equal(owner.revokes(), revokes);
+    }
+  } finally { await run.dispose(); }
+});
+
+test("command patterns: external legacy or mixed disabled sources fail refresh and dispatch without publishing or rewriting data", async () => {
+  const run = nativeConfigRun({ managedPermissionSettings: true });
+  try {
+    const profile = await run.createProfile("permission-pattern-reject-refresh"), owner = await bind(profile);
+    let bodies = 0;
+    const definition: ToolDefinition = { name: "owned-pattern-refresh", description: "Owned source validation boundary", parameters: { type: "object" },
+      output: { schema: { type: "integer" }, render: (_args, value) => [{ type: "text", text: String(value) }] }, async execute() { return ++bodies; } };
+    profile.ctx.tools.register(definition);
+    registerNativePermissionRules(profile.ctx, { runtime: owner.backend.runtime, identify: current => current === definition ? { kind: "webFetch", context: profile.ctx, assertCurrent() {} } : undefined, assertCurrent() {} });
+    owner.root.session.append("turn/start", { turn: 1 });
+    const execute = () => profile.ctx.tools.execute({ name: definition.name, callId: ToolCallId(randomUUID()), arguments: {}, agent: owner.root, signal: new AbortController().signal });
+    const entry = { id: "valid", mode: "ask", sandboxMode: "workspace-write", match: { tool: "pwsh", workingDirectory: run.root, commandPattern: "go test" } };
+    const valid = JSON.stringify({ permissionControl: { nativeCommands: { enabled: true, entries: [entry] } } });
+    await owner.deployment.store.save(valid, "absent"); await owner.backend.runtime.refresh();
+    assert.equal((await execute()).isError, false); assert.equal(bodies, 1);
+    const native = profile.persistedConfig(), nativeRevision = profile.descriptor().revision;
+    const legacy = { tool: "pwsh", workingDirectory: run.root, executable: "go", subcommand: "test", args: ["."] };
+    for (const match of [legacy, { ...legacy, commandPattern: "go test" }]) {
+      const snapshot = owner.backend.runtime.getPolicy(), signal = owner.backend.runtime.signal;
+      const invalid = JSON.stringify({ permissionControl: { enabled: false, nativeCommands: { enabled: false, entries: [{ ...entry, match }] } } });
+      writeFileSync(join(run.home, "plugins", "dsmm", "config.json"), invalid);
+      const file = owner.deployment.store.read();
+      await assert.rejects(owner.backend.runtime.refresh());
+      assert.equal((await execute()).isError, true); assert.equal(bodies, 1);
+      assert.equal(signal.aborted, true); assert.equal(owner.backend.runtime.status().state, "unsynced");
+      assert.equal(owner.backend.runtime.status().runtimeRevision, snapshot.revision);
+      assert.throws(() => owner.backend.runtime.getPolicy());
+      assert.deepEqual(owner.deployment.store.read(), file);
+      assert.equal(file.content, invalid);
+      assert.deepEqual(profile.persistedConfig(), native); assert.equal(profile.descriptor().revision, nativeRevision);
+      writeFileSync(join(run.home, "plugins", "dsmm", "config.json"), valid);
+      await owner.backend.runtime.refresh();
+      assert.deepEqual(owner.backend.runtime.getPolicy().policy.nativeCommands, { enabled: true, entries: [entry] });
+    }
   } finally { await run.dispose(); }
 });
 

@@ -12,7 +12,6 @@ import { nativeRoutingFixture, runFixtureTurn } from "./native-routing-fixture.t
 import type { DshAgent as PackageDshAgent, DshContext } from "../lib/dsh-types.js";
 import type { DsmmProfileRuntime } from "../lib/profile-runtime.js";
 import { DsmmRolePolicy } from "../lib/role-policy.js";
-import { resolveSelectedAgentPreset } from "../lib/session-scope.js";
 import { DeepworkModeController } from "../lib/state.js";
 import { DSMM_ROLES } from "../lib/roles.js";
 import type { DsmmRoleId } from "../lib/roles.js";
@@ -65,6 +64,13 @@ for (const gitWriteGuard of ["deny", "ask"] as const) {
         const turns = new Map<string, number>();
         f.adapter.streamChunks = async function* (options) {
           const turn = turns.get(options.model) ?? 0; turns.set(options.model, turn + 1);
+          if (options.model === "guarded-coding" && turn === 0) {
+            assert.ok(child);
+            assert.equal(policy.identity(child as DshAgent).parent, parent);
+            assert.equal(mode.active(child as DshAgent, false), true);
+            assert.equal(mode.describe(child as DshAgent, false).active, true);
+            assert.match(JSON.stringify(options.messages.filter(message => message.role === "system")), /<dsmm-deepwork-mode>/);
+          }
           if (turn === 0) yield* options.model === "native-default"
             ? call("dsmm_category", { category: "dsmm-coding", description: "Admitted safety scope", prompt: "Exercise the counter-only shell" })
             : call("pwsh", { command: "git push origin main" });
@@ -76,8 +82,6 @@ for (const gitWriteGuard of ["deny", "ask"] as const) {
         await runFixtureTurn(parent);
         assert.ok(child);
         assert.equal(child.session.inheritedEventCount, 0);
-        assert.equal(resolveSelectedAgentPreset(child.session), "dsmm-coding");
-        assert.equal(mode.active(child as DshAgent, false), true);
         assert.equal(bodies, 0, "an admitted DSMM child must be fenced before the shell body, even without mode/preset metadata");
         assert.deepEqual(writes, [true], "deny and unavailable approval both fail closed through native tool execution");
         assert.deepEqual([...turns], [["native-default", 2], ["guarded-coding", 2]]);
@@ -92,7 +96,7 @@ test("mock LLM drives root → deep → coding → read and returns the child's 
   const f = await nativeRoutingFixture({ defaultActive: true, subagents: { maxDepth: 3 }, roleRouting: {
     "dsmm-deep": { primary: { provider: "fixture", model: "local-deep" } },
     "dsmm-coding": { primary: { provider: "fixture", model: "local-coding" } }
-  } }, { headless: true });
+  } }, { headless: true, nativeFs: true });
   try {
     const readable = join(f.profileDir, "readable.txt"); writeFileSync(readable, "READ_PROOF");
     const reads: Array<{ model?: string; isError: boolean; value: unknown }> = [];

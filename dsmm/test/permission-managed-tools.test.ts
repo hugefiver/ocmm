@@ -20,6 +20,7 @@ import * as NativeFs from "@deepseek-ai/dsh-tool-fs";
 import * as ManagedFs from "../src/permission-fs.ts";
 import * as ManagedSearch from "../src/permission-fs-search.ts";
 import * as ManagedWeb from "../src/permission-web.ts";
+import * as ManagedPwsh from "../src/permission-pwsh.ts";
 import DsmmPlugin from "../src/index.ts";
 import type { NativePermissionFsTarget } from "../src/permission-native-rules.ts";
 import type { PermissionControlSchemaInput } from "../src/permission-settings.ts";
@@ -27,6 +28,8 @@ import { PermissionRefusal } from "../src/permission-control.ts";
 import { FixedConfigFileStore } from "../src/config-file-store.ts";
 import { profileStoreFilePrimitives } from "../src/profile-store.ts";
 import { DsmmProfileError } from "../src/profiles.ts";
+import type { DsmmProfileRuntime } from "../src/profile-runtime.ts";
+import type { DshAgent } from "../src/dsh-types.ts";
 import { useIsolatedDshEnvironment } from "./dsh-test-environment.ts";
 import { mountPermissionHostCore, permissionHostProfile, waitForPermissionHost } from "./permission-host-fixture.ts";
 
@@ -54,7 +57,8 @@ async function fixture(policy: PermissionControlSchemaInput = {}, lateCore = fal
   await writeFile(join(workspace, "inside.txt"), "needle inside");
   await writeFile(join(outside, "outside.txt"), "needle outside");
   const ctx = new Context(), handles: AgentHandle[] = [], targets = new Map<string, NativePermissionFsTarget>();
-  let reads = 0, mutations = 0, searches = 0, fetches = 0, spawns = 0, approvals = 0;
+  let reads = 0, mutations = 0, searches = 0, fetches = 0, spawns = 0, approvals = 0, shellStarts = 0;
+  const shellSpecs: Record<string, unknown>[] = [];
   let outcome: "allowed-once" | "rejected" = "allowed-once";
   let answer: (() => Promise<typeof outcome>) | undefined;
   const filePath = (target: NativePermissionFsTarget) => String(target.targetKey);
@@ -100,6 +104,13 @@ async function fixture(policy: PermissionControlSchemaInput = {}, lateCore = fal
     for (const [plugin, config] of [[AgentRegistry], [SessionStore], [SessionProjectionRegistry], [LlmRuntime], [SystemPrompt, {}], [ToolRuntime, { mode: "native" }], [ApprovalService, { policy: "ask" }], [OwnedFs], [SubagentRuntime, {}], [AgentLoop, {}]] as const) await ctx.plugin(plugin as never, config as never).await();
     await ctx.plugin(WorkingDirectory.default, { defaultDirectory: workspace }).await();
     ctx.provide("sandboxPolicy", { resolve() { return { mode: fullAccess ? "danger-full-access" : "workspace-write", workspaceRoot: workspace }; } });
+    ctx.provide("shellEnv", { collect() { return {}; } });
+    ctx.provide("shell", { sandboxMode: "workspace-write", resolve(request: Record<string, unknown>) { return { timeoutMs: 1000, ...request }; },
+      async execute(spec: Record<string, unknown>) {
+        (spec.signal as AbortSignal | undefined)?.throwIfAborted(); shellStarts++; shellSpecs.push(spec);
+        return { result: async () => ({ exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 1000,
+          stdout: { text: "owned counted shell", truncated: false }, stderr: { text: "", truncated: false } }) };
+      } });
     await ctx.plugin(WebRuntime, {}).await();
     ctx.web.registerSearchProvider({ id: "owned-search", available: () => true,
       async search(request: { query: string }) { searches++; return { sources: [{ url: "https://example.invalid/", title: request.query }], truncated: false }; },
@@ -123,8 +134,9 @@ async function fixture(policy: PermissionControlSchemaInput = {}, lateCore = fal
     return { ctx, workspace, outside, home, fsFiber, searchFiber, webFiber, create, mountCore,
       controller: () => ctx.get("dsmmPermissionController")!,
       execute: (agent: Agent, name: string, args: unknown, signal = new AbortController().signal) => ctx.tools.execute({ agent, name, arguments: args, signal, callId: ToolCallId(randomUUID()) }),
+      async mountShell() { const fiber = ctx.plugin(ManagedPwsh, { enableRunInBackground: false, promoteOnTimeout: false }); await fiber.await(); return fiber; },
       async update(value: PermissionControlSchemaInput) { const path = join(home, "plugins", "dsmm"); await mkdir(path, { recursive: true }); await writeFile(join(path, "config.json"), JSON.stringify({ permissionControl: { enabled: true, ...value } })); },
-      counts: () => ({ reads, mutations, searches, fetches, spawns, approvals }),
+      counts: () => ({ reads, mutations, searches, fetches, spawns, approvals, shellStarts }), shellSpecs,
       setOutcome(value: typeof outcome) { outcome = value; }, setAnswer(value: typeof answer) { answer = value; },
       async dispose() { for (const handle of handles.reverse()) await handle.dispose(); await ctx.fiber.dispose(); const exact = await realpath(directory); assert.equal(dirname(exact), parent); await rm(exact, { recursive: true }); },
     };
@@ -262,7 +274,7 @@ test("unmapped native write/edit retain their original sandbox approval and muta
   } finally { await f.dispose(); }
 });
 
-test("late Core load fences unbound roots while new roots honor the captured permission setting", async () => {
+test("late Core load applies permission rules to unadmitted native roots without granting DSMM admission", async () => {
   for (const enabled of [true, false]) {
     const f = await fixture({ enabled, outsideReads: "deny" }, true);
     try {
@@ -271,14 +283,72 @@ test("late Core load fences unbound roots while new roots honor the captured per
       assert.equal((await f.execute(root, "read", { file_path: join(f.outside, "outside.txt") })).isError, false);
       assert.equal(f.counts().reads, 1); assert.equal(f.counts().approvals, 0);
       await f.mountCore();
-      assert.equal((await f.execute(root, "read", { file_path: join(f.outside, "outside.txt") })).isError, true);
-      assert.equal(f.counts().reads, 1);
+      assert.equal(f.ctx.dsmmNativeAdmission.owns(root), false);
+      assert.equal((await f.execute(root, "read", { file_path: join(f.outside, "outside.txt") })).isError, enabled);
+      assert.equal(f.counts().reads, enabled ? 1 : 2);
+      assert.equal((await f.execute(root, "read", { file_path: join(f.workspace, "inside.txt") })).isError, false);
       const admitted = await f.create();
       assert.equal((await f.execute(admitted, "read", { file_path: join(f.outside, "outside.txt") })).isError, enabled);
-      assert.equal(f.counts().reads, enabled ? 1 : 2); assert.equal(f.counts().approvals, 0);
+      assert.equal(f.counts().reads, enabled ? 2 : 4); assert.equal(f.counts().approvals, 0);
       assert.equal(f.controller().toolCoverage(admitted).length, enabled ? 5 : 0);
+      if (enabled) {
+        await f.update({ outsideReads: "ask" }); f.setOutcome("rejected");
+        assert.equal((await f.execute(root, "read", { file_path: join(f.outside, "outside.txt") })).isError, true);
+        assert.equal(f.counts().reads, 2); assert.equal(f.counts().approvals, 1);
+        f.setOutcome("allowed-once");
+        assert.equal((await f.execute(root, "read", { file_path: join(f.outside, "outside.txt") })).isError, false);
+        assert.equal(f.counts().reads, 3); assert.equal(f.counts().approvals, 2);
+      }
     } finally { await f.dispose(); }
   }
+});
+
+test("pre-Core native root managed shell retains native sandbox, approval and applicable rules without role admission", async () => {
+  const f = await fixture({ outsideReads: "inherit" }, true);
+  try {
+    const root = await f.create(); await f.mountCore(); await f.mountShell();
+    const args = { command: "go test", description: "Count one owned shell invocation", workdir: f.workspace };
+    const call = (extra = {}) => f.execute(root, "pwsh", { ...args, ...extra });
+    assert.equal(f.ctx.dsmmNativeAdmission.owns(root), false);
+    assert.equal((await call()).isError, false); assert.equal(f.counts().shellStarts, 1); assert.equal(f.counts().approvals, 0);
+    assert.equal((f.shellSpecs.at(-1)!.sandboxPolicy as { mode: string }).mode, "workspace-write");
+    const escalation = { sandbox_permissions: "danger-full-access", justification: "Approve this exact counted native invocation" };
+    f.setOutcome("rejected"); assert.equal((await call(escalation)).isError, true); assert.equal(f.counts().shellStarts, 1);
+    f.setOutcome("allowed-once"); assert.equal((await call(escalation)).isError, false); assert.equal(f.counts().shellStarts, 2);
+    assert.equal((f.shellSpecs.at(-1)!.sandboxPolicy as { mode: string }).mode, "danger-full-access");
+    assert.equal((await call()).isError, false); assert.equal((f.shellSpecs.at(-1)!.sandboxPolicy as { mode: string }).mode, "workspace-write");
+    setApprovalPolicy(root.session, "never"); assert.equal((await call(escalation)).isError, true); assert.equal(f.counts().shellStarts, 3);
+    const restrict = root.ctx.tools.restrict({ deny: ["pwsh"] });
+    try { assert.equal((await call()).isError, true); } finally { restrict(); }
+    await f.update({ outsideReads: "deny" }); assert.equal((await call()).isError, true); assert.equal(f.counts().shellStarts, 3);
+    assert.equal(f.counts().approvals, 2); assert.equal(f.counts().spawns, 0);
+    setApprovalPolicy(root.session, "ask");
+    await f.update({ nativeCommands: { enabled: true, entries: [{ id: "owned-test", mode: "ask", sandboxMode: "danger-full-access",
+      match: { tool: "pwsh", commandPattern: "go test", workingDirectory: f.workspace } }] } });
+    f.setOutcome("rejected"); assert.equal((await call()).isError, true); assert.equal(f.counts().shellStarts, 3);
+    f.setOutcome("allowed-once"); assert.equal((await call()).isError, false); assert.equal(f.counts().shellStarts, 4);
+    assert.equal((f.shellSpecs.at(-1)!.sandboxPolicy as { mode: string }).mode, "danger-full-access");
+    setApprovalPolicy(root.session, "never"); assert.equal((await call()).isError, true);
+    assert.equal(f.counts().shellStarts, 4); assert.equal(f.counts().approvals, 4);
+    assert.equal(f.ctx.dsmmNativeAdmission.owns(root), false);
+    const profiles = f.ctx.get("dsmmProfileRuntime") as DsmmProfileRuntime;
+    assert.throws(() => profiles.admission(root as unknown as DshAgent), { code: "activation" });
+  } finally { await f.dispose(); }
+});
+
+test("retired exact native-preset DSMM capture cannot become an unadmitted native permission caller", async () => {
+  const f = await fixture({ outsideReads: "inherit" });
+  try {
+    await f.mountShell(); const root = await f.create();
+    const args = { command: "Write-Output owned", description: "Count one owned shell invocation", workdir: f.workspace };
+    assert.equal(f.ctx.dsmmNativeAdmission.owns(root), true);
+    assert.equal((await f.execute(root, "pwsh", args)).isError, false); assert.equal(f.counts().shellStarts, 1);
+    f.ctx.dsmmNativeAdmission.lifetime.abort();
+    assert.equal(f.ctx.agents.get(root.id), root); assert.equal(f.ctx.dsmmNativeAdmission.owns(root), true);
+    assert.equal((await f.execute(root, "pwsh", args)).isError, true);
+    assert.equal((await f.execute(root, "read", { file_path: join(f.workspace, "inside.txt") })).isError, true);
+    assert.equal(f.counts().shellStarts, 1); assert.equal(f.counts().reads, 0); assert.equal(f.counts().approvals, 0);
+  } finally { await f.dispose(); }
 });
 
 test("same-name Agent-local tool is untrusted, while native local registrations keep their scope and disposal", async () => {

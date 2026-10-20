@@ -116,8 +116,6 @@ test("profile model metadata follows the admitted ordinary root role without cha
     const draft = await runtime.save({ id: "metadata", expectedRevision: null, content: JSON.stringify({ version: 1, id: "metadata", settings: {
       defaultActive: false, roleRouting: {
         "dsmm-orchestrator": { primary: { provider: "fixture", model: "declared-main", reasoningEffort: "max" }, fallbackRoutes: [route("not-the-primary")] },
-        "dsmm-planner": { primary: { provider: "fixture", model: "declared-planner" } },
-        "dsmm-reviewer": { primary: route("declared-reviewer") },
       },
     } }) });
     await runtime.select({ id: draft.id, expectedRevision: draft.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
@@ -140,18 +138,24 @@ test("profile model metadata follows the admitted ordinary root role without cha
     first.profileModel!.model = "caller-edited-copy";
     assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main");
     root.session.append("agent-preset/selected", { agentPreset: "dsmm-planner" });
-    assert.deepEqual((await runtime.getSession(structural(root))).profileModel, { provider: "fixture", model: "declared-planner" }, "omitted effort is not replaced by an adapter default");
-    root.session.append("agent-preset/selected", { agentPreset: "dsmm-reviewer" });
-    assert.deepEqual((await runtime.getSession(structural(root))).profileModel, route("declared-reviewer"), "any top-level effective role can declare an optional model action");
-    root.session.append("agent-preset/selected", { agentPreset: "standard" });
-    assert.equal((await runtime.getSession(structural(root))).profileModel, undefined, "inactive non-DW roots do not infer an orchestrator model");
-    root.session.append("deepwork/mode", { active: true });
-    assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main");
+    assert.deepEqual((await runtime.getSession(structural(root))).profileModel, { provider: "fixture", model: "declared-main", reasoningEffort: "max" }, "history labels do not replace the current native role");
+    const ordinary = await f.create({ agentPreset: "standard" });
+    assert.equal((await runtime.getSession(structural(ordinary))).profileModel, undefined, "inactive non-DW roots do not infer an orchestrator model");
+    ordinary.session.append("agent-preset/selected", { agentPreset: "dsmm-planner" });
+    const ordinarySnapshot = await runtime.getSession(structural(ordinary));
+    assert.equal(ordinarySnapshot.profileModel, undefined, "history labels cannot activate a role on an ordinary native root");
+    assert.equal(ordinarySnapshot.deepwork!.active, false);
+    ordinary.session.append("deepwork/mode", { active: true });
+    assert.equal((await runtime.getSession(structural(ordinary))).profileModel?.model, "declared-main");
     const noPrimary = await runtime.save({ id: "no-primary", expectedRevision: null, content: JSON.stringify({ version: 1, id: "no-primary", settings: { roleRouting: { "dsmm-orchestrator": { fallbackRoutes: [route("fallback-only")] } } } }) });
     await runtime.select({ id: noPrimary.id, expectedRevision: noPrimary.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
     assert.equal((await runtime.getSession(structural(root))).profileModel?.model, "declared-main", "future defaults cannot replace an immutable admission");
     const future = await f.create({ agentPreset: "dsmm-orchestrator" });
     assert.equal((await runtime.getSession(structural(future))).profileModel, undefined, "fallbacks and actual native routes never become a declared profile primary");
+    const noEffort = await runtime.save({ id: "no-effort", expectedRevision: null, content: JSON.stringify({ version: 1, id: "no-effort", settings: { roleRouting: { "dsmm-orchestrator": { primary: { provider: "fixture", model: "declared-main" } } } } }) });
+    await runtime.select({ id: noEffort.id, expectedRevision: noEffort.revision, expectedSelectionRevision: (await runtime.describe()).selectionRevision });
+    const omittedEffort = await f.create({ agentPreset: "dsmm-orchestrator" });
+    assert.deepEqual((await runtime.getSession(structural(omittedEffort))).profileModel, { provider: "fixture", model: "declared-main" }, "omitted effort is not replaced by an adapter default");
     assert.deepEqual(nativeSelection.current, { provider: "fixture", model: "native-tab", reasoningEffort: "low" });
   } finally { await f.dispose(); }
 });

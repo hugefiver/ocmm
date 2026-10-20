@@ -97,7 +97,7 @@ test("busy parent and future role children retain their epoch while fresh roots 
 
 test("live reviewer and coding children retain captured read-only and Git ceilings across parent mode and future-default changes", async () => {
   let bodies = 0;
-  const f = await nativeRoutingFixture({ defaultActive: true, guards: { gitWriteGuard: "deny" } }, { headless: true, fixtureTools: [
+  const f = await nativeRoutingFixture({ defaultActive: true, guards: { gitWriteGuard: "deny" } }, { headless: true, nativeFs: true, fixtureTools: [
     { name: "pwsh", description: "Counter-only shell; never executes commands", parameters: { command: { type: "string", required: true } },
       output: { schema: { type: "string" }, render: () => [] }, async execute() { bodies++; return "COUNTER_ONLY"; } }
   ] });

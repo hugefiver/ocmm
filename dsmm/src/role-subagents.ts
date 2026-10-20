@@ -252,11 +252,12 @@ export async function registerHeadlessRoleTools(ctx: DshContext, controller: Dee
   if (refresh) { refresh(); return; }
   type State = { tools?: ToolRuntime; parentScope?: object; owned: Array<() => void>; restriction?: () => void; guard?: () => void; signature?: string; providers: Array<object | undefined>; hostDefinitions: Array<ToolDefinition | undefined>; identityRole?: DsmmRoleId; identityPrompt?: () => void; promptRealm?: object; guidance?: () => void };
   const states = new WeakMap<DshAgent, State>();
-  const reconcileIdentity = (agent: DshAgent, role = policy.identity(agent).role): void => {
+  const reconcileIdentity = (agent: DshAgent, identity = policy.identity(agent)): void => {
+    const role = identity.role;
     const state = states.get(agent);
     if (state === undefined || state.identityRole === role) return;
     state.identityPrompt?.();
-    state.identityPrompt = role === undefined ? undefined : registerRoleHarnessIdentity(agent, role);
+    state.identityPrompt = role === undefined ? undefined : registerRoleHarnessIdentity(agent, role, identity.child);
     state.identityRole = role;
   };
   const reconcile = (agent: DshAgent): void => {
@@ -284,7 +285,7 @@ export async function registerHeadlessRoleTools(ctx: DshContext, controller: Dee
       } });
       state.promptRealm = promptRealm;
     }
-    reconcileIdentity(agent, identity.role);
+    reconcileIdentity(agent, identity);
     const subagents = agentCtx.get("subagents");
     const host = ctx.get?.<ToolRuntime>("tools");
     const names = [...hostControls, ...host?.schemas().map((row) => row.name).filter((name) => name.startsWith(`mcp__${settings.lsp.serverName}__`)) ?? []];

@@ -16,9 +16,13 @@ export interface PermissionView {
   sessionId: string | null;
   scope: "unknown" | "root" | "child";
   connected: boolean;
+  /** Visible first load or explicit refresh only; background revalidation never sets it. */
   reading: boolean;
+  /** Silent background revalidation of an already trusted snapshot; not a busy state. */
+  revalidating: boolean;
   busy: "save" | null;
   rules: PermissionRulesSaveResult | null;
+  /** Last observed C state; only a successful clean read/save may become the mutation baseline. */
   base: PermissionRulesSaveResult["snapshot"] | null;
   draft: PermissionDraft | null;
   rulesIssue: PermissionIssue | null;
@@ -34,7 +38,7 @@ export function permissionChanges(view: PermissionView): PermissionRulesSaveRequ
   if (Object.keys(changes).length === 0 && draft.upsert.length === 0 && draft.revoke.length === 0) return null;
   return { expectedRevision: base.revision, ...(Object.keys(changes).length ? { changes } : {}), ...(draft.upsert.length ? { upsert: draft.upsert } : {}), ...(draft.revoke.length ? { revoke: draft.revoke } : {}) };
 }
-const empty = (): PermissionView => ({ generation: 0, sessionId: null, scope: "unknown", connected: false, reading: false, busy: null,
+const empty = (): PermissionView => ({ generation: 0, sessionId: null, scope: "unknown", connected: false, reading: false, revalidating: false, busy: null,
   rules: null, base: null, draft: null, rulesIssue: null, dirty: false, notice: null });
 
 /** Borrowed native selection plus last-observed C state; never a Root or policy authority. */
@@ -49,13 +53,18 @@ export class PermissionController {
   private timer?: ReturnType<typeof setTimeout>;
   private watchers = 0;
   private disposed = false;
+  /** A successful read/save exists for the current scope fence; not mutation authority. */
+  private observed = false;
   readonly store = { getSnapshot: (): PermissionView => this.state, subscribe: (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; } };
   private publish(patch: Partial<PermissionView>): void { if (this.disposed) return; this.state = { ...this.state, ...patch }; for (const listener of this.listeners) listener(); }
   private cancel(): void { this.request.abort(); this.request = new AbortController(); this.requestSequence++; clearTimeout(this.timer); }
-  private fence(preserve: boolean): void {
+  /** An observed snapshot exists; background work must stay invisible until it changes what is possible. */
+  private trusted(): boolean { return this.observed; }
+  private fence(preserveDraft: boolean, preserveBase = preserveDraft): void {
     this.cancel();
-    this.publish({ generation: this.state.generation + 1, reading: false, busy: null, notice: null,
-      rules: null, rulesIssue: null, ...preserve ? {} : { base: null, draft: null, dirty: false } });
+    this.observed = false;
+    this.publish({ generation: this.state.generation + 1, reading: false, revalidating: false, busy: null, notice: null, rules: null, rulesIssue: null,
+      ...preserveDraft ? {} : { draft: null, dirty: false }, ...preserveBase ? {} : { base: null } });
   }
   bindConnection(invoke: PermissionInvoker | null, generation?: unknown): void {
     if (this.disposed || this.invoke === invoke && this.connection === generation) return;
@@ -63,8 +72,12 @@ export class PermissionController {
   }
   bindScope(sessionId: string | null, owner: object | null, scope: PermissionView["scope"]): void {
     if (this.disposed || this.state.sessionId === sessionId && this.owner === owner && this.state.scope === scope) return;
-    const preserve = sessionId === this.state.sessionId;
-    this.owner = owner; this.fence(preserve); this.publish({ sessionId, scope }); this.schedule(true);
+    const sameSession = sessionId === this.state.sessionId;
+    this.owner = owner;
+    // A replaced owner invalidates the old base even when the session ID is unchanged;
+    // only the draft may survive for explicit recovery.
+    this.fence(sameSession, false);
+    this.publish({ sessionId, scope }); this.schedule(true);
   }
   watch(): () => void {
     this.watchers++; if (this.watchers === 1) this.schedule(true);
@@ -76,7 +89,7 @@ export class PermissionController {
   private schedule(immediate = false): void {
     clearTimeout(this.timer);
     if (this.watchers === 0 || !this.live(this.state.generation)) return;
-    this.timer = setTimeout(() => { void this.refresh(this.state.generation); }, immediate ? 0 : 1000);
+    this.timer = setTimeout(() => { void this.revalidate(this.state.generation); }, immediate ? 0 : 1000);
     this.timer.unref?.();
   }
   private issue(error: unknown): PermissionIssue { return error instanceof PermissionClientError ? error.code : "transport"; }
@@ -84,22 +97,34 @@ export class PermissionController {
     const value = this.state.rules;
     return value !== null && value.runtime.state === "synced" && value.runtime.savedRevision === value.snapshot.revision && value.runtime.runtimeRevision === value.snapshot.revision;
   }
+  /** A background request in flight never disables editing or saving; only its own save/authority does. */
   canEdit(generation: number): boolean { return this.live(generation) && this.state.rulesIssue === null && this.synchronized() && this.state.busy === null; }
-  canSave(generation: number): boolean { return this.canEdit(generation) && !this.state.reading && this.state.dirty && this.state.draft?.editor === null; }
-  async refresh(generation: number, discard = false): Promise<void> {
-    if (!this.live(generation) || this.state.reading || this.state.busy !== null) return;
+  canSave(generation: number): boolean { return this.canEdit(generation) && this.state.dirty && this.state.draft?.editor === null; }
+  /** User-triggered refresh: visible busy state on this transaction only. */
+  async refresh(generation: number, discard = false): Promise<void> { await this.load(generation, discard, false); }
+  /** Watch-driven revalidation. Invisible once a trusted snapshot exists. */
+  private async revalidate(generation: number): Promise<void> { await this.load(generation, false, true); }
+  private async load(generation: number, discard: boolean, background: boolean): Promise<void> {
+    if (!this.live(generation) || this.state.busy !== null || this.state.reading) return;
+    if (background && this.state.revalidating) return;
+    // A user-triggered refresh upgrades an in-flight silent read into its visible own request.
+    if (!background && this.state.revalidating) this.cancel();
+    const visible = !background || !this.trusted();
     const sequence = ++this.requestSequence, signal = this.request.signal, id = this.state.sessionId!;
-    this.publish({ reading: true });
-    const [rules] = await Promise.allSettled([this.invoke!("describeRules", [id], signal)]);
-    if (!this.live(generation) || signal.aborted || sequence !== this.requestSequence) return;
-    if (rules.status === "rejected") {
-      this.publish({ rules: null, rulesIssue: this.issue(rules.reason), reading: false });
-    } else {
-      const value = rules.value;
+    this.publish(visible ? { reading: true, revalidating: false } : { revalidating: true });
+    try {
+      const value = await this.invoke!("describeRules", [id], signal);
+      if (!this.live(generation) || signal.aborted || sequence !== this.requestSequence) return;
+      this.observed = true;
       const retain = this.state.dirty && !discard;
       this.publish({ rules: value, rulesIssue: retain && this.state.base?.revision !== value.snapshot.revision ? "stale" : null,
-        reading: false,
         ...retain ? {} : { base: value.snapshot, draft: draftOf(value.snapshot.policy), dirty: false } });
+    } catch (error) {
+      if (!this.live(generation) || signal.aborted || sequence !== this.requestSequence) return;
+      // Keep the last trusted projection visible; only its mutation authority is withdrawn.
+      this.publish({ rulesIssue: this.issue(error) });
+    } finally {
+      if (this.live(generation) && sequence === this.requestSequence) this.publish({ reading: false, revalidating: false });
     }
     this.schedule();
   }
@@ -121,8 +146,9 @@ export class PermissionController {
     this.edit(generation, { upsert: draft.upsert.filter(row => row.id !== id), revoke: [...new Set([...draft.revoke, id])], editor: draft.editor?.id === id ? null : draft.editor });
   }
   private begin(busy: NonNullable<PermissionView["busy"]>): { signal: AbortSignal; id: string } {
+    // Invalidate and abort unfinished reads so a late response cannot overwrite the save result.
     this.cancel();
-    this.publish({ busy, notice: null });
+    this.publish({ busy, reading: false, revalidating: false, notice: null });
     return { signal: this.request.signal, id: this.state.sessionId! };
   }
   async save(generation: number): Promise<void> {
@@ -131,8 +157,8 @@ export class PermissionController {
     const current = this.begin("save");
     try {
       const result = await this.invoke!("saveRules", [current.id, request], current.signal);
-      if (this.live(generation)) this.publish({ rules: result, base: result.snapshot, draft: draftOf(result.snapshot.policy), dirty: false, rulesIssue: null, notice: "saved" });
-    } catch (error) { if (this.live(generation)) this.publish({ rules: null, rulesIssue: this.issue(error) }); }
+      if (this.live(generation)) { this.observed = true; this.publish({ rules: result, base: result.snapshot, draft: draftOf(result.snapshot.policy), dirty: false, rulesIssue: null, notice: "saved" }); }
+    } catch (error) { if (this.live(generation)) this.publish({ rulesIssue: this.issue(error) }); }
     finally { if (this.live(generation)) { this.publish({ busy: null }); this.schedule(); } }
   }
 }

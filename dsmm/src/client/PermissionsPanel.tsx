@@ -72,16 +72,17 @@ function PermissionCoverage({ state, t }: Locale & { state: PermissionView }) {
 }
 export function PermissionRulesEditor({ controller, state, t }: Locale & { controller: PermissionController; state: PermissionView }) {
   const id = useId(), draft = state.draft, disabled = !controller.canEdit(state.generation), value = state.rules;
+  const writable = state.scope === "root" && state.connected;
   return <section className="dsmm-zone" aria-label={t("rules")}><h3>{t("rules")}</h3><p className="dsmm-hint">{t("rulesHint")}</p><p className="dsmm-hint">{t("networkLimit")}</p>
     <p className="dsmm-hint">{t("matchHint")}</p><Issue value={state.rulesIssue} t={t} />
     <p className="dsmm-hint">{t("observedPolicy")}</p><dl className="dsmm-child-meta"><dt>{t("profileOverrideState")}</dt><dd>{t("profileOverrideUnknown")}</dd></dl>
     <dl className="dsmm-child-meta"><dt>{t("runtime")}</dt><dd>{value === null ? t("unknown") : t(value.runtime.state)}</dd>
       <dt>{t("mounted")}</dt><dd>{value === null ? t("unknown") : t(value.runtime.mounted ? "on" : "off")}</dd></dl>
     {value?.runtime.restartRequired && <p>{t("restart")}</p>}
-    {disabled && <p className="dsmm-hint">{t(state.reading ? "reading" : "rulesUnavailable")}</p>}
+    {disabled && !state.reading && <p className="dsmm-hint">{t("rulesUnavailable")}</p>}
     {state.base !== null && <dl className="dsmm-child-meta"><dt>permissionControl.enabled</dt><dd>{t(state.base.policy.enabled ? "on" : "off")} · {t("coldHint")}</dd>
       <dt>permissionControl.nativeCommands.enabled</dt><dd>{t(state.base.policy.nativeCommands.enabled ? "on" : "off")}</dd></dl>}
-    <PermissionCoverage state={state} t={t} />
+    <details className="dsmm-deployment-group"><summary>{t("coverageDetails")}</summary><PermissionCoverage state={state} t={t} /></details>
     {draft !== null && <><div className="dsmm-field"><label htmlFor={`${id}-outside`}>{t("outsideReads")}</label><ActionSelect id={`${id}-outside`} value={draft.outsideReads} disabled={disabled} t={t} onChange={outsideReads => controller.edit(state.generation, { outsideReads })} /></div>
       {(["webSearch", "webFetch"] as const).map(key => <fieldset key={key}><legend>{t(key)}</legend><label className="dsmm-actions" htmlFor={`${id}-${key}-enabled`}><input type="checkbox" id={`${id}-${key}-enabled`} checked={draft[key].enabled} disabled={disabled} onChange={event => controller.edit(state.generation, { [key]: { ...draft[key], enabled: event.currentTarget.checked } })} />{t("enabled")}</label>
         <div className="dsmm-field"><label htmlFor={`${id}-${key}-rule`}>{t("rule")}</label><ActionSelect id={`${id}-${key}-rule`} value={draft[key].rule} disabled={disabled} t={t} onChange={rule => controller.edit(state.generation, { [key]: { ...draft[key], rule } })} /></div></fieldset>)}
@@ -92,7 +93,8 @@ export function PermissionRulesEditor({ controller, state, t }: Locale & { contr
     </>}
     <RuleRecords state={state} controller={controller} t={t} />
     <div className="dsmm-actions"><Button type="button" variant="primary" disabled={!controller.canSave(state.generation)} onClick={() => void controller.save(state.generation)}>{t("save")}</Button>
-      <Button type="button" variant="outline" disabled={state.scope !== "root" || !state.connected || state.reading || state.busy !== null} onClick={() => void controller.refresh(state.generation, true)}>{t("discard")}</Button></div>
+      <Button type="button" variant="outline" disabled={!writable || state.reading || state.busy !== null} onClick={() => void controller.refresh(state.generation)}>{t("refresh")}</Button>
+      <Button type="button" variant="outline" disabled={!writable || state.reading || state.busy !== null || !state.dirty && state.rulesIssue === null} onClick={() => void controller.refresh(state.generation, true)}>{t("discard")}</Button></div>
     {state.dirty && <p>{t("dirty")}</p>}
   </section>;
 }
@@ -100,7 +102,8 @@ export function PermissionsPanel({ controller, t, sessionId }: PermissionsPanelP
   const state = useSyncExternalStore(controller.store.subscribe, controller.store.getSnapshot);
   useEffect(() => controller.watch(), [controller]);
   if (sessionId !== undefined && sessionId !== state.sessionId) return <p className="dsmm-hint" role="status">{t("rulesUnavailable")}</p>;
-  return <section className="dsmm-profiles dsmm-children dsmm-permissions" data-dsmm-permissions aria-label={t("title")} aria-busy={state.reading || state.busy !== null}>
+  // Silent revalidation never flips the region busy; a save reports through its own status line.
+  return <section className="dsmm-profiles dsmm-children dsmm-permissions" data-dsmm-permissions aria-label={t("title")} aria-busy={state.reading}>
     <h2>{t("title")}</h2><RootState state={state} t={t} /><p className="dsmm-hint">{t("nativeApproval")}</p>
     <p className="dsmm-status" role="status" aria-live="polite">{state.busy !== null ? t("busy") : state.reading ? t("reading") : state.notice === null ? "" : t(state.notice)}</p>
     <PermissionRulesEditor controller={controller} state={state} t={t} />

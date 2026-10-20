@@ -13,8 +13,14 @@ import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { DsmmConfigHost } from "../lib/profile-rpc.js";
+import { applyPermissionRulesSave, operatorPermissionRulesSource } from "../src/permission-rules.ts";
+import type { PermissionRuleSnapshot, PermissionRulesBackend } from "../src/permission-rules.ts";
+import { resolvePermissionControl } from "../src/permission-settings.ts";
+import { registerPermissionControlRpc } from "../src/permission-rpc.ts";
+import type { PermissionRulesRuntimeSync } from "../src/permission-rules.ts";
 import type { DshAgent } from "../lib/dsh-types.js";
 import { deploymentEn } from "../src/client/deployment-locales.ts";
+import { permissionEn } from "../src/client/permission-locales.ts";
 
 const available = process.env.DSMM_TEST_DSH_ENTRY !== undefined && process.env.DSMM_TEST_PLAYWRIGHT_ENTRY !== undefined;
 
@@ -58,13 +64,39 @@ test("Core deployment controls save sparse desired values through native Gateway
     await host.plugin(TypertRegistry).await(); await host.plugin(TypertGatewayService, {}).await();
     await host.plugin(MemoryCredentials).await(); await host.plugin(NativeConnection).await();
     host.provide("webServer", { host: "127.0.0.1" }); host.provide("settings", { writable: true });
+    host.provide("agents", profile.ctx.agents);
     await host.plugin({ name: "core-ui-config-rpc", inject: ["typert", "connection"], apply(ctx: Context) {
       new DsmmConfigHost(ctx, profile.deployment, profile.runtime.getSettings(), () => profile.runtime);
     } }).await();
+    let permissionSnapshot: PermissionRuleSnapshot = { revision: "rules-g0", policy: resolvePermissionControl() };
+    let runtimeState: "synced" | "unsynced" = "synced";
+    const permissionBackend: PermissionRulesBackend = {
+      assertWritable() { assert.equal(profile.ctx.agents.get(root.id as never), root); },
+      async read() { return structuredClone(permissionSnapshot); },
+      async save(request, authority) {
+        authority.assertCurrent();
+        const policy = applyPermissionRulesSave(permissionSnapshot, request, operatorPermissionRulesSource(authority));
+        permissionSnapshot = { revision: "rules-g1", policy };
+        return { snapshot: permissionSnapshot, runtime: permissionRuntime.status() };
+      },
+    };
+    const permissionRuntime = { status: () => ({ savedRevision: permissionSnapshot.revision,
+      runtimeRevision: runtimeState === "synced" ? permissionSnapshot.revision : "runtime-previous", state: runtimeState, mounted: true, restartRequired: false }) } as unknown as PermissionRulesRuntimeSync;
+    await host.plugin({ name: "core-ui-permission-rpc", inject: ["typert", "connection"], apply(ctx: Context) {
+      registerPermissionControlRpc(ctx, { backend: permissionBackend, runtime: permissionRuntime });
+    } }).await();
+    const permissionCalls: Array<{ method: string; args: Record<string, unknown> }> = [];
+    let holdPermissionRead = false, failNextPermissionRead = false;
+    let releasePermissionRead!: () => void;
+    const permissionReadGate = new Promise<void>(resolve => { releasePermissionRead = resolve; });
     const calls: Array<{ method: string; args: Record<string, unknown> }> = [];
-    let holdSave = true;
+    let holdSave = true, failNextSettingsRead = false;
     const invoke = async (method: string, args: Record<string, unknown>) => {
       calls.push({ method, args });
+      if (method === "describeSettings" && failNextSettingsRead) {
+        failNextSettingsRead = false;
+        return { ok: false, error: { code: "gateway/unavailable", message: "Fixture read failure", details: {} } };
+      }
       if (method === "save" && holdSave) { holdSave = false; await saveGate; }
       try { return { ok: true, value: await host.typertGateway.invoke({ namespace: "dsmmConfig", method, args, peer: host.connection.browserPeer }) }; }
       catch (error) { const failure = remoteErrorOf(error); if (failure === undefined) throw error; return { ok: false, error: { code: failure.code, message: failure.message, details: failure.details } }; }
@@ -74,10 +106,22 @@ test("Core deployment controls save sparse desired values through native Gateway
       import React,{useEffect,useState} from 'react';
       import {DeploymentPage} from './DeploymentPage.tsx';
       import {DeploymentController} from './deployment-controller.ts';
+      import {PermissionController} from './permission-controller.ts';
+      import {PermissionClientError} from './permission-client.ts';
       import {deploymentEn,deploymentZh} from './deployment-locales.ts';
+      import {permissionEn,permissionZh} from './permission-locales.ts';
       import {PROFILE_STYLES} from './styles.ts';
+      const permissionInvoke=async(method,args,signal)=>{
+        const result=await window.__permissionBridge({method,args});
+        if(signal.aborted)throw new PermissionClientError('cancelled');
+        if(!result.ok)throw new PermissionClientError(result.code==='dsmm-permissions/refused'?result.details.code:'unavailable');
+        return result.value;
+      };
       const remote=Object.fromEntries(['describe','describeSettings','describeModules','save'].map(method=>[method,(request)=>window.__deploymentBridge({method,args:method==='save'?{request}:{}})]));
       const core=new DeploymentController(remote,'global');
+      const permissions=new PermissionController();
+      permissions.bindConnection(permissionInvoke,{});
+      permissions.bindScope(window.__permissionSessionId,permissions,'root');
       let formState={status:'loading'},listeners=new Set();
       const shared={getSnapshot:()=>formState,subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener)},mutate:async(ops,revision)=>{
         const result=await window.__deploymentBridge({method:'nativeSave',args:{ops,revision}});
@@ -88,8 +132,8 @@ test("Core deployment controls save sparse desired values through native Gateway
         formState={status:'ready',writable:true,revision:s.nativeFormRevision,value:s.profile,base:s.nativeForm.base,user:s.nativeForm.user};
         listeners.forEach(listener=>listener());}}
       function Surface(){const [locale,setLocale]=useState('en');useEffect(()=>{void refreshForm()},[]);
-        const copy=locale==='zh'?deploymentZh:deploymentEn;
-        return <><button onClick={()=>setLocale(locale==='en'?'zh':'en')}>EN / 中文</button><DeploymentPage view="page" core={core} remote={remote} forms={forms} t={key=>copy[key]}/></>;
+        const copy=locale==='zh'?deploymentZh:deploymentEn, pcopy=locale==='zh'?permissionZh:permissionEn;
+        return <><button onClick={()=>setLocale(locale==='en'?'zh':'en')}>EN / 中文</button><DeploymentPage view="page" core={core} remote={remote} forms={forms} permissions={permissions} permissionsT={key=>pcopy[key]} t={key=>copy[key]}/></>;
       }
       export const inject=['slots'];
       export function apply(ctx){ctx.effect(()=>{const style=document.createElement('style');style.textContent=PROFILE_STYLES;document.head.append(style);return()=>style.remove()});
@@ -112,14 +156,38 @@ test("Core deployment controls save sparse desired values through native Gateway
       await profile.settings.mutate(profile.descriptor().ns, input.args.ops as Parameters<typeof profile.settings.mutate>[1], input.args.revision as number);
       return { ok: true };
     });
+    await page.exposeBinding("__permissionBridge", async (source: { page: unknown; frame: { url(): string } }, input: { method: string; args: readonly unknown[] }) => {
+      assert.equal(source.page, page); assert.equal(new URL(source.frame.url()).origin, server!.origin);
+      permissionCalls.push({ method: input.method, args: { sessionId: input.args[0], request: input.args[1] } });
+      if (input.method === "describeRules") {
+        // Deterministic first-load gate and a one-shot ordinary read error, both outside the Host.
+        if (holdPermissionRead) { holdPermissionRead = false; await permissionReadGate; }
+        // Only a visible load may consume the injected failure; a silent background revalidation
+        // must not swallow it and leave the following user-triggered read succeeding.
+        if (failNextPermissionRead && await page.evaluate(() => document.querySelector("[data-dsmm-permissions]")?.getAttribute("aria-busy") === "true")) {
+          failNextPermissionRead = false;
+          return { ok: false, code: "dsmm-permissions/refused", details: { code: "unavailable" } };
+        }
+      }
+      try { return { ok: true, value: await host.typertGateway.invoke({ namespace: "dsmmPermissions", method: input.method, args: { sessionId: input.args[0], ...input.args.length > 1 ? { request: input.args[1] } : {} }, peer: host.connection.browserPeer }) }; }
+      catch (error) { const failure = remoteErrorOf(error); if (failure === undefined) throw error; return { ok: false, code: failure.code, details: failure.details }; }
+    });
+    await page.addInitScript((sessionId: string) => { (window as unknown as { __permissionSessionId: string }).__permissionSessionId = sessionId; }, root.id);
     await page.goto(server.origin);
+    const evidence = process.env.DSMM_UI_EVIDENCE_DIR ?? owned;
+    const capture = async (name: string) => {
+      for (const width of [375, 768, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${name}/${width} reflow`);
+        await page.screenshot({ path: join(evidence, `${name}-${width}.png`), fullPage: true });
+      }
+      await page.setViewportSize({ width: 768, height: 900 });
+    };
     const global = page.locator('[data-dsmm-layer="global"]'), native = page.locator('[data-dsmm-layer="profile"]');
     const scope = page.getByRole("combobox", { name: "Configuration scope", exact: true });
     const saveBar = page.getByRole("region", { name: "Save selected configuration scope", exact: true });
     const openModule = async (name: string) => {
-      const close = page.getByRole("button", { name: "Close module", exact: true });
-      if (await close.count()) await close.click();
-      await page.getByRole("navigation", { name: "Configuration modules", exact: true }).getByRole("button", { name, exact: true }).click();
+      await page.getByRole("tablist", { name: "Configuration sections", exact: true }).getByRole("tab", { name, exact: true }).click();
     };
     const openGroup = async (layer: typeof global, field: string) => {
       const group = layer.locator(`details[data-field="${field}"]`);
@@ -133,6 +201,9 @@ test("Core deployment controls save sparse desired values through native Gateway
     await globalField.waitFor(); assert.equal(await globalField.inputValue(), "inherit");
     assert.equal(await globalField.locator('option[value="inherit"]').textContent(), `${deploymentEn.unset} · ${deploymentEn.on}`);
     await globalField.selectOption("false");
+    // Explicit dirty state, with no save in flight.
+    assert.equal(await saveBar.getByRole("status").textContent(), deploymentEn.dirty);
+    await capture("state-dirty");
     await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     assert.equal(await globalField.isDisabled(), true);
     assert.equal(await saveBar.getByRole("button", { name: "Save", exact: true }).isDisabled(), true);
@@ -171,7 +242,18 @@ test("Core deployment controls save sparse desired values through native Gateway
     assert.equal((await profile.deployment.readDesired()).settings.modelParameters.passthrough, false);
 
     await scope.selectOption("global");
-    await openModule("Permissions and guards");
+    // First load of the watched Global-rules transaction: visible loading is armed through the
+    // existing bridge, not the Host, and the already-visited section stays mounted afterwards.
+    holdPermissionRead = true;
+    await openModule("Permissions and safety");
+    const rulesPanel = page.locator("[data-dsmm-permissions]");
+    await rulesPanel.waitFor();
+    const rulesStatus = rulesPanel.locator('[role="status"]').first();
+    await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions]")?.getAttribute("aria-busy") === "true");
+    assert.equal(await rulesStatus.textContent(), permissionEn.reading);
+    await capture("state-first-load");
+    releasePermissionRead();
+    await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions]")?.getAttribute("aria-busy") === "false");
     await openGroup(global, "permissionControl");
     const globalPermission = global.locator('details[data-field="permissionControl"]').getByRole("combobox", { name: "Enabled", exact: true });
     await globalPermission.selectOption("false"); await saveBar.getByRole("button", { name: "Save", exact: true }).click();
@@ -179,6 +261,8 @@ test("Core deployment controls save sparse desired values through native Gateway
     assert.equal((await profile.deployment.readGlobal()).config.permissionControl?.enabled, false);
     assert.equal((await profile.deployment.readGlobal()).config.modelParameters?.passthrough, false);
     await scope.selectOption("profile");
+    assert.equal(await page.getByRole("tab", { name: "Model routes and recovery", exact: true }).getAttribute("aria-selected"), "true");
+    await openModule("Permissions and safety");
     await openGroup(native, "permissionControl");
     const nativePermission = native.locator('details[data-field="permissionControl"]').getByRole("combobox", { name: "Enabled", exact: true });
     await nativePermission.selectOption("true"); await saveBar.getByRole("button", { name: "Save", exact: true }).click();
@@ -190,12 +274,100 @@ test("Core deployment controls save sparse desired values through native Gateway
     assert.equal((await profile.deployment.readDesired()).settings.permissionControl.enabled, false);
     assert.deepEqual(profile.persistedConfig().roleRouting, edited);
 
+    // Command rules: a pattern row is added through the rendered form, refused while its pattern
+    // is invalid, and persisted through the native SettingsForms backend on a valid save.
+    await openGroup(native, "permissionControl.nativeCommands");
+    const commands = native.locator('[data-field="permissionControl.nativeCommands.entries"]');
+    await commands.waitFor();
+    await commands.locator(":scope > details > summary").click();
+    await commands.getByRole("button", { name: permissionEn.addEntry, exact: true }).click();
+    const commandEntry = commands.locator("fieldset").first();
+    await commandEntry.getByRole("textbox", { name: permissionEn.entryId, exact: true }).fill("browser-pattern");
+    await commandEntry.getByRole("combobox", { name: permissionEn.tool, exact: true }).selectOption("pwsh");
+    await commandEntry.getByRole("textbox", { name: permissionEn.cwd, exact: true }).fill(profile.dir);
+    const pattern = commandEntry.getByRole("textbox", { name: permissionEn.pattern, exact: true });
+    const saveCommand = saveBar.getByRole("button", { name: "Save", exact: true });
+    await pattern.fill("go build test");
+    assert.equal(await pattern.getAttribute("aria-invalid"), "true");
+    assert.equal(await commandEntry.getByText(permissionEn.invalidPattern, { exact: true }).isVisible(), true);
+    assert.equal(await pattern.inputValue(), "go build test");
+    assert.equal(await saveBar.getByRole("status").textContent(), deploymentEn.dirty);
+    assert.equal(await saveCommand.isDisabled(), true);
+    await capture("state-command-pattern-invalid");
+    await pattern.fill("go build|test *");
+    assert.equal(await pattern.getAttribute("aria-invalid"), "false");
+    assert.equal(await commandEntry.getByText(permissionEn.invalidPattern, { exact: true }).count(), 0);
+    assert.equal(await saveCommand.isDisabled(), false);
+    await saveCommand.click();
+    await saved();
+    const commandRule = { id: "browser-pattern", mode: "ask", sandboxMode: "workspace-write",
+      match: { tool: "pwsh", workingDirectory: profile.dir, commandPattern: "go build|test *" } };
+    assert.deepEqual(profile.persistedConfig().permissionControl?.nativeCommands?.entries, [commandRule]);
+    assert.deepEqual((await profile.deployment.readDesired()).settings.permissionControl.nativeCommands.entries, [commandRule]);
+    assert.equal(await pattern.inputValue(), "go build|test *");
+    assert.equal(await pattern.isDisabled(), false);
+    await capture("state-command-pattern-saved");
+
+    // Unset replaces the whole array with the inherited list instead of keeping the saved rule.
+    await commands.locator("button[data-dsmm-unset]").click();
+    await saveBar.getByRole("button", { name: "Save", exact: true }).click();
+    await saved();
+    assert.equal(profile.persistedConfig().permissionControl?.nativeCommands?.entries, undefined);
+    assert.equal((await profile.deployment.readDesired()).settings.permissionControl.nativeCommands.entries.length, 0);
+    assert.equal(await commands.getByRole("textbox", { name: permissionEn.pattern, exact: true }).count(), 0);
+
+    // The Global-rules transaction owns its own RPC, status and Save inside the same section.
+    await page.waitForFunction(() => !document.querySelector("[data-dsmm-permissions]")?.querySelector("section[aria-label] select:disabled"));
+    const rulesOutside = rulesPanel.locator("select").first();
+    const stableStatus = (await rulesStatus.textContent()) ?? "";
+    assert.equal(await rulesPanel.getAttribute("aria-busy"), "false");
+    const describesBefore = permissionCalls.filter(call => call.method === "describeRules").length;
+    for (const cycle of [1, 2]) {
+      await page.waitForTimeout(1200);
+      assert.equal(await rulesPanel.getAttribute("aria-busy"), "false", `background revalidation cycle ${cycle} must not flip aria-busy`);
+      assert.equal((await rulesStatus.textContent()) ?? "", stableStatus, `background revalidation cycle ${cycle} must not announce reading`);
+    }
+    assert.ok(permissionCalls.filter(call => call.method === "describeRules").length > describesBefore, "the watched panel really revalidated in the background");
+    await capture("state-ready");
+    // Ordinary error: a one-shot read failure surfaces as an alert, keeps the draft, and does not
+    // clear the last trusted projection.
+    await rulesOutside.selectOption("allow");
+    failNextPermissionRead = true;
+    await rulesPanel.getByRole("button", { name: permissionEn.discard, exact: true }).click();
+    const rulesAlert = rulesPanel.getByRole("alert");
+    await rulesAlert.waitFor();
+    assert.equal(await rulesAlert.locator("code").textContent(), "unavailable");
+    assert.equal(await rulesOutside.inputValue(), "allow");
+    assert.equal(await rulesPanel.getByRole("button", { name: permissionEn.save, exact: true }).isDisabled(), true);
+    await capture("state-error");
+    await rulesPanel.getByRole("button", { name: permissionEn.discard, exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions] [role=alert]") === null);
+    // Runtime unsynced: the rules transaction reports it and refuses its own Save only.
+    runtimeState = "unsynced";
+    await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions]")?.textContent?.includes("Unsynced"));
+    assert.equal(await rulesPanel.getByRole("button", { name: "Save", exact: true }).isDisabled(), true);
+    assert.equal(await rulesOutside.isDisabled(), true);
+    await capture("state-unsynced");
+    const unsyncedSaves = permissionCalls.filter(call => call.method === "saveRules").length;
+    runtimeState = "synced";
+    await page.waitForFunction(() => !document.querySelector<HTMLSelectElement>("[data-dsmm-permissions] select")?.disabled);
+    await rulesOutside.selectOption("ask");
+    await rulesPanel.getByRole("button", { name: "Save", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions]")?.textContent?.includes("Rules saved"));
+    assert.equal(permissionCalls.filter(call => call.method === "saveRules").length, unsyncedSaves + 1);
+    assert.equal(permissionSnapshot.policy.outsideReads, "ask");
+    assert.ok(permissionCalls.some(call => call.method === "describeRules" && call.args.sessionId === root.id));
+    assert.ok(permissionCalls.some(call => call.method === "saveRules"));
+    assert.deepEqual(permissionCalls.filter(call => call.method === "saveRules").map(call => (call.args.request as { changes?: unknown }).changes), [{ outsideReads: "ask" }]);
+
     assert.equal(profile.runtime.admission(root), original);
     profile.assertLive();
 
     await scope.selectOption("global");
-    await openModule("Subagent settings");
+    await openModule("Workflow, roles and subagents");
     const subagents = global.locator('details[data-field="subagents"]');
+    assert.equal(await subagents.evaluate((element: HTMLDetailsElement) => element.open), false);
+    await subagents.locator(":scope > summary").first().click();
     assert.equal(await subagents.evaluate((element: HTMLDetailsElement) => element.open), true);
     const depth = subagents.locator('[data-field="subagents.maxDepth"] input');
     assert.equal(await depth.isVisible(), true);
@@ -209,14 +381,14 @@ test("Core deployment controls save sparse desired values through native Gateway
     await page.getByRole("button", { name: "EN / 中文", exact: true }).click();
     assert.equal(await subagents.evaluate((element: HTMLDetailsElement) => element.open), false);
     await page.getByRole("button", { name: "EN / 中文", exact: true }).click();
-    await openModule("Subagent settings");
+    await openModule("Workflow, roles and subagents");
     assert.equal(await subagents.evaluate((element: HTMLDetailsElement) => element.open), false);
     await subagents.locator(":scope > summary").click();
     assert.equal(await depth.isVisible(), true);
 
     await scope.selectOption("global");
     await openModule("Configuration state");
-    const inspector = page.getByRole("complementary", { name: "Configuration state", exact: true });
+    const inspector = page.getByRole("tabpanel", { name: "Configuration state", exact: true });
     const parameterState = inspector.locator("dl").filter({ hasText: "modelParameters.passthrough" });
     assert.equal(await parameterState.count(), 1);
     const states = await parameterState.locator("dd").allTextContents();
@@ -229,7 +401,6 @@ test("Core deployment controls save sparse desired values through native Gateway
     assert.equal(await globalField.evaluate((element: HTMLSelectElement) => element.matches(":focus-visible") && parseFloat(getComputedStyle(element).outlineWidth) >= 2), true);
     await globalField.press("ArrowUp"); assert.equal(await globalField.inputValue(), "true");
     await globalField.press("ArrowDown"); assert.equal(await globalField.inputValue(), "false");
-    const evidence = process.env.DSMM_UI_EVIDENCE_DIR ?? owned;
     for (const locale of ["en", "zh"]) {
       if (locale === "zh") await page.getByRole("button", { name: "EN / 中文", exact: true }).click();
       for (const dark of [false, true]) {
@@ -277,7 +448,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     assert.equal(await globalField.inputValue(), "false");
     await context.tracing.stop({ path: join(evidence, "core-ui-trace.zip") });
     await context.close(); assert.deepEqual(errors, []); assert.deepEqual(server.errors, []);
-    t.diagnostic(`Native gateway Global Save + durable native SettingsForms On/inherit/raw JSON Save; old admission retained; busy, keyboard focus/select, conflict/discard and reduced-motion covered. EN/ZH light/dark at 375/768/1280 without horizontal overflow. Screenshots/trace: ${process.env.DSMM_UI_EVIDENCE_DIR ?? "temporary (removed at cleanup)"}; no Lighthouse audit performed.`);
+    t.diagnostic(`Native gateway Global Save + durable native SettingsForms On/inherit/raw JSON Save; command-pattern rows refused Save while invalid and persisted on a valid pattern; old admission retained; PermissionsPanel Root RPC background revalidation kept aria-busy/status stable and its independent Save persisted; busy, keyboard focus/select, conflict/discard and reduced-motion covered. EN/ZH light/dark at 375/768/1280 without horizontal overflow. Screenshots/trace: ${process.env.DSMM_UI_EVIDENCE_DIR ?? "temporary (removed at cleanup)"}; no Lighthouse audit performed.`);
   } finally {
     releaseSave();
     try { await browser?.close(); } finally {

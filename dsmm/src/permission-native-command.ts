@@ -1,5 +1,5 @@
 import { isAbsolute, normalize, parse, resolve } from "node:path";
-import { parseNativeCommands } from "./permission-settings.js";
+import { parseNativeCommandPattern, parseNativeCommands } from "./permission-settings.js";
 import type { NativeCommandEntry, NativeCommandsSettings } from "./permission-settings.js";
 import type { PermissionShellIdentity } from "./permission-shell.js";
 import { PermissionRefusal } from "./permission-errors.js";
@@ -56,9 +56,10 @@ export function nativeCommandMatch(settings: NativeCommandsSettings, tool: "bash
   const words = literalCommand(command, identity.dialect);
   if (words === undefined) return undefined;
   const matches = parseHostNativeCommands(settings).entries.filter(entry => {
-    const match = entry.match, argv = match.subcommand === undefined ? words.slice(1) : words.slice(2);
-    return match.tool === tool && match.executable === words[0] && normalize(match.workingDirectory) === cwd
-      && (match.subcommand === undefined || match.subcommand === words[1]) && argv.length === match.args.length && argv.every((value, index) => value === match.args[index]);
+    const match = entry.match;
+    if (match.tool !== tool || normalize(match.workingDirectory) !== cwd) return false;
+    const pattern = parseNativeCommandPattern(match.commandPattern);
+    return pattern.executable === words[0] && pattern.subcommands.includes(words[1]);
   });
   if (new Set(matches.map(entry => entry.sandboxMode)).size > 1) return "ambiguous";
   return matches.find(entry => entry.mode === "ask") ?? matches[0];

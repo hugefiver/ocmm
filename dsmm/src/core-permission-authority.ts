@@ -9,7 +9,7 @@ import type { PermissionControlCollaborators, PermissionExecutionAuthority } fro
 import type { DsmmRolePolicy } from "./role-policy.js";
 import { DSMM_ROLES } from "./roles.js";
 import type { NativeAdmission } from "./native-admission.js";
-import { classifyDsmmAgent } from "./runtime-integration.js";
+import { capturedRoleInvocation } from "./role-invocation.js";
 import type { DsmmProfileAdmission, DsmmSettingsGetter } from "./settings.js";
 
 export interface CorePermissionAuthorityOptions {
@@ -34,10 +34,10 @@ interface NativeSandboxPolicy {
 }
 
 interface Generation {
-  readonly nativeChild: boolean;
+  readonly native: boolean;
   readonly controlled: boolean;
   readonly integration?: object;
-  readonly admission: DsmmProfileAdmission;
+  readonly admission?: DsmmProfileAdmission;
   readonly facts: readonly unknown[];
   readonly authority: PermissionExecutionAuthority;
   revoke(): void;
@@ -85,12 +85,16 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
     }
   };
 
-  const coreAdmission = (agent: Agent): DsmmProfileAdmission => {
+  const coreDomain = (agent: Agent) => {
     const core = ctx.get("dsmmCoreLlmOwner"), profiles = ctx.get("dsmmProfileRuntime");
     const ownerCore = coreOwner.get("dsmmCoreLlmOwner"), realmCore = agent.ctx.get("dsmmCoreLlmOwner");
     if (core === undefined || ownerCore === undefined || realmCore === undefined || profiles === undefined
       || permissionOriginal(core) !== permissionOriginal(ownerCore) || permissionOriginal(core) !== permissionOriginal(realmCore)) throw new PermissionRefusal("unavailable");
-    const structural = agent as unknown as DshAgent, admission = getSettings.admission?.(structural);
+    return profiles;
+  };
+
+  const coreAdmission = (agent: Agent): DsmmProfileAdmission => {
+    const profiles = coreDomain(agent), structural = agent as unknown as DshAgent, admission = getSettings.admission?.(structural);
     if (admission === undefined || profiles.admission(structural) !== admission || getSettings(structural) !== admission.settings) throw new PermissionRefusal("stale");
     return admission;
   };
@@ -99,25 +103,31 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
     const previous = generations.get(agent);
     try {
       const structural = agent as unknown as DshAgent;
-      const nativeChild = parent !== undefined && !parent.controlled && classifyDsmmAgent(agent) === "native";
-      if (!nativeChild) rolePolicy.assertModuleAdmission(structural);
-      // Ordinary native children borrow the actual parent's Core policy domain,
-      // while retaining their own native realm, restrictions and lifetime.
-      const admission = nativeChild ? parent.admission : coreAdmission(agent);
-      const identity = nativeChild ? undefined : rolePolicy.identity(structural);
+      const profiles = coreDomain(agent);
+      const captured = host?.owns(agent) === true || capturedRoleInvocation(structural) !== undefined;
+      const native = !captured && !profiles.hasAdmission(structural);
+      if (native && parent?.controlled) throw new PermissionRefusal("not-owned");
+      if (captured) {
+        if (host === undefined) throw new PermissionRefusal("unavailable");
+        host.assert(agent);
+      }
+      if (!native) rolePolicy.assertModuleAdmission(structural);
+      // Unadmitted native calls retain physical authority, never DSMM role rights.
+      const admission = native ? parent?.admission : coreAdmission(agent);
+      const identity = native ? undefined : rolePolicy.identity(structural);
       const tools = agent.ctx.get("tools"), approval = agent.ctx.get("approval");
-      if (tools === undefined || !nativeChild && (identity?.epoch !== admission.epoch
+      if (tools === undefined || !native && (identity?.epoch !== admission!.epoch
         || (parent === undefined ? agent !== root || identity.child : identity.parent !== parent.authority.agent || !identity.child))) throw new PermissionRefusal("not-owned");
       const nativePolicy = approval === undefined ? undefined : approval.overrideOf(agent.session) ?? approval.config.policy;
       if (approval !== undefined && nativePolicy !== "ask" && nativePolicy !== "never") throw new PermissionRefusal("unavailable");
-      const managed = parent !== undefined && !nativeChild;
+      const managed = parent !== undefined && identity?.role !== undefined;
       if (managed && host === undefined) throw new PermissionRefusal("unavailable");
       const entry = managed ? permissionOriginal(host!) : undefined;
       const owner = managed ? host! : coreOwner;
       const facts = [root, agent.ctx, parent?.authority.signal, permissionOriginal(ctx.get("dsmmCoreLlmOwner")!),
         permissionOriginal(ctx.get("dsmmProfileRuntime")!), permissionOriginal(tools),
         approval === undefined ? undefined : permissionOriginal(approval),
-        admission.settings, nativeChild, identity?.role, identity?.child, identity?.parent, identity?.epoch, identity?.readOnly,
+        admission?.settings, native, captured, identity?.role, identity?.child, identity?.parent, identity?.epoch, identity?.readOnly,
         JSON.stringify(identity?.toolFilter)];
       if (previous !== undefined && !previous.authority.signal.aborted && previous.integration === entry
         && previous.authority.owner === owner && previous.admission === admission && sameFacts(previous.facts, facts)) {
@@ -126,13 +136,14 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
       }
       previous?.revoke();
       if (managed && host!.assert(agent) !== admission) throw new PermissionRefusal("not-owned");
+      const revision = admission?.epoch ?? randomUUID();
       const controller = new AbortController();
       const signal = AbortSignal.any([controller.signal, lifetimeSignal, ...parent === undefined ? [] : [parent.authority.signal]]);
       const detach: Array<() => void> = [];
       let revoked = false;
-      const generation: Generation = { nativeChild, controlled: managed || identity?.role !== undefined, integration: entry, admission, facts,
-        authority: Object.freeze({ agent, root, realm: agent.ctx, owner, ownerGeneration: admission.epoch,
-          admissionRevision: admission.epoch, permissionRevision: randomUUID(), signal }),
+      const generation: Generation = { native, controlled: managed || identity?.role !== undefined, integration: entry, admission, facts,
+        authority: Object.freeze({ agent, root, realm: agent.ctx, owner, ownerGeneration: revision,
+          admissionRevision: revision, permissionRevision: randomUUID(), signal }),
         revoke() {
           if (revoked) return;
           revoked = true; controller.abort();
@@ -194,7 +205,7 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
         || authority.permissionRevision !== live.permissionRevision || authority.signal !== live.signal) throw new PermissionRefusal("stale");
       const tools = live.agent.ctx.get("tools");
       if (tools?.get(exec.name, live.agent) === undefined
-        || !generations.get(live.agent)?.nativeChild && rolePolicy.toolDenial(live.agent as unknown as DshAgent, exec.name, tools, exec) !== undefined) throw new PermissionRefusal("denied");
+        || !generations.get(live.agent)?.native && rolePolicy.toolDenial(live.agent as unknown as DshAgent, exec.name, tools, exec) !== undefined) throw new PermissionRefusal("denied");
     },
   };
   return { authority,
