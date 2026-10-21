@@ -77,7 +77,7 @@ export function NativeCommandEntries({ value, inherited, controller, disabled, o
     change(entries.filter((_, position) => position !== index));
   };
   return <details className="dsmm-deployment-group"><summary>{t("nativeCommands")} <code>{name}</code></summary><div className="dsmm-structured">
-    <p className="dsmm-hint">{t("nativeCommandsHint")}</p><p className="dsmm-hint">{t("patternHint")}</p><p className="dsmm-hint">{t("patternScope")}</p><p className="dsmm-hint">{t("registrationUnresolved")}</p>
+    <p className="dsmm-hint">{t("nativeCommandsHint")}</p><p className="dsmm-hint">{t("patternHint")}</p><p className="dsmm-hint">{t("registrationUnresolved")}</p>
     <p className="dsmm-hint">{t(value === undefined ? "inheritedEntries" : "explicitEntries")}</p>
     {!valid && <p className="dsmm-issue" role="alert">{t("invalidEntry")}</p>}
     {invalidRows.length > 0 && <p className="dsmm-hint">{t("invalidPatternHint")}</p>}

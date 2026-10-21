@@ -135,7 +135,7 @@ export function DeploymentPage(props: DeploymentPageProps) {
           {active === "run" && controller.layer === "profile" && <NativeRuntimeState value={state.snapshot.subagentRuntime} t={t} />}
         </div>}
         {scopeActions}
-        {active === "permissions" && <section className="dsmm-zone dsmm-rules-transaction" aria-label={t("rootRules")}><h3>{t("rootRules")}</h3><p className="dsmm-hint">{t("rootRulesHint")}</p>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionsPanel controller={workspace.permissions} t={props.permissionsT ?? (key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key)} />}</section>}
+        {active === "permissions" && <section className="dsmm-zone dsmm-rules-transaction" aria-label={t("rootRules")}>{workspace.permissions === undefined ? <p>{t("rootRulesUnavailable")}</p> : <PermissionsPanel controller={workspace.permissions} t={props.permissionsT ?? (key => Object.hasOwn(permissionEn, key) ? permissionText(t)(key as PermissionLocaleKey) : key)} />}</section>}
       </>}
     </section>}
     {navigation.pending !== null && <section className="dsmm-confirm" role="group" aria-label={t("leaveDraft")} onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); workspace.continueEditing(); } }}><p>{t("leaveDraft")}</p><div className="dsmm-actions">

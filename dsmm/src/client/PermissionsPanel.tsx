@@ -54,6 +54,8 @@ function RuleRecords({ controller, state, t }: Locale & { controller: Permission
 function PermissionCoverage({ state, t }: Locale & { state: PermissionView }) {
   const value = observedRules(state)?.capabilities;
   return <section className="dsmm-structured" aria-label={t("coverageTitle")}><h3>{t("coverageTitle")}</h3>
+    <p className="dsmm-hint">{t("matchHint")}</p>
+    <p className="dsmm-hint">{t("networkLimit")}</p>
     <p className="dsmm-hint">{t("coverage")}</p>
     <p className="dsmm-hint">{t("registrationUnresolved")}</p>
     {value === undefined ? <p>{t("coverageUnavailable")}</p> : <>
@@ -74,8 +76,7 @@ function PermissionCoverage({ state, t }: Locale & { state: PermissionView }) {
 export function PermissionRulesEditor({ controller, state, t }: Locale & { controller: PermissionController; state: PermissionView }) {
   const id = useId(), draft = state.draft, disabled = !controller.canEdit(state.generation), value = observedRules(state), observedPolicy = value?.snapshot ?? null;
   const writable = state.scope === "root" && state.connected;
-  return <section className="dsmm-zone" aria-label={t("rules")}><h3>{t("rules")}</h3><p className="dsmm-hint">{t("rulesHint")}</p><p className="dsmm-hint">{t("networkLimit")}</p>
-    <p className="dsmm-hint">{t("matchHint")}</p><Issue value={state.rulesIssue} t={t} />
+  return <section className="dsmm-zone" aria-label={t("rules")}><h3>{t("rules")}</h3><p className="dsmm-hint">{t("rulesHint")}</p><Issue value={state.rulesIssue} t={t} />
     {displayUnconfirmed(state) && <p className="dsmm-hint">{t("unconfirmedObservation")}</p>}
     <p className="dsmm-hint">{t("observedPolicy")}</p><dl className="dsmm-child-meta"><dt>{t("profileOverrideState")}</dt><dd>{t("profileOverrideUnknown")}</dd></dl>
     <dl className="dsmm-child-meta"><dt>{t("runtime")}</dt><dd>{value === null ? t("unknown") : t(value.runtime.state)}</dd>
@@ -106,7 +107,7 @@ export function PermissionsPanel({ controller, t, sessionId }: PermissionsPanelP
   if (sessionId !== undefined && sessionId !== state.sessionId) return <p className="dsmm-hint" role="status">{t("rulesUnavailable")}</p>;
   // Silent revalidation never flips the region busy; a save reports through its own status line.
   return <section className="dsmm-profiles dsmm-children dsmm-permissions" data-dsmm-permissions aria-label={t("title")} aria-busy={state.reading}>
-    <h2>{t("title")}</h2><RootState state={state} t={t} /><p className="dsmm-hint">{t("nativeApproval")}</p><p className="dsmm-hint">{t("sandboxScope")}</p>
+    <h2>{t("title")}</h2><RootState state={state} t={t} /><p className="dsmm-hint">{t("nativeApproval")} {t("sandboxScope")}</p>
     <p className="dsmm-status" role="status" aria-live="polite">{state.busy !== null ? t("busy") : state.reading ? t("reading") : state.notice === null ? "" : t(state.notice)}</p>
     <PermissionRulesEditor controller={controller} state={state} t={t} />
   </section>;

@@ -65,7 +65,11 @@ export const PROFILE_STYLES = `
 .dsmm-scope-save{display:flex;flex-direction:column;gap:8px;padding-top:16px;border-top:1px solid var(--dsw-alias-border-l4)}
 .dsmm-deployment .dsmm-deployment-group{border-top:1px solid var(--dsw-alias-border-l4);padding-top:8px;min-width:0}
 .dsmm-deployment .dsmm-deployment-group>div{display:flex;flex-direction:column;gap:8px;padding-top:8px}
-.dsmm-deployment summary .dsmm-group-summary{display:flex;align-items:center;gap:8px;min-width:0}
+.dsmm-deployment .dsmm-deployment-group>summary.dsmm-group-summary-row{display:flex;align-items:center;gap:8px;list-style:none}
+.dsmm-deployment .dsmm-deployment-group>summary.dsmm-group-summary-row::-webkit-details-marker{display:none}
+.dsmm-deployment .dsmm-deployment-group>summary.dsmm-group-summary-row::before{content:"▶";flex:0 0 auto;width:12px;text-align:center;color:var(--dsw-alias-label-secondary)}
+.dsmm-deployment .dsmm-deployment-group[open]>summary.dsmm-group-summary-row::before{content:"▼"}
+.dsmm-deployment summary .dsmm-group-summary{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 auto}
 .dsmm-deployment .dsmm-group-summary-label{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
 .dsmm-deployment .dsmm-group-summary-action{flex:0 0 auto;min-height:28px;height:28px;padding:0 8px}
 .dsmm-deployment .dsmm-group-summary-action[hidden]{display:none}

@@ -451,6 +451,52 @@ test("Core deployment controls save sparse desired values through native Gateway
     assert.equal(await globalField.evaluate((element: HTMLSelectElement) => element.matches(":focus-visible") && parseFloat(getComputedStyle(element).outlineWidth) >= 2), true);
     await globalField.press("ArrowUp"); assert.equal(await globalField.inputValue(), "true");
     await globalField.press("ArrowDown"); assert.equal(await globalField.inputValue(), "false");
+
+    // A group title row is one line: marker, title and whole-group action share the row;
+    // the action and the group body exist only while expanded.
+    const summaryRow = 'details[data-field="modelParameters"] > summary';
+    const summaryGeometry = async () => page.evaluate((selector: string) => {
+      const row = document.querySelector<HTMLElement>(selector)!, label = row.querySelector<HTMLElement>(".dsmm-group-summary-label")!,
+        action = row.querySelector<HTMLElement>(".dsmm-group-summary-action")!, details = row.closest("details")!, body = details.querySelector<HTMLElement>(":scope > div")!, marker = getComputedStyle(row, "::before");
+      const box = (element: Element) => element.getBoundingClientRect(), center = (rect: DOMRect) => rect.top + rect.height / 2;
+      const rowBox = box(row), labelBox = box(label), actionBox = box(action);
+      return { marker: marker.content.replace(/^"|"$/gu, ""), markerWidth: parseFloat(marker.width), rowCenter: center(rowBox), labelCenter: center(labelBox), actionCenter: center(actionBox),
+        labelOffset: labelBox.left - rowBox.left, actionHidden: action.hidden, actionShown: actionBox.width > 0 && actionBox.height > 0,
+        rowHeight: rowBox.height, bodyVisible: body.checkVisibility({ contentVisibilityAuto: true }), detailsHeight: details.getBoundingClientRect().height,
+        chrome: parseFloat(getComputedStyle(details).paddingTop) + parseFloat(getComputedStyle(details).borderTopWidth),
+        scrolls: row.scrollHeight > row.clientHeight + 1 };
+    }, summaryRow);
+    for (const width of [375, 768, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await openGroup(global, "modelParameters");
+      await page.waitForFunction((selector: string) => document.querySelector<HTMLElement>(selector)?.hidden === false, summaryRow + " .dsmm-group-summary-action");
+      const expanded = await summaryGeometry();
+      assert.equal(expanded.marker, "▼", `${width} expanded marker`);
+      assert.ok(expanded.markerWidth > 0 && expanded.labelOffset >= expanded.markerWidth, `${width} marker occupies the row before the title`);
+      assert.ok(Math.abs(expanded.labelCenter - expanded.rowCenter) <= 1, `${width} title centered on the marker row: ${JSON.stringify(expanded)}`);
+      assert.equal(expanded.actionHidden, false); assert.equal(expanded.actionShown, true);
+      assert.ok(Math.abs(expanded.actionCenter - expanded.rowCenter) <= 1, `${width} action centered on the title row: ${JSON.stringify(expanded)}`);
+      assert.ok(expanded.bodyVisible && !expanded.scrolls, `${width} expanded row has content without clipping`);
+      await page.locator(summaryRow).screenshot({ path: join(evidence, `group-row-expanded-${width}.png`) });
+      await page.locator(summaryRow + " .dsmm-group-summary-label").click();
+      await page.waitForFunction((selector: string) => document.querySelector<HTMLElement>(selector)?.hidden === true, summaryRow + " .dsmm-group-summary-action");
+      const collapsed = await summaryGeometry();
+      assert.equal(collapsed.marker, "▶", `${width} collapsed marker`);
+      assert.ok(Math.abs(collapsed.labelCenter - collapsed.rowCenter) <= 1, `${width} collapsed title stays on the marker row`);
+      assert.equal(collapsed.actionHidden, true); assert.equal(collapsed.actionShown, false);
+      assert.equal(collapsed.bodyVisible, false, `${width} collapsed group body is not rendered`);
+      assert.ok(collapsed.detailsHeight <= collapsed.rowHeight + collapsed.chrome + 1, `${width} collapsed group is only its title row: ${JSON.stringify(collapsed)}`);
+      await page.locator('details[data-field="modelParameters"]').screenshot({ path: join(evidence, `group-row-collapsed-${width}.png`) });
+      // The custom marker keeps native disclosure keyboard semantics.
+      await page.locator(summaryRow).focus(); await page.keyboard.press("Space");
+      await page.waitForFunction((selector: string) => document.querySelector<HTMLDetailsElement>('details[data-field="modelParameters"]')?.open === true && document.querySelector<HTMLElement>(selector)?.hidden === false, summaryRow + " .dsmm-group-summary-action");
+      assert.equal(await page.evaluate(() => document.querySelector<HTMLDetailsElement>('details[data-field="modelParameters"]')?.open), true, `${width} Space expands the group`);
+      t.diagnostic(`${width} group row geometry: ${JSON.stringify({ expanded, collapsed })}`);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${width} group row reflow`);
+    }
+    await page.setViewportSize({ width: 768, height: 900 });
+    await openGroup(global, "modelParameters");
+
     for (const locale of ["en", "zh"]) {
       if (locale === "zh") await page.getByRole("button", { name: "EN / 中文", exact: true }).click();
       for (const dark of [false, true]) {
