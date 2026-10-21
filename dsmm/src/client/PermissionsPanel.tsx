@@ -4,6 +4,7 @@ import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { PermissionRule, PermissionRuleDraft, PermissionRuleMatch } from "../permission-rules.js";
 import type { PermissionRuleAction } from "../permission-settings.js";
 import type { PermissionController, PermissionView } from "./permission-controller.js";
+import { displayUnconfirmed, observedRules } from "./permission-controller.js";
 import type { PermissionIssue } from "./permission-client.js";
 import type { PermissionLocaleKey } from "./permission-locales.js";
 
@@ -40,7 +41,7 @@ function RuleEditor({ controller, state, t }: Locale & { controller: PermissionC
   </form>;
 }
 function RuleRecords({ controller, state, t }: Locale & { controller: PermissionController; state: PermissionView }) {
-  const records = state.rules?.snapshot.policy.rules ?? state.base?.policy.rules;
+  const records = observedRules(state)?.snapshot.policy.rules ?? state.base?.policy.rules;
   return <div className="dsmm-structured">{records?.length === 0 && <p>{t("noRules")}</p>}{records?.map(rule => <fieldset key={rule.id}><legend>{rule.id}</legend>
     <p>{t(rule.revoked ? "revoked" : "active")} · {t(`action:${rule.action}`)}</p><dl className="dsmm-child-meta"><dt>{t("match")}</dt><dd>{t(`kind:${rule.match.kind}`)}</dd>
       {rule.match.kind === "outside-read" && <><dt>{t("path")}</dt><dd>{rule.match.path} · {t(rule.match.scope)}</dd></>}
@@ -51,7 +52,7 @@ function RuleRecords({ controller, state, t }: Locale & { controller: Permission
   </fieldset>)}</div>;
 }
 function PermissionCoverage({ state, t }: Locale & { state: PermissionView }) {
-  const value = state.rules?.capabilities;
+  const value = observedRules(state)?.capabilities;
   return <section className="dsmm-structured" aria-label={t("coverageTitle")}><h3>{t("coverageTitle")}</h3>
     <p className="dsmm-hint">{t("coverage")}</p>
     <p className="dsmm-hint">{t("registrationUnresolved")}</p>
@@ -71,17 +72,18 @@ function PermissionCoverage({ state, t }: Locale & { state: PermissionView }) {
   </section>;
 }
 export function PermissionRulesEditor({ controller, state, t }: Locale & { controller: PermissionController; state: PermissionView }) {
-  const id = useId(), draft = state.draft, disabled = !controller.canEdit(state.generation), value = state.rules;
+  const id = useId(), draft = state.draft, disabled = !controller.canEdit(state.generation), value = observedRules(state), observedPolicy = value?.snapshot ?? null;
   const writable = state.scope === "root" && state.connected;
   return <section className="dsmm-zone" aria-label={t("rules")}><h3>{t("rules")}</h3><p className="dsmm-hint">{t("rulesHint")}</p><p className="dsmm-hint">{t("networkLimit")}</p>
     <p className="dsmm-hint">{t("matchHint")}</p><Issue value={state.rulesIssue} t={t} />
+    {displayUnconfirmed(state) && <p className="dsmm-hint">{t("unconfirmedObservation")}</p>}
     <p className="dsmm-hint">{t("observedPolicy")}</p><dl className="dsmm-child-meta"><dt>{t("profileOverrideState")}</dt><dd>{t("profileOverrideUnknown")}</dd></dl>
     <dl className="dsmm-child-meta"><dt>{t("runtime")}</dt><dd>{value === null ? t("unknown") : t(value.runtime.state)}</dd>
       <dt>{t("mounted")}</dt><dd>{value === null ? t("unknown") : t(value.runtime.mounted ? "on" : "off")}</dd></dl>
     {value?.runtime.restartRequired && <p>{t("restart")}</p>}
-    {disabled && !state.reading && <p className="dsmm-hint">{t("rulesUnavailable")}</p>}
-    {state.base !== null && <dl className="dsmm-child-meta"><dt>permissionControl.enabled</dt><dd>{t(state.base.policy.enabled ? "on" : "off")} · {t("coldHint")}</dd>
-      <dt>permissionControl.nativeCommands.enabled</dt><dd>{t(state.base.policy.nativeCommands.enabled ? "on" : "off")}</dd></dl>}
+    {disabled && !state.reading && !displayUnconfirmed(state) && <p className="dsmm-hint">{t("rulesUnavailable")}</p>}
+    {observedPolicy !== null && <dl className="dsmm-child-meta"><dt>permissionControl.enabled</dt><dd>{t(observedPolicy.policy.enabled ? "on" : "off")} · {t("coldHint")}</dd>
+      <dt>permissionControl.nativeCommands.enabled</dt><dd>{t(observedPolicy.policy.nativeCommands.enabled ? "on" : "off")}</dd></dl>}
     <details className="dsmm-deployment-group"><summary>{t("coverageDetails")}</summary><PermissionCoverage state={state} t={t} /></details>
     {draft !== null && <><div className="dsmm-field"><label htmlFor={`${id}-outside`}>{t("outsideReads")}</label><ActionSelect id={`${id}-outside`} value={draft.outsideReads} disabled={disabled} t={t} onChange={outsideReads => controller.edit(state.generation, { outsideReads })} /></div>
       {(["webSearch", "webFetch"] as const).map(key => <fieldset key={key}><legend>{t(key)}</legend><label className="dsmm-actions" htmlFor={`${id}-${key}-enabled`}><input type="checkbox" id={`${id}-${key}-enabled`} checked={draft[key].enabled} disabled={disabled} onChange={event => controller.edit(state.generation, { [key]: { ...draft[key], enabled: event.currentTarget.checked } })} />{t("enabled")}</label>
@@ -104,7 +106,7 @@ export function PermissionsPanel({ controller, t, sessionId }: PermissionsPanelP
   if (sessionId !== undefined && sessionId !== state.sessionId) return <p className="dsmm-hint" role="status">{t("rulesUnavailable")}</p>;
   // Silent revalidation never flips the region busy; a save reports through its own status line.
   return <section className="dsmm-profiles dsmm-children dsmm-permissions" data-dsmm-permissions aria-label={t("title")} aria-busy={state.reading}>
-    <h2>{t("title")}</h2><RootState state={state} t={t} /><p className="dsmm-hint">{t("nativeApproval")}</p>
+    <h2>{t("title")}</h2><RootState state={state} t={t} /><p className="dsmm-hint">{t("nativeApproval")}</p><p className="dsmm-hint">{t("sandboxScope")}</p>
     <p className="dsmm-status" role="status" aria-live="polite">{state.busy !== null ? t("busy") : state.reading ? t("reading") : state.notice === null ? "" : t(state.notice)}</p>
     <PermissionRulesEditor controller={controller} state={state} t={t} />
   </section>;

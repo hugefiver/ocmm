@@ -321,9 +321,12 @@ test("profile dynamic override refuses Root rules Save without a Global fallback
     c.edit(generation, { outsideReads: "ask" }); await c.save(generation); assert.equal(c.store.getSnapshot().notice, "saved");
     c.bindConnection(null); generation = c.store.getSnapshot().generation;
     c.edit(generation, { outsideReads: "deny" }); assert.equal(c.store.getSnapshot().draft?.outsideReads, "ask");
+    assert.equal(c.store.getSnapshot().display?.snapshot.policy.outsideReads, "ask");
     const permissionCopy: Readonly<Record<string, string>> = permissionEn;
     const tree = render(PermissionsPanel({ controller: c, t: key => permissionCopy[key] ?? key }));
     assert.ok(nodes(tree).filter(node => node.type === "select").every(node => node.props.disabled === true));
+    assert.ok(text(tree).includes(permissionEn.unconfirmedObservation), "the retained projection is disclosed as unconfirmed");
+    assert.ok(text(tree).includes(permissionEn.sandboxScope), "the Host sandbox boundary is stated once");
     const child = await f.profile.create(f.root); c.bindScope(child.id, child, "child");
     assert.equal(c.canEdit(c.store.getSnapshot().generation), false);
   } finally { c.dispose(); await f.cleanup(); }

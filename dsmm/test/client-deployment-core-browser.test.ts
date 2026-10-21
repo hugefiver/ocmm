@@ -87,8 +87,13 @@ test("Core deployment controls save sparse desired values through native Gateway
     } }).await();
     const permissionCalls: Array<{ method: string; args: Record<string, unknown> }> = [];
     let holdPermissionRead = false, failNextPermissionRead = false;
-    let releasePermissionRead!: () => void;
-    const permissionReadGate = new Promise<void>(resolve => { releasePermissionRead = resolve; });
+    let releasePermissionRead = () => {};
+    let permissionReadGate = Promise.resolve();
+    /** Arm a fresh one-shot gate so each held read can be released independently. */
+    const armPermissionRead = () => {
+      holdPermissionRead = true;
+      permissionReadGate = new Promise<void>(resolve => { releasePermissionRead = resolve; });
+    };
     const calls: Array<{ method: string; args: Record<string, unknown> }> = [];
     let holdSave = true, failNextSettingsRead = false;
     const invoke = async (method: string, args: Record<string, unknown>) => {
@@ -107,6 +112,7 @@ test("Core deployment controls save sparse desired values through native Gateway
       import {DeploymentPage} from './DeploymentPage.tsx';
       import {DeploymentController} from './deployment-controller.ts';
       import {PermissionController} from './permission-controller.ts';
+      import {bindPermissionSession} from './permission-session.ts';
       import {PermissionClientError} from './permission-client.ts';
       import {deploymentEn,deploymentZh} from './deployment-locales.ts';
       import {permissionEn,permissionZh} from './permission-locales.ts';
@@ -121,7 +127,22 @@ test("Core deployment controls save sparse desired values through native Gateway
       const core=new DeploymentController(remote,'global');
       const permissions=new PermissionController();
       permissions.bindConnection(permissionInvoke,{});
-      permissions.bindScope(window.__permissionSessionId,permissions,'root');
+      const store=value=>{let current=value;const listeners=new Set();return{getSnapshot:()=>current,subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener)},set(next){current=next;for(const listener of [...listeners])listener();}}};
+      const sessionId=window.__permissionSessionId;
+      const key=store({key:sessionId,keyedHooks:{},hooks:{},props:{}});
+      const catalog=store({ids:[sessionId],byId:{[sessionId]:{id:sessionId}},phase:'ready',projectionsBySession:{}});
+      const session=store({sessionId,subagent:null,openState:'open',removed:false});
+      let attached=true;
+      const binding={sessionId,session};
+      const sessions={binding:id=>attached&&id===sessionId?binding:undefined,list:catalog};
+      bindPermissionSession(key,sessions,permissions);
+      // Real production binding helper over real store notifications; these controls only
+      // reproduce a same-session transient scope gap and connection generation change.
+      window.__permissionScope={
+        detach(){attached=false;catalog.set(catalog.getSnapshot());},
+        attach(){attached=true;catalog.set(catalog.getSnapshot());},
+        reconnect(){permissions.bindConnection(permissionInvoke,{generation:Date.now()});}
+      };
       let formState={status:'loading'},listeners=new Set();
       const shared={getSnapshot:()=>formState,subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener)},mutate:async(ops,revision)=>{
         const result=await window.__deploymentBridge({method:'nativeSave',args:{ops,revision}});
@@ -191,7 +212,10 @@ test("Core deployment controls save sparse desired values through native Gateway
     };
     const openGroup = async (layer: typeof global, field: string) => {
       const group = layer.locator(`details[data-field="${field}"]`);
-      if (!await group.evaluate((element: HTMLDetailsElement) => element.open)) await group.locator("summary").first().click();
+      if (await group.evaluate((element: HTMLDetailsElement) => element.open)) return;
+      // Activate the title text, never the trailing whole-group action inside summary.
+      const title = group.locator("summary .dsmm-group-summary-label").first();
+      if (await title.count() > 0) await title.click(); else await group.locator("summary").first().click();
     };
     const saved = () => page.waitForFunction(() => document.querySelector('.dsmm-scope-save [role="status"]')?.textContent === "Saved");
     assert.equal(await scope.inputValue(), "global");
@@ -244,7 +268,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     await scope.selectOption("global");
     // First load of the watched Global-rules transaction: visible loading is armed through the
     // existing bridge, not the Host, and the already-visited section stays mounted afterwards.
-    holdPermissionRead = true;
+    armPermissionRead();
     await openModule("Permissions and safety");
     const rulesPanel = page.locator("[data-dsmm-permissions]");
     await rulesPanel.waitFor();
@@ -329,6 +353,32 @@ test("Core deployment controls save sparse desired values through native Gateway
     }
     assert.ok(permissionCalls.filter(call => call.method === "describeRules").length > describesBefore, "the watched panel really revalidated in the background");
     await capture("state-ready");
+    // Same-session transient scope gap: the last successful projection stays readable while
+    // authority is withdrawn; no first-load state returns and the panel never claims it is current.
+    const beforeGap = await rulesOutside.inputValue();
+    await page.evaluate(() => (window as unknown as { __permissionScope: { detach(): void } }).__permissionScope.detach());
+    const hasGapHint = (hint: string) => document.querySelector("[data-dsmm-permissions]")?.textContent?.includes(hint) === true;
+    await page.waitForFunction(hasGapHint, permissionEn.unconfirmedObservation);
+    assert.equal(await rulesPanel.getAttribute("aria-busy"), "false");
+    assert.equal((await rulesStatus.textContent()) ?? "", stableStatus, "a transient gap is not a first load");
+    assert.equal(await rulesOutside.inputValue(), beforeGap, "the projection remains visible");
+    assert.equal(await rulesOutside.isDisabled(), true);
+    assert.equal(await rulesPanel.getByRole("button", { name: permissionEn.save, exact: true }).isDisabled(), true);
+    await capture("state-projection-gap");
+    await page.evaluate(() => (window as unknown as { __permissionScope: { attach(): void } }).__permissionScope.attach());
+    await page.waitForFunction((hint: string) => document.querySelector("[data-dsmm-permissions]")?.textContent?.includes(hint) === false, permissionEn.unconfirmedObservation);
+    assert.equal(await rulesPanel.getAttribute("aria-busy"), "false", "the automatic re-read over a retained projection is silent");
+    await page.waitForFunction(() => !document.querySelector<HTMLSelectElement>("[data-dsmm-permissions] select")?.disabled);
+    // A connection generation change keeps the projection for display and re-reads silently.
+    armPermissionRead();
+    await page.evaluate(() => (window as unknown as { __permissionScope: { reconnect(): void } }).__permissionScope.reconnect());
+    await page.waitForFunction(hasGapHint, permissionEn.unconfirmedObservation);
+    assert.equal(await rulesPanel.getAttribute("aria-busy"), "false", "no visible first load after reconnection");
+    assert.equal(await rulesOutside.inputValue(), beforeGap);
+    assert.equal(await rulesOutside.isDisabled(), true);
+    releasePermissionRead();
+    await page.waitForFunction(() => !document.querySelector<HTMLSelectElement>("[data-dsmm-permissions] select")?.disabled);
+    assert.equal(await rulesPanel.getAttribute("aria-busy"), "false");
     // Ordinary error: a one-shot read failure surfaces as an alert, keeps the draft, and does not
     // clear the last trusted projection.
     await rulesOutside.selectOption("allow");
@@ -446,6 +496,42 @@ test("Core deployment controls save sparse desired values through native Gateway
     await saveBar.getByRole("button", { name: "Discard and reload", exact: true }).click();
     await page.waitForFunction(() => document.querySelector('[data-dsmm-layer="global"]')?.getAttribute("aria-busy") === "false");
     assert.equal(await globalField.inputValue(), "false");
+
+    // Whole-group Unset is a title-row action: it keeps the group and its ancestors open,
+    // never activates the disclosure twice, and retains focus in the title row.
+    await openModule("Permissions and safety");
+    await openGroup(global, "permissionControl");
+    await openGroup(global, "permissionControl.nativeCommands");
+    const permissionGroup = global.locator('details[data-field="permissionControl"]');
+    const commandGroup = global.locator('details[data-field="permissionControl.nativeCommands"]');
+    const groupReset = commandGroup.locator(':scope > summary button[data-dsmm-unset="permissionControl.nativeCommands"]');
+    const commandEnabled = commandGroup.getByRole("combobox", { name: permissionEn.enabled, exact: true });
+    const groupOpen = async () => {
+      assert.equal(await commandGroup.evaluate((element: HTMLDetailsElement) => element.open), true, "the group itself stays expanded");
+      assert.equal(await permissionGroup.evaluate((element: HTMLDetailsElement) => element.open), true, "no ancestor group collapses");
+      assert.equal(await commandEnabled.inputValue(), "inherit", "the group value was actually cleared");
+    };
+    const titleRowFocus = async () => {
+      const summary = 'details[data-field="permissionControl.nativeCommands"] > summary';
+      await page.waitForFunction((selector: string) => {
+        const row = document.querySelector(selector), active = document.activeElement;
+        return row !== null && active !== null && row.contains(active);
+      }, summary, { timeout: 2000 });
+      const focused = await page.evaluate((selector: string) => {
+        const row = document.querySelector(selector)!, active = document.activeElement as HTMLElement | null;
+        return { tag: active?.tagName ?? null, isSummary: active === row, actionDisabled: (active as HTMLButtonElement | null)?.disabled ?? null };
+      }, summary);
+      assert.equal(focused.tag !== "BODY", true, "focus was not dropped to the document");
+      return focused;
+    };
+    for (const activation of ["mouse", "Enter", "Space"] as const) {
+      await commandEnabled.selectOption("true");
+      assert.equal(await groupReset.isEnabled(), true);
+      if (activation === "mouse") await groupReset.click();
+      else { await groupReset.focus(); await page.keyboard.press(activation); }
+      await groupOpen(); await titleRowFocus();
+      await capture(`state-group-unset-${activation.toLowerCase()}`);
+    }
     await context.tracing.stop({ path: join(evidence, "core-ui-trace.zip") });
     await context.close(); assert.deepEqual(errors, []); assert.deepEqual(server.errors, []);
     t.diagnostic(`Native gateway Global Save + durable native SettingsForms On/inherit/raw JSON Save; command-pattern rows refused Save while invalid and persisted on a valid pattern; old admission retained; PermissionsPanel Root RPC background revalidation kept aria-busy/status stable and its independent Save persisted; busy, keyboard focus/select, conflict/discard and reduced-motion covered. EN/ZH light/dark at 375/768/1280 without horizontal overflow. Screenshots/trace: ${process.env.DSMM_UI_EVIDENCE_DIR ?? "temporary (removed at cleanup)"}; no Lighthouse audit performed.`);

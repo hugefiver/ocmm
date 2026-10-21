@@ -65,14 +65,28 @@ export function Field({ schema, path, controller, initiallyOpen = false, disclos
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot), snapshot = state.snapshot!, id = useId(), name = path.join(".");
   const [open, setOpen] = useState(disclosures?.get(name) ?? initiallyOpen);
   const expand = (expanded: boolean) => { disclosures?.set(name, expanded); setOpen(expanded); };
+  const unsetGroup = (event?: { currentTarget: HTMLButtonElement; preventDefault(): void; stopPropagation(): void }) => {
+    // The group action lives in the title row; prevent the disclosure's own activation
+    // instead of swallowing key events, so Enter/Space each activate this button once.
+    event?.preventDefault(); event?.stopPropagation();
+    const summary = event?.currentTarget.closest("summary"), action = event?.currentTarget ?? null;
+    controller.clearRaw(name); controller.edit(path, undefined);
+    // The action is disabled by the reset, so the browser would drop focus to the document;
+    // keep it on the group title row instead.
+    if (summary !== null && summary !== undefined) {
+      const restore = () => { const active = document.activeElement; if (active === null || active === document.body || active === action) summary.focus(); };
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => { restore(); requestAnimationFrame(restore); });
+    }
+  };
   const explicit = at(state.draft, path), inherited = controller.layer === "global" ? at(snapshot.defaults, path) : at(mergeLayer(mergeLayer(snapshot.defaults, snapshot.global), snapshot.nativeForm?.base ?? {}), path);
   const choices = enumValues(schema), disabled = !controller.canEdit();
   if (name === "permissionControl.nativeCommands.entries") return <div data-field={name}><NativeCommandEntries controller={controller} value={explicit as readonly NativeCommandEntry[] | undefined} inherited={(inherited ?? []) as readonly NativeCommandEntry[]} disabled={disabled} onChange={value => controller.edit(path, value)} setInvalid={(key, bad) => controller.setInvalid(key, bad)} t={permissionText(t)} /></div>;
   if (name === "permissionControl.rules") return <div data-field={name}><PermissionRuleEntries controller={controller} value={explicit as readonly PermissionRule[] | undefined} inherited={(inherited ?? []) as readonly PermissionRule[]} disabled={disabled} onChange={value => controller.edit(path, value)} expanded={open} onExpandedChange={expand} t={permissionText(t)} /></div>;
-  if (schema.type === "object" && schema.fields !== undefined && path[0] !== "roleRouting") return <details className="dsmm-deployment-group" data-field={name} open={open} onToggle={event => expand(event.currentTarget.open)}><summary>{fieldLabel(path, t)}</summary><div>
+  if (schema.type === "object" && schema.fields !== undefined && path[0] !== "roleRouting") return <details className="dsmm-deployment-group" data-field={name} open={open} onToggle={event => expand(event.currentTarget.open)}><summary><span className="dsmm-group-summary"><span className="dsmm-group-summary-label">{fieldLabel(path, t)}</span>
+    <Button type="button" variant="outline" className="dsmm-group-summary-action" data-dsmm-unset={name} hidden={!open} disabled={disabled || explicit === undefined && !Object.keys(state.raw).some(key => key === name || key.startsWith(`${name}.`))} onClick={unsetGroup}>{t("unsetGroup")}</Button>
+  </span></summary><div>
     {name === "permissionControl" && <p className="dsmm-hint">{permissionText(t)("configPolicyHint")}</p>}
     <p className="dsmm-hint">{t(explicit === undefined ? "inherit" : "explicit")}</p>
-    <Button type="button" variant="outline" data-dsmm-unset={name} disabled={disabled || explicit === undefined && !Object.keys(state.raw).some(key => key === name || key.startsWith(`${name}.`))} onClick={() => { controller.clearRaw(name); controller.edit(path, undefined); }}>{t("unsetGroup")}</Button>
     {Object.entries(schema.fields).map(([key, node]) => <Field key={key} schema={node} path={[...path, key]} controller={controller} disclosures={disclosures} t={t} />)}
   </div></details>;
   if (!["boolean", "string", "number"].includes(schema.type) && choices === null) return <AdvancedField schema={schema} path={path} controller={controller} inherited={inherited} upper={controller.layer === "global" ? at(snapshot.profile, path) : undefined} expanded={open} onExpandedChange={expand} t={t} />;

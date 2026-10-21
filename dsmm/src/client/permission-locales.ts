@@ -2,6 +2,8 @@ export const PERMISSIONS_NS = "settings.dsmm-permissions";
 export const permissionEn = {
   title: "Permission control", rules: "Global permission rules (through the selected main session)",
   nativeApproval: "Approve commands in the native prompt. Allow approves only that call.",
+  sandboxScope: "These rules decide allow, ask or deny for tools and matches. The Host sandbox and its native approval prompt remain separate and authoritative for what an approved call may touch.",
+  unconfirmedObservation: "Showing the last successful observation. The current selection is not confirmed yet, so editing and saving stay unavailable.",
   root: "Selected main session", noRoot: "Select a main session to view its permission rules.",
   child: "Select this child’s main session to edit Global rules.",
   unknown: "Unavailable / unknown", reading: "Reading…", busy: "Operation pending…",
@@ -63,6 +65,8 @@ export type PermissionLocaleKey = keyof typeof permissionEn;
 export const permissionZh: Record<PermissionLocaleKey, string> = {
   title: "权限控制", rules: "全局权限规则（通过所选主会话管理）",
   nativeApproval: "请在原生提示中批准命令；「允许」仅批准本次调用。",
+  sandboxScope: "这些规则决定工具与匹配项的允许、询问或拒绝；具体调用可触及的范围仍由宿主沙箱及其原生批准提示单独决定。",
+  unconfirmedObservation: "当前显示上次成功观测；当前选择尚未确认，编辑与保存暂不可用。",
   root: "所选主会话", noRoot: "请选择主会话以查看权限规则。", child: "请切换到此子会话的主会话后编辑全局规则。",
   unknown: "不可用／未知", reading: "正在读取…", busy: "操作处理中…",
   executable: "原生 Shell 注册身份（精确匹配）", command: "完整命令（精确匹配）", cwd: "工作目录（精确匹配）", id: "规则 ID", action: "规则动作", match: "匹配类型",

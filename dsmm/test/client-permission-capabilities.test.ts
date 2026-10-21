@@ -55,7 +55,7 @@ test("client treats malformed coverage as protocol failure rather than a ready o
   wire = result(); assert.equal((await invoke("describeRules", ["owned-root"], new AbortController().signal)).capabilities, undefined);
 });
 
-test("coverage refresh preserves draft CAS and save payload while disconnect clears observed coverage", async () => {
+test("coverage refresh preserves draft CAS and save payload while disconnect keeps the display observation without authority", async () => {
   const controller = new PermissionController();
   const synced = { ...runtime, state: "synced" as const, runtimeRevision: "saved-source" };
   let observed: PermissionRulesSaveResult = { ...result(), runtime: synced, capabilities: { ...capability(), runtime: synced } };
@@ -81,7 +81,10 @@ test("coverage refresh preserves draft CAS and save payload while disconnect cle
     observed = { ...result(), runtime: synced }; await controller.refresh(generation);
     assert.equal(controller.store.getSnapshot().rules!.capabilities, undefined); assert.equal(controller.store.getSnapshot().draft!.outsideReads, "ask");
     controller.bindConnection(null);
-    assert.equal(controller.store.getSnapshot().rules, null); assert.equal(controller.store.getSnapshot().draft!.outsideReads, "ask");
+    const detached = controller.store.getSnapshot();
+    assert.equal(detached.rules, null); assert.equal(detached.display!.snapshot.revision, "saved-source");
+    assert.equal(detached.rulesIssue, null); assert.equal(detached.draft!.outsideReads, "ask");
+    assert.equal(controller.canSave(detached.generation), false); assert.equal(controller.canEdit(detached.generation), false);
   } finally { controller.dispose(); }
 });
 

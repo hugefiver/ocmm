@@ -11,7 +11,7 @@ import { TypertRegistry } from "@deepseek-ai/dsh-typert-registry";
 import { TypertGatewayService } from "@deepseek-ai/dsh-api-gateway";
 import { RemoteAccessService } from "@deepseek-ai/dsh-api-remote-access";
 import * as Connection from "@deepseek-ai/dsh-client-connection";
-import { PermissionController, permissionChanges } from "../src/client/permission-controller.ts";
+import { PermissionController, displayUnconfirmed, observedRules, permissionChanges } from "../src/client/permission-controller.ts";
 import { PermissionClientError } from "../src/client/permission-client.ts";
 import type { PermissionInvoker, PermissionValue } from "../src/client/permission-client.ts";
 import { installDeploymentPermissionRules } from "../src/deployment-permission-rules.ts";
@@ -78,12 +78,31 @@ test("child, disconnected and readonly reject mutation; accepted notification fa
     const count = second.calls.length; await controller.save(generation); assert.equal(second.calls.length, count);
   } finally { await second.cleanup(); }
 });
-test("late read from a replaced connection cannot publish its policy or rebase a draft", async () => {
+test("late read from a replaced connection cannot publish its policy, display or a draft rebase", async () => {
   const c = new PermissionController(), owner = {}, held = deferred<never>();
   c.bindConnection(async () => held.promise); c.bindScope("owned-root", owner, "root");
   const before = c.store.getSnapshot().generation, pending = c.refresh(before);
   c.bindConnection(null); held.reject(new PermissionClientError("cancelled")); await pending;
-  assert.equal(c.store.getSnapshot().rules, null); assert.equal(c.store.getSnapshot().reading, false); assert.equal(c.canSave(before), false); c.dispose();
+  assert.equal(c.store.getSnapshot().rules, null); assert.equal(c.store.getSnapshot().display, null);
+  assert.equal(c.store.getSnapshot().reading, false); assert.equal(c.canSave(before), false); c.dispose();
+});
+test("a same-session connection change keeps the display projection without regaining authority", async () => {
+  const c = new PermissionController(), owner = {};
+  c.bindConnection((async () => policyResult("ask", "r0")) as PermissionInvoker, {}); c.bindScope("owned-root", owner, "root");
+  const first = c.store.getSnapshot().generation; await c.refresh(first);
+  c.edit(first, { outsideReads: "deny" });
+  c.bindConnection((async () => policyResult("allow", "r1")) as PermissionInvoker, {});
+  const view = c.store.getSnapshot();
+  assert.equal(view.rules, null); assert.equal(view.display!.snapshot.revision, "r0");
+  assert.equal(observedRules(view)!.snapshot.revision, "r0");
+  assert.equal(displayUnconfirmed(view), true);
+  assert.equal(view.draft!.outsideReads, "deny"); assert.equal(view.dirty, true);
+  assert.equal(c.canSave(view.generation), false, "a stale display projection never authorizes a save");
+  // A real session switch clears both the authority and the display projection.
+  c.bindScope("other-root", {}, "root");
+  const switched = c.store.getSnapshot();
+  assert.equal(switched.display, null); assert.equal(switched.draft, null); assert.equal(switched.base, null);
+  c.dispose();
 });
 const policyResult = (outsideReads: "inherit" | "allow" | "ask" | "deny", revision: string) => ({
   snapshot: { revision, policy: { ...resolvePermissionControl(), outsideReads } },
@@ -128,6 +147,8 @@ test("a replaced owner with the same session ID invalidates the old base but kee
   const replaced = c.store.getSnapshot();
   assert.equal(replaced.sessionId, "owned-root"); assert.equal(replaced.base, null);
   assert.equal(replaced.rules, null); assert.equal(replaced.draft!.outsideReads, "deny");
+  // The previous observation stays visible for display only; it is never a base.
+  assert.equal(replaced.display!.snapshot.revision, "r0"); assert.equal(displayUnconfirmed(replaced), true);
   assert.equal(c.canSave(generation), false); assert.equal(c.canSave(replaced.generation), false, "no trusted policy yet for the new owner");
   c.dispose();
 });
@@ -150,16 +171,19 @@ test("a replaced owner observes new policy without visible churn or regaining sa
     c.bindScope("owned-root", second, "root");
     const fenced = c.store.getSnapshot();
     assert.equal(fenced.sessionId, "owned-root"); assert.equal(fenced.base, null); assert.equal(fenced.rules, null);
+    assert.equal(fenced.display!.snapshot.revision, "r0", "the display projection survives the rebind");
     assert.equal(fenced.draft!.outsideReads, "deny");
-    // Nothing is observed for the replaced owner yet, so its first read stays visible.
-    await waitFor(() => c.store.getSnapshot().reading);
-    assert.equal(c.store.getSnapshot().reading, true);
+    // The automatic read over that display projection stays silent instead of re-showing first-load.
+    await waitFor(() => c.store.getSnapshot().revalidating);
+    const quiet = c.store.getSnapshot();
+    assert.equal(quiet.reading, false); assert.equal(quiet.display!.snapshot.revision, "r0");
     replacement.resolve(policyResult("inherit", "r1"));
     await waitFor(() => c.store.getSnapshot().rules !== null);
     const observed = c.store.getSnapshot();
     assert.equal(observed.reading, false); assert.equal(observed.rules!.snapshot.revision, "r1");
     assert.equal(observed.base, null, "an observation under a replaced owner is not a CAS base");
     assert.equal(observed.draft!.outsideReads, "deny"); assert.equal(observed.rulesIssue, "stale");
+    assert.equal(displayUnconfirmed(observed), false);
     assert.equal(c.canSave(observed.generation), false, "the old base remains non-authoritative");
     // Later background revalidation stays invisible but keeps its dirty-draft conflict.
     await waitFor(() => describes === 3);
@@ -170,6 +194,7 @@ test("a replaced owner observes new policy without visible churn or regaining sa
     await waitFor(() => !c.store.getSnapshot().revalidating);
     const updated = c.store.getSnapshot();
     assert.equal(updated.rules!.snapshot.revision, "r2"); assert.equal(updated.base, null);
+    assert.equal(updated.display!.snapshot.revision, "r2");
     assert.equal(updated.draft!.outsideReads, "deny"); assert.equal(updated.rulesIssue, "stale");
     assert.equal(updated.reading, false); assert.equal(c.canSave(updated.generation), false);
   } finally { stop(); c.dispose(); }

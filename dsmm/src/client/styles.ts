@@ -65,6 +65,10 @@ export const PROFILE_STYLES = `
 .dsmm-scope-save{display:flex;flex-direction:column;gap:8px;padding-top:16px;border-top:1px solid var(--dsw-alias-border-l4)}
 .dsmm-deployment .dsmm-deployment-group{border-top:1px solid var(--dsw-alias-border-l4);padding-top:8px;min-width:0}
 .dsmm-deployment .dsmm-deployment-group>div{display:flex;flex-direction:column;gap:8px;padding-top:8px}
+.dsmm-deployment summary .dsmm-group-summary{display:flex;align-items:center;gap:8px;min-width:0}
+.dsmm-deployment .dsmm-group-summary-label{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.dsmm-deployment .dsmm-group-summary-action{flex:0 0 auto;min-height:28px;height:28px;padding:0 8px}
+.dsmm-deployment .dsmm-group-summary-action[hidden]{display:none}
 .dsmm-deployment code{font-family:var(--ds-font-family-code);overflow-wrap:anywhere}
 .dsmm-deployment label code,.dsmm-deployment summary code{margin-left:8px;font-size:12px;line-height:18px;font-weight:400;color:var(--dsw-alias-label-secondary)}
 .dsmm-deployment pre{margin:0;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--ds-font-family-code)}

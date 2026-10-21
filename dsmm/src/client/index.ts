@@ -25,9 +25,9 @@ import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client
 import { ROLE_CONTROL_REMOTE } from "../role-control-remote.js";
 import { PERMISSION_REMOTE } from "../permission-remote.js";
 import { permissionClient } from "./permission-client.js";
+import { bindPermissionSession } from "./permission-session.js";
 import { PermissionController } from "./permission-controller.js";
 import { PERMISSIONS_NS, permissionEn, permissionZh } from "./permission-locales.js";
-import type { SessionBinding } from "@deepseek-ai/dsh-api-session-controller/client";
 import { registerRoleToolViews } from "./RoleToolView.js";
 
 export { ProfilesController, NEW_PROFILE_CONTENT } from "./controller.js";
@@ -62,18 +62,7 @@ export async function apply(ctx: Context): Promise<void> {
   });
   void ctx.inject(["uiSession", "sessions"], sessionCtx => {
     const source = sessionCtx.uiSession.adapter.current, sessions = sessionCtx.sessions as unknown as ISessions;
-    let observed: SessionBinding | undefined, stop: (() => void) | undefined;
-    const update = () => {
-      const id = source.getSnapshot().key as SessionId | undefined, binding = id === undefined ? undefined : sessions.binding(id);
-      if (binding !== observed) { stop?.(); observed = binding; stop = binding?.session.subscribe(update); }
-      const snapshot = binding?.session.getSnapshot(), catalog = sessions.list.getSnapshot(), summary = id === undefined ? undefined : catalog.byId[id];
-      const child = snapshot?.subagent != null || summary?.origin === "subagent" || summary?.parentId !== undefined;
-      const root = id !== undefined && binding?.sessionId === id && snapshot?.sessionId === id && snapshot.openState === "open" && !snapshot.removed
-        && catalog.ids.includes(id) && summary !== undefined && !child;
-      permissions.bindScope(id ?? null, binding ?? null, child ? "child" : root ? "root" : "unknown");
-    };
-    update(); sessionCtx.effect(() => source.subscribe(update)); sessionCtx.effect(() => sessions.list.subscribe(update));
-    sessionCtx.effect(() => () => { stop?.(); permissions.bindScope(null, null, "unknown"); }, "dsmm: permission native session withdrawal");
+    sessionCtx.effect(() => bindPermissionSession(source, sessions, permissions), "dsmm: permission native session withdrawal");
   });
   let deployment: DeploymentController | null = null;
   let profiles: ProfilesController | null = null;

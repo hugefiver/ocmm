@@ -21,7 +21,13 @@ export interface PermissionView {
   /** Silent background revalidation of an already trusted snapshot; not a busy state. */
   revalidating: boolean;
   busy: "save" | null;
+  /** Current-fence authority observation; only a fresh successful read/save may set it. */
   rules: PermissionRulesSaveResult | null;
+  /**
+   * Last successful observation kept for display across a same-session scope gap,
+   * owner rebind or connection change. Never a base or mutation authority.
+   */
+  display: PermissionRulesSaveResult | null;
   /** Last observed C state; only a successful clean read/save may become the mutation baseline. */
   base: PermissionRulesSaveResult["snapshot"] | null;
   draft: PermissionDraft | null;
@@ -39,7 +45,11 @@ export function permissionChanges(view: PermissionView): PermissionRulesSaveRequ
   return { expectedRevision: base.revision, ...(Object.keys(changes).length ? { changes } : {}), ...(draft.upsert.length ? { upsert: draft.upsert } : {}), ...(draft.revoke.length ? { revoke: draft.revoke } : {}) };
 }
 const empty = (): PermissionView => ({ generation: 0, sessionId: null, scope: "unknown", connected: false, reading: false, revalidating: false, busy: null,
-  rules: null, base: null, draft: null, rulesIssue: null, dirty: false, notice: null });
+  rules: null, display: null, base: null, draft: null, rulesIssue: null, dirty: false, notice: null });
+/** Policy, records, coverage and runtime may render from this observation; authority stays in `rules`. */
+export const observedRules = (view: PermissionView): PermissionRulesSaveResult | null => view.rules ?? view.display;
+/** The projection is older than the current fence and the current policy is unconfirmed. */
+export const displayUnconfirmed = (view: PermissionView): boolean => view.display !== null && view.rules === null;
 
 /** Borrowed native selection plus last-observed C state; never a Root or policy authority. */
 export class PermissionController {
@@ -58,13 +68,13 @@ export class PermissionController {
   readonly store = { getSnapshot: (): PermissionView => this.state, subscribe: (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; } };
   private publish(patch: Partial<PermissionView>): void { if (this.disposed) return; this.state = { ...this.state, ...patch }; for (const listener of this.listeners) listener(); }
   private cancel(): void { this.request.abort(); this.request = new AbortController(); this.requestSequence++; clearTimeout(this.timer); }
-  /** An observed snapshot exists; background work must stay invisible until it changes what is possible. */
+  /** An observed snapshot exists for this fence; background work must stay invisible until it changes what is possible. */
   private trusted(): boolean { return this.observed; }
-  private fence(preserveDraft: boolean, preserveBase = preserveDraft): void {
+  private fence(preserveDraft: boolean, preserveBase = preserveDraft, preserveDisplay = true): void {
     this.cancel();
     this.observed = false;
     this.publish({ generation: this.state.generation + 1, reading: false, revalidating: false, busy: null, notice: null, rules: null, rulesIssue: null,
-      ...preserveDraft ? {} : { draft: null, dirty: false }, ...preserveBase ? {} : { base: null } });
+      ...preserveDisplay ? {} : { display: null }, ...preserveDraft ? {} : { draft: null, dirty: false }, ...preserveBase ? {} : { base: null } });
   }
   bindConnection(invoke: PermissionInvoker | null, generation?: unknown): void {
     if (this.disposed || this.invoke === invoke && this.connection === generation) return;
@@ -72,11 +82,11 @@ export class PermissionController {
   }
   bindScope(sessionId: string | null, owner: object | null, scope: PermissionView["scope"]): void {
     if (this.disposed || this.state.sessionId === sessionId && this.owner === owner && this.state.scope === scope) return;
-    const sameSession = sessionId === this.state.sessionId;
+    const sameSession = sessionId !== null && sessionId === this.state.sessionId;
     this.owner = owner;
     // A replaced owner invalidates the old base even when the session ID is unchanged;
-    // only the draft may survive for explicit recovery.
-    this.fence(sameSession, false);
+    // only the draft and the read-only display projection may survive for explicit recovery.
+    this.fence(sameSession, false, sameSession);
     this.publish({ sessionId, scope }); this.schedule(true);
   }
   watch(): () => void {
@@ -84,7 +94,7 @@ export class PermissionController {
     let active = true;
     return () => { if (!active) return; active = false; this.watchers--; if (this.watchers === 0) this.fence(true); };
   }
-  dispose(): void { if (this.disposed) return; this.fence(false); this.disposed = true; this.listeners.clear(); this.invoke = null; this.owner = null; }
+  dispose(): void { if (this.disposed) return; this.fence(false, false, false); this.disposed = true; this.listeners.clear(); this.invoke = null; this.owner = null; }
   private live(generation: number): boolean { return !this.disposed && generation === this.state.generation && this.owner !== null && this.invoke !== null && this.state.scope === "root" && this.state.sessionId !== null; }
   private schedule(immediate = false): void {
     clearTimeout(this.timer);
@@ -109,7 +119,8 @@ export class PermissionController {
     if (background && this.state.revalidating) return;
     // A user-triggered refresh upgrades an in-flight silent read into its visible own request.
     if (!background && this.state.revalidating) this.cancel();
-    const visible = !background || !this.trusted();
+    // An automatic read over an existing display projection is silent; a first load stays visible.
+    const visible = !background || !this.trusted() && this.state.display === null;
     const sequence = ++this.requestSequence, signal = this.request.signal, id = this.state.sessionId!;
     this.publish(visible ? { reading: true, revalidating: false } : { revalidating: true });
     try {
@@ -117,11 +128,11 @@ export class PermissionController {
       if (!this.live(generation) || signal.aborted || sequence !== this.requestSequence) return;
       this.observed = true;
       const retain = this.state.dirty && !discard;
-      this.publish({ rules: value, rulesIssue: retain && this.state.base?.revision !== value.snapshot.revision ? "stale" : null,
+      this.publish({ rules: value, display: value, rulesIssue: retain && this.state.base?.revision !== value.snapshot.revision ? "stale" : null,
         ...retain ? {} : { base: value.snapshot, draft: draftOf(value.snapshot.policy), dirty: false } });
     } catch (error) {
       if (!this.live(generation) || signal.aborted || sequence !== this.requestSequence) return;
-      // Keep the last trusted projection visible; only its mutation authority is withdrawn.
+      // Keep the last trusted projection (current or display-only) visible; only its mutation authority is withdrawn.
       this.publish({ rulesIssue: this.issue(error) });
     } finally {
       if (this.live(generation) && sequence === this.requestSequence) this.publish({ reading: false, revalidating: false });
@@ -157,7 +168,7 @@ export class PermissionController {
     const current = this.begin("save");
     try {
       const result = await this.invoke!("saveRules", [current.id, request], current.signal);
-      if (this.live(generation)) { this.observed = true; this.publish({ rules: result, base: result.snapshot, draft: draftOf(result.snapshot.policy), dirty: false, rulesIssue: null, notice: "saved" }); }
+      if (this.live(generation)) { this.observed = true; this.publish({ rules: result, display: result, base: result.snapshot, draft: draftOf(result.snapshot.policy), dirty: false, rulesIssue: null, notice: "saved" }); }
     } catch (error) { if (this.live(generation)) this.publish({ rulesIssue: this.issue(error) }); }
     finally { if (this.live(generation)) { this.publish({ busy: null }); this.schedule(); } }
   }
