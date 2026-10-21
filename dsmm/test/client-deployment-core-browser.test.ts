@@ -348,10 +348,10 @@ test("Core deployment controls save sparse desired values through native Gateway
     const describesBefore = permissionCalls.filter(call => call.method === "describeRules").length;
     for (const cycle of [1, 2]) {
       await page.waitForTimeout(1200);
-      assert.equal(await rulesPanel.getAttribute("aria-busy"), "false", `background revalidation cycle ${cycle} must not flip aria-busy`);
-      assert.equal((await rulesStatus.textContent()) ?? "", stableStatus, `background revalidation cycle ${cycle} must not announce reading`);
+      assert.equal(await rulesPanel.getAttribute("aria-busy"), "false", `cycle ${cycle} must not flip aria-busy`);
+      assert.equal((await rulesStatus.textContent()) ?? "", stableStatus, `cycle ${cycle} must not announce reading`);
     }
-    assert.ok(permissionCalls.filter(call => call.method === "describeRules").length > describesBefore, "the watched panel really revalidated in the background");
+    assert.equal(permissionCalls.filter(call => call.method === "describeRules").length, describesBefore, "periodic polling removed: no repeated requests occur across seconds");
     await capture("state-ready");
     // Same-session transient scope gap: the last successful projection stays readable while
     // authority is withdrawn; no first-load state returns and the panel never claims it is current.
@@ -390,16 +390,27 @@ test("Core deployment controls save sparse desired values through native Gateway
     assert.equal(await rulesOutside.inputValue(), "allow");
     assert.equal(await rulesPanel.getByRole("button", { name: permissionEn.save, exact: true }).isDisabled(), true);
     await capture("state-error");
+    // Continuous unavailable across multiple seconds does not repeatedly poll or flicker reading:
+    const errorDescribesBefore = permissionCalls.filter(call => call.method === "describeRules").length;
+    for (const cycle of [1, 2]) {
+      await page.waitForTimeout(1200);
+      assert.equal(await rulesPanel.getAttribute("aria-busy"), "false", `continuous unavailable cycle ${cycle} must not flip aria-busy`);
+      assert.equal(await rulesAlert.locator("code").textContent(), "unavailable", "stable error display");
+    }
+    assert.equal(permissionCalls.filter(call => call.method === "describeRules").length, errorDescribesBefore, "continuous unavailable: no repeated requests on failure");
+    // Manual retry recovery:
     await rulesPanel.getByRole("button", { name: permissionEn.discard, exact: true }).click();
     await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions] [role=alert]") === null);
     // Runtime unsynced: the rules transaction reports it and refuses its own Save only.
     runtimeState = "unsynced";
+    await rulesPanel.getByRole("button", { name: permissionEn.refresh, exact: true }).click();
     await page.waitForFunction(() => document.querySelector("[data-dsmm-permissions]")?.textContent?.includes("Unsynced"));
     assert.equal(await rulesPanel.getByRole("button", { name: "Save", exact: true }).isDisabled(), true);
     assert.equal(await rulesOutside.isDisabled(), true);
     await capture("state-unsynced");
     const unsyncedSaves = permissionCalls.filter(call => call.method === "saveRules").length;
     runtimeState = "synced";
+    await rulesPanel.getByRole("button", { name: permissionEn.refresh, exact: true }).click();
     await page.waitForFunction(() => !document.querySelector<HTMLSelectElement>("[data-dsmm-permissions] select")?.disabled);
     await rulesOutside.selectOption("ask");
     await rulesPanel.getByRole("button", { name: "Save", exact: true }).click();

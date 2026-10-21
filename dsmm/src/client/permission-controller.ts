@@ -78,7 +78,7 @@ export class PermissionController {
   }
   bindConnection(invoke: PermissionInvoker | null, generation?: unknown): void {
     if (this.disposed || this.invoke === invoke && this.connection === generation) return;
-    this.invoke = invoke; this.connection = generation; this.fence(true); this.publish({ connected: invoke !== null }); this.schedule(true);
+    this.invoke = invoke; this.connection = generation; this.fence(true); this.publish({ connected: invoke !== null }); this.schedule();
   }
   bindScope(sessionId: string | null, owner: object | null, scope: PermissionView["scope"]): void {
     if (this.disposed || this.state.sessionId === sessionId && this.owner === owner && this.state.scope === scope) return;
@@ -87,19 +87,19 @@ export class PermissionController {
     // A replaced owner invalidates the old base even when the session ID is unchanged;
     // only the draft and the read-only display projection may survive for explicit recovery.
     this.fence(sameSession, false, sameSession);
-    this.publish({ sessionId, scope }); this.schedule(true);
+    this.publish({ sessionId, scope }); this.schedule();
   }
   watch(): () => void {
-    this.watchers++; if (this.watchers === 1) this.schedule(true);
+    this.watchers++; if (this.watchers === 1) this.schedule();
     let active = true;
     return () => { if (!active) return; active = false; this.watchers--; if (this.watchers === 0) this.fence(true); };
   }
   dispose(): void { if (this.disposed) return; this.fence(false, false, false); this.disposed = true; this.listeners.clear(); this.invoke = null; this.owner = null; }
   private live(generation: number): boolean { return !this.disposed && generation === this.state.generation && this.owner !== null && this.invoke !== null && this.state.scope === "root" && this.state.sessionId !== null; }
-  private schedule(immediate = false): void {
+  private schedule(): void {
     clearTimeout(this.timer);
     if (this.watchers === 0 || !this.live(this.state.generation)) return;
-    this.timer = setTimeout(() => { void this.revalidate(this.state.generation); }, immediate ? 0 : 1000);
+    this.timer = setTimeout(() => { void this.revalidate(this.state.generation); }, 0);
     this.timer.unref?.();
   }
   private issue(error: unknown): PermissionIssue { return error instanceof PermissionClientError ? error.code : "transport"; }
@@ -137,7 +137,6 @@ export class PermissionController {
     } finally {
       if (this.live(generation) && sequence === this.requestSequence) this.publish({ reading: false, revalidating: false });
     }
-    this.schedule();
   }
   edit(generation: number, patch: Partial<PermissionDraft>): void {
     if (!this.canEdit(generation) || this.state.draft === null) return;
@@ -170,6 +169,6 @@ export class PermissionController {
       const result = await this.invoke!("saveRules", [current.id, request], current.signal);
       if (this.live(generation)) { this.observed = true; this.publish({ rules: result, display: result, base: result.snapshot, draft: draftOf(result.snapshot.policy), dirty: false, rulesIssue: null, notice: "saved" }); }
     } catch (error) { if (this.live(generation)) this.publish({ rulesIssue: this.issue(error) }); }
-    finally { if (this.live(generation)) { this.publish({ busy: null }); this.schedule(); } }
+    finally { if (this.live(generation)) this.publish({ busy: null }); }
   }
 }

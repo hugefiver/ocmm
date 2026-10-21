@@ -506,13 +506,11 @@ test("Global rules transaction offers a non-destructive Refresh and an explicit 
     // A non-destructive refresh keeps the dirty draft and its base.
     click(button(permissionEn.refresh)); await settle(() => !c.store.getSnapshot().reading);
     assert.equal(c.store.getSnapshot().dirty, true); assert.equal(c.store.getSnapshot().draft!.outsideReads, "deny");
-    // Background revalidation stays invisible and never disables either control.
+    // Refresh with a newer revision flags a stale CAS conflict.
+    click(button(permissionEn.refresh));
     await settle(() => describes === 4);
-    const silent = c.store.getSnapshot();
-    assert.equal(silent.revalidating, true); assert.equal(silent.reading, false);
-    assert.equal(button(permissionEn.refresh).props.disabled, false); assert.equal(button(permissionEn.discard).props.disabled, false);
-    assert.equal(c.canSave(generation), true);
-    held.resolve(value("r1", "allow")); await settle(() => !c.store.getSnapshot().revalidating);
+    assert.equal(c.store.getSnapshot().reading, true);
+    held.resolve(value("r1", "allow")); await settle(() => !c.store.getSnapshot().reading);
     const stale = c.store.getSnapshot();
     assert.equal(stale.base!.revision, "r0"); assert.equal(stale.rulesIssue, "stale");
     assert.equal(stale.draft!.outsideReads, "deny"); assert.equal(c.canSave(generation), false);

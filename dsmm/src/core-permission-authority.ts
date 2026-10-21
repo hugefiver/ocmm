@@ -220,10 +220,21 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
         if (fiber.uid === null || fiber.state === 4 || fiber.state === 5) throw new PermissionRefusal("cancelled");
         seen.add(fiber.ctx);
       }
-      const structural = root as unknown as DshAgent, admission = coreAdmission(root);
-      const identity = rolePolicy.identity(structural);
-      if (identity.child || identity.parent !== undefined || identity.epoch !== admission.epoch) throw new PermissionRefusal("not-owned");
-      if (identity.readOnly === true || DSMM_ROLES.find(role => role.id === identity.role)?.access === "read-only") throw new PermissionRefusal("denied");
+      const structural = root as unknown as DshAgent, profiles = coreDomain(root), host = integration();
+      const captured = host?.owns(root) === true || capturedRoleInvocation(structural) !== undefined;
+      const native = !captured && !profiles.hasAdmission(structural);
+      if (native && root.ctx.get("agentPresets")?.composedPreset(root.ctx)?.startsWith("dsmm-")) throw new PermissionRefusal("denied");
+      if (captured) {
+        if (host === undefined) throw new PermissionRefusal("unavailable");
+        host.assert(root);
+      }
+      if (!native) {
+        const admission = coreAdmission(root);
+        rolePolicy.assertModuleAdmission(structural);
+        const identity = rolePolicy.identity(structural);
+        if (identity.child || identity.parent !== undefined || identity.epoch !== admission.epoch) throw new PermissionRefusal("not-owned");
+        if (identity.readOnly === true || DSMM_ROLES.find(role => role.id === identity.role)?.access === "read-only") throw new PermissionRefusal("denied");
+      }
       const sandbox = root.ctx.get("sandboxPolicy") as NativeSandboxPolicy | undefined;
       if (sandbox === undefined) throw new PermissionRefusal("unavailable");
       const policy = sandbox.resolve({ session: root.session });

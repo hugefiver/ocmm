@@ -301,20 +301,20 @@ Coverage, registration limits and capability caveats sit in a collapsed **Detail
 
 ### Reading, saving and conflict states
 
-Loading is split from transport activity so that background work is invisible unless it changes what the user can do. This applies to every watched transaction, including the Global-rules panel and observed runtime state. The configuration-layer editor loads once on entry and rereads only through its explicit Refresh; the Global-rules panel may revalidate in the background under the same rules.
+Loading is split from transport activity so that background work is invisible unless it changes what the user can do. The configuration-layer editor loads once on entry and rereads through its explicit Refresh. The Global-rules panel reads on opening, changes to its session/owner/connection binding, and explicit Refresh; it does not poll. Save uses the returned result without scheduling another read.
 
 - **First load / no trusted authority** — stable status text with `aria-busy`, one busy label, and no stale controls presented as current.
 - **User-triggered Refresh or retry** — its own visible busy state on that action and status line.
 - **Silent revalidation of a trusted snapshot** — no spinner, no `aria-busy` flip on the section, no live-region announcement, no dismount, and no disabling of inputs or Save. Focus, drafts, expansion and scroll position remain untouched.
 - **Save** — cancels or invalidates unfinished background reads, keeps the existing `expectedRevision` field mandatory, and relies on CAS plus Host verification. A late read cannot overwrite the accepted result.
-- **Ownership, read-only, connection and runtime synchronization checks keep running** during silent revalidation. An observed refusal disables only the affected mutation, keeps the draft and marks the visible data as no longer current. Revocation is never hidden behind a silent refresh or a longer interval.
+- **Current authority** — native session and connection notifications immediately fence affected operations. Other external policy or runtime changes become visible on the next read or save; the UI does not promise continuous observation. The Host checks current ownership, writability, runtime state and CAS for each mutation. An observed refusal disables only the affected mutation, keeps the draft and marks the visible data as no longer current.
 - **Identity fencing** — responses and saves are accepted only for the exact owner object, session ID, scope and connection generation that started them, in request-sequence order, with abort and disposal invalidating earlier work. A replaced owner with an unchanged session ID still invalidates old responses and saves; the old draft may be offered for recovery but its base is not treated as the new owner's authority.
 - **Identical clean policy** — revalidation may refresh the baseline without visible movement.
-- **Dirty draft** — keep the original CAS base; a changed revision marks a conflict immediately and blocks Save. Do not merge. The conflict path offers non-destructive reload/inspect and an explicit discard-and-reload; no force-overwrite and no automatic rebase.
+- **Dirty draft** — keep the original CAS base; an observed changed revision marks a conflict and blocks Save. Do not merge. The conflict path offers non-destructive reload/inspect and an explicit discard-and-reload; no force-overwrite and no automatic rebase.
 - **Accepted-but-unconfirmed** — a committed write with failed reread stays Saved / refresh required and blocks replay until refreshed. Transport or protocol failure is not proof of rejection.
 - **Independent transaction state** — pending, saved, conflict, unavailable/offline and unsynced are shown per transaction. Repeated background failures do not re-alert. Focus moves only for user-triggered validation failures, and ordinary save keeps focus on the initiating control.
 
-Polling stays inside the existing watch lifecycle and is cleared on unmount; an invalid Root issues no background request. Background reads are never overlapped and never reschedule from a stale timer.
+Reads stay inside the existing watch lifecycle; an invalid Root issues no automatic request. A failed read leaves a stable error until an explicit retry or a real binding change. There is no timed retry loop. Unmount and identity changes invalidate in-flight work.
 
 ### Section field map
 
