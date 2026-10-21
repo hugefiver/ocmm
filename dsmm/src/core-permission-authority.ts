@@ -7,7 +7,7 @@ import type { DshAgent } from "./dsh-types.js";
 import { PermissionRefusal, permissionOriginal } from "./permission-control.js";
 import type { PermissionControlCollaborators, PermissionExecutionAuthority } from "./permission-control.js";
 import type { DsmmRolePolicy } from "./role-policy.js";
-import { DSMM_ROLES } from "./roles.js";
+import { DSMM_DISPATCHER_ROLE, DSMM_ROLES, isRootRole } from "./roles.js";
 import type { NativeAdmission } from "./native-admission.js";
 import { capturedRoleInvocation } from "./role-invocation.js";
 import type { DsmmProfileAdmission, DsmmSettingsGetter } from "./settings.js";
@@ -223,7 +223,13 @@ export function createCorePermissionAuthority(ctx: Context, options: CorePermiss
       const structural = root as unknown as DshAgent, profiles = coreDomain(root), host = integration();
       const captured = host?.owns(root) === true || capturedRoleInvocation(structural) !== undefined;
       const native = !captured && !profiles.hasAdmission(structural);
-      if (native && root.ctx.get("agentPresets")?.composedPreset(root.ctx)?.startsWith("dsmm-")) throw new PermissionRefusal("denied");
+      if (native) {
+        const preset = root.ctx.get("agentPresets")?.composedPreset(root.ctx);
+        if (preset?.startsWith("dsmm-")) {
+          const definition = DSMM_ROLES.find(role => role.id === preset);
+          if (preset !== DSMM_DISPATCHER_ROLE || definition === undefined || !isRootRole(definition) || definition.access !== "write") throw new PermissionRefusal("denied");
+        }
+      }
       if (captured) {
         if (host === undefined) throw new PermissionRefusal("unavailable");
         host.assert(root);
