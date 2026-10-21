@@ -10,11 +10,11 @@ pnpm test            # node --test + cargo test
 pnpm run build       # tsc -> dist/ and cargo release -> dist/bin/
 ```
 
-All three must pass before committing. TypeScript tests use `node --test --experimental-strip-types` (Node 22+), no test framework dependency. The Rust `ocmm-lsp` MCP server lives under `crates/ocmm-lsp/` and requires Cargo. `pnpm run build` writes both the local fallback binary name and the target-triple release name to `dist/bin/`.
+TypeScript tests use `node --test --experimental-strip-types` (Node 22+), no test framework dependency. The Rust `ocmm-lsp` MCP server lives under `crates/ocmm-lsp/` and requires Cargo. `pnpm run build` writes both the local fallback binary name and the target-triple release name to `dist/bin/`.
 
 For multi-task or parallel work, workers run lightweight local checks relevant to their substantive changes and return changed areas, local evidence/results, and material risks or unverified coverage. The orchestrator coordinates integration and global verification, consolidating necessary heavy checks at task completion or important phase boundaries rather than running full suites per small task.
 
-Reuse passing evidence when it still covers the current claim and no change materially affects tested behavior or interfaces. Unchanged code needs no rerun absent a relevant change; dependency/environment changes during long tasks and unrelated parallel code edits don't automatically invalidate evidence. Assess concrete relevance, rerun only affected or missing checks, and report uncovered risks; don't call a behavior/interface-affecting change unrelated or treat failed/stale evidence as a pass. Safety/data/API/permission boundaries, required release checks, the three pre-commit gates above, and explicit user verification requirements remain binding.
+Reuse passing evidence when it still covers the current claim and no change materially affects tested behavior or interfaces. Unchanged code needs no rerun absent a relevant change; dependency/environment changes during long tasks and unrelated parallel code edits don't automatically invalidate evidence. Assess concrete relevance, rerun only affected or missing checks, and report uncovered risks; don't call a behavior/interface-affecting change unrelated or treat failed/stale evidence as a pass. Safety/data/API/permission boundaries, required release checks, and explicit user verification requirements remain binding.
 
 ## Final-State Artifacts and Regression Tests
 
