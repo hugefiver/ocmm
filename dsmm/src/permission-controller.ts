@@ -4,10 +4,10 @@ import { HarnessError } from "@deepseek-ai/dsh-llm";
 import { TOOL_ABORTED } from "@deepseek-ai/dsh-tools";
 import type { ToolDefinition, ToolExecution, ToolRunContext, ToolRuntime } from "@deepseek-ai/dsh-tools";
 import type { Agent } from "@deepseek-ai/dsh-agent";
-import { isSandboxWidening, PermissionControl, PermissionRefusal, permissionApprovalAdapter } from "./permission-control.js";
+import { isSandboxWidening, PermissionControl, PermissionRefusal, permissionApprovalAdapter, permissionOriginal } from "./permission-control.js";
 import type { PermissionControlCollaborators, PermissionRegistration } from "./permission-control.js";
 import { classifyPermissionShell } from "./permission-shell.js";
-import { nativeCommandMatch } from "./permission-native-command.js";
+import { nativeCommandMatch, simpleCommandMatch, simpleShellCommand, simpleShellDialect } from "./permission-native-command.js";
 import type { PermissionShellIdentity } from "./permission-shell.js";
 import { NATIVE_PERMISSION_CAPABILITIES, registerNativePermissionRules } from "./permission-native-rules.js";
 import type { NativePermissionCapabilityView, NativePermissionFileSystem, NativePermissionToolIdentity } from "./permission-native-rules.js";
@@ -61,6 +61,7 @@ interface ManagedToolRegistration {
   unchanged(): boolean;
   dispose(): void;
 }
+interface StockRegistration { readonly registration: PermissionRegistration; dispose(): void }
 
 /** Bind methods to the original scoped receiver, preserving filters and registry layers. */
 function toolsFacade(tools: ToolRuntime, register: ToolRuntime["register"]): ToolRuntime {
@@ -96,6 +97,7 @@ export class DsmmPermissionController extends Service {
   readonly rules: PermissionRulesRuntimeSync;
   private readonly registrations = new Map<ToolDefinition, ManagedRegistration>();
   private readonly toolRegistrations = new Map<ToolDefinition, ManagedToolRegistration>();
+  private readonly stockRegistrations = new Map<ToolDefinition, StockRegistration>();
   private readonly lifetime = new AbortController();
   constructor(ctx: Context, private readonly options: PermissionControllerOptions) {
     super(ctx, "dsmmPermissionController");
@@ -113,6 +115,7 @@ export class DsmmPermissionController extends Service {
     if (this.rules.status().mounted) {
       registerNativePermissionRules(ctx, {
         runtime: this.rules,
+        simpleCommandAllowed: exec => this.permissions.isSimple(exec),
         captureIntegrity: options.authority.captureIntegrity === undefined ? undefined : exec => options.authority.captureIntegrity!(exec),
         identify: definition => {
           const managed = this.registrations.get(definition);
@@ -134,13 +137,13 @@ export class DsmmPermissionController extends Service {
           return { signal: current.signal, assertCurrent: () => options.authority.assertCurrent(current, exec) };
         },
         assertCurrent: exec => authority.assertCurrent(authority.current(exec), exec),
-        managedShellDecision: async (exec, action, downstream) => {
+        managedShellDecision: async (exec, action, downstream, snapshot) => {
           const definition = ctx.tools.get(exec.name, exec.agent), managed = definition === undefined ? undefined : this.registrations.get(definition);
           if (managed === undefined) throw new PermissionRefusal("stale");
           const workspace = exec.agent?.session.header.cwd ?? "";
           const full = nativeStandingFullAccess(ctx, exec.agent);
           if (full) return this.permissions.compose(exec, managed.registration, undefined, "inherit", downstream, workspace);
-          const policy = this.rules.getPolicy().policy;
+          const policy = (snapshot ?? this.rules.getPolicy()).policy;
           const entry = nativeCommandMatch(policy.nativeCommands, managed.kind, managed.shell, exec.arguments, workspace);
           if (entry === "ambiguous") managed.scope.logger.warn("Ambiguous native command sandbox modes; retaining native execution policy.");
           if (entry !== undefined && entry !== "ambiguous" && (managed.scope.get("shell") as NativeShell | undefined)?.sandboxMode === undefined) return { kind: "deny", reason: "Native command sandbox enhancement is unavailable in this executor." };
@@ -148,12 +151,107 @@ export class DsmmPermissionController extends Service {
           return this.permissions.compose(exec, managed.registration, entry === "ambiguous" ? undefined : entry, action, downstream, operation.workingDirectory);
         },
       });
+      ctx.on("tools/pre-execute", async (exec, next) => {
+        if (!await this.simpleCommandAllowed(exec)) return next();
+        const definition = ctx.tools.get(exec.name, exec.agent);
+        const registration = definition === undefined ? undefined : this.registrations.get(definition)?.registration ?? this.stockRegistrations.get(definition)?.registration;
+        if (registration === undefined) throw new PermissionRefusal("stale");
+        return this.permissions.compose(exec, registration, undefined, "allow", next, exec.agent?.session.header.cwd ?? "", true);
+      }, { global: true, prepend: true });
       ctx.tools.guard(exec => this.permissions.guard(exec));
+      ctx.on("tools/execute", async (exec, next) => {
+        const denied = this.permissions.guard(exec); if (denied !== undefined) throw new PermissionRefusal("stale"); return next();
+      }, { global: true });
       ctx.on("approval/request", permissionApprovalAdapter(ctx, (request, next) => this.permissions.answerer(request, next)), { prepend: true, global: true });
-      ctx.on("tools/result", exec => { this.permissions.finish(exec); }, { global: true });
+      ctx.on("tools/result", exec => {
+        this.permissions.finish(exec);
+        for (const stock of this.stockRegistrations.values()) if (!stock.registration.active) stock.dispose();
+      }, { global: true });
       ctx.on("agent/disposed", ({ agent }) => { this.permissions.revokeAgent(agent); }, { global: true });
     }
     ctx.effect(() => () => this.retire());
+  }
+
+  /** Admit this exact simple match through the existing per-call native approval binding. */
+  async simpleCommandAllowed(exec: Readonly<ToolExecution>): Promise<boolean> {
+    if (this.permissions.isSimple(exec)) return true;
+    if (!this.rules.status().mounted || this.lifetime.signal.aborted || exec.agent === undefined) return false;
+    const agent = exec.agent, realm = agent.ctx;
+    const resolveTools = (): ToolRuntime | undefined => agent.ctx.get("agentPresets")?.serviceFor(agent, "tools") ?? agent.ctx.get("tools");
+    const tools = resolveTools(), definition = tools?.get(exec.name, agent);
+    if (tools === undefined || definition === undefined) return false;
+    const managed = this.registrations.get(definition);
+    const dialect = managed?.shell.dialect ?? simpleShellDialect(exec.name);
+    const command = managed === undefined ? simpleShellCommand(exec.arguments) : Reflect.get(exec.arguments as object, managed.shell.commandField) as unknown;
+    if (dialect === undefined || typeof command !== "string") return false;
+    const body = definition.execute, args = exec.arguments, name = exec.name, callId = exec.callId, signal = exec.signal;
+    const registry = agent.ctx.get("agents"), workspace = agent.session.header.cwd;
+    const checkCall = (): void => {
+      if (signal.aborted || exec.signal !== signal || this.lifetime.signal.aborted) throw new PermissionRefusal("cancelled");
+      const liveTools = resolveTools(), liveRegistry = agent.ctx.get("agents");
+      const stock = this.stockRegistrations.get(definition)?.registration;
+      const sameBody = definition.execute === body || stock?.active === true && stock.body === body
+        && definition.execute === stock.wrapper && stock.unchanged();
+      if (exec.agent !== agent || agent.ctx !== realm || registry === undefined || liveRegistry === undefined
+        || permissionOriginal(liveRegistry) !== permissionOriginal(registry) || liveRegistry.get(agent.id) !== agent
+        || exec.arguments !== args || exec.name !== name || exec.callId !== callId || agent.session.header.cwd !== workspace
+        || liveTools === undefined || permissionOriginal(liveTools) !== permissionOriginal(tools)
+        || tools.get(name, agent) !== definition || liveTools.get(name, agent) !== definition || !sameBody) throw new PermissionRefusal("stale");
+    };
+    // Capture before refresh, but do not impose new gates on calls which never use simple.
+    let authority: ReturnType<PermissionControlCollaborators["current"]> | undefined, failure: unknown;
+    try {
+      authority = this.options.authority.current(exec);
+      this.options.authority.assertCurrent(authority, exec);
+    } catch (error) { failure = error; }
+    let snapshot: Awaited<ReturnType<PermissionRulesRuntimeSync["refresh"]>>;
+    try { snapshot = await this.rules.refresh(); } catch { return false; }
+    if (!simpleCommandMatch(snapshot.policy.nativeCommands, command, dialect)) return false;
+    if (failure !== undefined) throw failure;
+    if (authority === undefined) throw new PermissionRefusal("not-owned");
+    checkCall(); this.options.authority.assertCurrent(authority, exec);
+    const registration = managed?.registration ?? this.stockRegistration(definition, tools);
+    await this.permissions.compose(exec, registration, undefined, "allow", async () => ({ kind: "allow" }), workspace ?? "", true);
+    return true;
+  }
+
+  private stockRegistration(definition: ToolDefinition, tools: ToolRuntime): PermissionRegistration {
+    const previous = this.stockRegistrations.get(definition);
+    if (previous?.registration.active && previous.registration.unchanged()) return previous.registration;
+    previous?.dispose();
+    if (this.stockRegistrations.has(definition)) throw new PermissionRefusal("stale");
+    const body = definition.execute, fields = Object.getOwnPropertyDescriptors(definition), outputFields = Object.getOwnPropertyDescriptors(definition.output);
+    const parameters = JSON.stringify(definition.parameters), outputSchema = JSON.stringify(definition.output.schema);
+    let registration!: PermissionRegistration, stock!: StockRegistration;
+    const wrapper: ToolDefinition["execute"] = async (args, exec) => {
+      try { return await this.permissions.run(exec, args, registration, async (signal, bodyArgs) => {
+        const value = await body.call(definition, bodyArgs, Object.freeze({ ...exec, signal,
+          deferContext: exec.deferContext.bind(exec), concludeTurn: exec.concludeTurn.bind(exec) }));
+        if (signal.aborted) throw new HarnessError("Permission-controlled tool execution was cancelled.", TOOL_ABORTED);
+        return value;
+      }); } finally { if (!registration.active) stock.dispose(); }
+    };
+    Object.defineProperty(definition, "execute", { ...fields.execute, value: wrapper });
+    const wrappedFields = Object.getOwnPropertyDescriptors(definition);
+    registration = { definition, registered: definition, body, wrapper, identity: Object.freeze({}), active: true, simpleOnly: true,
+      signal: this.lifetime.signal, approval: () => this.ctx.get("approval"),
+      standingMode: exec => this.ctx.get("sandboxPolicy")?.resolve(exec.agent === undefined ? {} : { session: exec.agent.session }).mode,
+      unchanged: () => unchangedFields(definition, wrappedFields) && unchangedFields(definition.output, outputFields)
+        && JSON.stringify(definition.parameters) === parameters && JSON.stringify(definition.output.schema) === outputSchema,
+      assertIntegrity: exec => {
+        const agent = exec.agent;
+        const visible = agent?.ctx.get("agentPresets")?.serviceFor(agent, "tools") ?? agent?.ctx.get("tools") ?? tools;
+        if (permissionOriginal(visible) !== permissionOriginal(tools) || visible.get(exec.name, agent) !== definition) throw new PermissionRefusal("stale");
+      },
+    };
+    stock = { registration, dispose: () => {
+      this.permissions.revokeRegistration(registration);
+      if (this.permissions.pending(registration)) return;
+      if (definition.execute === wrapper) Object.defineProperty(definition, "execute", fields.execute);
+      if (this.stockRegistrations.get(definition) === stock) this.stockRegistrations.delete(definition);
+    } };
+    this.stockRegistrations.set(definition, stock);
+    return registration;
   }
 
   /** Public in-process facts for DSMM consumers; requested/configured modes never grant access. */
@@ -252,8 +350,8 @@ export class DsmmPermissionController extends Service {
     if (shellOwner === undefined) throw new PermissionRefusal("unavailable");
     let registration!: PermissionRegistration;
     const wrapper = async (args: unknown, exec: ToolRunContext): Promise<unknown> => {
-      return this.permissions.run(exec, args, registration, async signal => {
-        const value = await body.call(definition, args, Object.freeze({ ...exec, signal,
+      return this.permissions.run(exec, args, registration, async (signal, bodyArgs) => {
+        const value = await body.call(definition, bodyArgs, Object.freeze({ ...exec, signal,
           deferContext: exec.deferContext.bind(exec), concludeTurn: exec.concludeTurn.bind(exec) }));
         if (signal.aborted) throw new HarnessError("Permission-controlled tool execution was cancelled.", TOOL_ABORTED);
         return value;
@@ -312,6 +410,7 @@ export class DsmmPermissionController extends Service {
     this.lifetime.abort(); this.permissions.retire();
     for (const managed of [...this.registrations.values()]) managed.dispose();
     for (const managed of [...this.toolRegistrations.values()]) managed.dispose();
+    for (const stock of [...this.stockRegistrations.values()]) stock.dispose();
   }
 }
 declare module "@deepseek-ai/cordis" { interface Context { dsmmPermissionController: DsmmPermissionController } }

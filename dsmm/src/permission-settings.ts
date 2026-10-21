@@ -16,7 +16,8 @@ export interface NativeCommandEntry {
   readonly match: NativeCommandMatch;
   readonly sandboxMode: "workspace-write" | "danger-full-access";
 }
-export interface NativeCommandsSettings { readonly enabled: boolean; readonly entries: readonly NativeCommandEntry[] }
+export type NativeCommandRule = string | NativeCommandEntry;
+export interface NativeCommandsSettings { readonly enabled: boolean; readonly entries: readonly NativeCommandRule[] }
 /** Only enabled is deployment-only. Rules are independently synchronized at runtime. */
 export interface PermissionControlSettings {
   readonly enabled: boolean;
@@ -45,12 +46,25 @@ export function parseNativeCommandPattern(input: unknown): NativeCommandPattern 
   if (subcommands.some(value => value.length === 0 || /[^\p{L}\p{M}\p{N}_./:=+%\-]/u.test(value))) throw new PermissionRefusal("validation");
   return Object.freeze({ executable: tokens[0], subcommands: Object.freeze(subcommands) });
 }
+/** Literal token prefixes; only the second token may contain alternatives. */
+export function parseSimpleCommandPattern(input: unknown): readonly (readonly string[])[] {
+  if (typeof input !== "string" || input.length > 32768) throw new PermissionRefusal("validation");
+  const tokens = input.replace(/^[ \t]+|[ \t]+$/gu, "").split(/[ \t]+/u);
+  if (tokens.at(-1) === "*") tokens.pop();
+  if (!tokens.length) throw new PermissionRefusal("validation");
+  return Object.freeze(tokens.map((token, index) => {
+    const values = index === 1 ? token.split("|") : [token];
+    if (values.some(value => !value.length || /[^\p{L}\p{M}\p{N}_./:=+%\\\-]/u.test(value))) throw new PermissionRefusal("validation");
+    return Object.freeze(values);
+  }));
+}
 export function parseNativeCommands(input: unknown = {}): NativeCommandsSettings {
   const row = permissionRuleRow(input, [], ["enabled", "entries"]);
   if (row.enabled !== undefined && typeof row.enabled !== "boolean" || row.entries !== undefined && (!Array.isArray(row.entries) || row.entries.length > 1024)) throw new PermissionRefusal("validation");
   const text = (value: unknown): string => { if (typeof value !== "string" || value.trim().length === 0 || value.length > 32768 || value.includes("\0")) throw new PermissionRefusal("validation"); return value; };
   const ids = new Set<string>();
   const entries = (row.entries as unknown[] | undefined ?? []).map(value => {
+    if (typeof value === "string") { parseSimpleCommandPattern(value); return value; }
     const entry = permissionRuleRow(value, ["id", "mode", "match", "sandboxMode"]);
     const match = permissionRuleRow(entry.match, ["tool", "workingDirectory", "commandPattern"]);
     const id = text(entry.id), cwd = text(match.workingDirectory);
@@ -66,9 +80,10 @@ export function parseNativeCommands(input: unknown = {}): NativeCommandsSettings
   return Object.freeze({ enabled: row.enabled as boolean | undefined ?? false, entries: Object.freeze(entries) });
 }
 export const nativeCommandMatchSchema = z.object({ tool: z.union(["bash", "pwsh"]).required(), workingDirectory: z.string().required(), commandPattern: z.string().required() }).required();
-const nativeCommands = z.object({ enabled: z.boolean().default(false), entries: z.array(z.object({
+export const nativeCommandEntrySchema = z.object({
   id: z.string().required(), mode: z.union(["ask", "allow"]).required(), match: nativeCommandMatchSchema, sandboxMode: z.union(["workspace-write", "danger-full-access"]).required(),
-})).default([]) });
+}).required();
+const nativeCommands = z.object({ enabled: z.boolean().default(false), entries: z.array(z.union([z.string(), nativeCommandEntrySchema])).default([]) });
 const webDefault = Object.freeze({ enabled: true, rule: "inherit" as const });
 export const DEFAULT_PERMISSION_CONTROL: PermissionControlSettings = Object.freeze({ enabled: true, outsideReads: "inherit", webSearch: webDefault, webFetch: webDefault, rules: Object.freeze([]), nativeCommands: parseNativeCommands() });
 const action = () => z.union(["inherit", "allow", "ask", "deny"]).default("inherit");

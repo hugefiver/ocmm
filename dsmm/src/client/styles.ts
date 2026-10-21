@@ -83,5 +83,16 @@ export const PROFILE_STYLES = `
 .dsmm-children .dsmm-child-meta dt{font-weight:500;overflow-wrap:anywhere}
 .dsmm-children .dsmm-child-meta dd{margin:0;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
 .dsmm-children textarea.dsmm-child-message{font-family:var(--dsw-font-family);white-space:pre-wrap;overflow-wrap:anywhere}
+.dsmm-profiles .dsmm-command-entry{min-width:0;display:flex;flex-direction:column;gap:6px}
+.dsmm-profiles .dsmm-command-entry .dsmm-actions{display:flex;align-items:center;gap:8px}
+.dsmm-profiles .dsmm-command-entry .dsmm-input{flex:1 1 auto;min-width:0}
+.dsmm-profiles .dsmm-command-summary{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.dsmm-profiles .dsmm-command-summary code{font-family:var(--ds-font-family-code);font-size:13px;color:var(--dsw-alias-label-primary)}
+.dsmm-profiles .dsmm-legacy-badge{display:inline-flex;align-items:center;padding:2px 6px;font-size:11px;font-weight:600;line-height:16px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);text-transform:uppercase;letter-spacing:0.5px}
+.dsmm-profiles .dsmm-legacy-details{padding:4px 0}
+.dsmm-profiles .dsmm-legacy-details summary{font-size:12px;color:var(--dsw-alias-label-secondary);min-height:24px;line-height:24px}
+.dsmm-profiles .dsmm-kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:4px 0 0;font-size:12px}
+.dsmm-profiles .dsmm-kv dt{font-weight:500;color:var(--dsw-alias-label-secondary)}
+.dsmm-profiles .dsmm-kv dd{margin:0;color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code)}
 @media(prefers-reduced-motion:reduce){.dsmm-profiles *{transition:none!important;animation:none!important}}
 `;

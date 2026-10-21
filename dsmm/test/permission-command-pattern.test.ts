@@ -99,7 +99,8 @@ test("command patterns: both shell dialects match zero or many static tail argum
     }
   }
   const entry = patternEntry({ match: { tool: "pwsh", workingDirectory: `${workspace}/child/..`, commandPattern: "C:\\Tools\\go.exe test" } });
-  assert.equal(parseHostNativeCommands(policy(entry)).entries[0].match.workingDirectory, workspace);
+  const parsedEntry = parseHostNativeCommands(policy(entry)).entries[0];
+  assert.equal(typeof parsedEntry === "string" ? undefined : parsedEntry.match.workingDirectory, workspace);
   assert.equal(matchedId(nativeCommandMatch(policy(entry), "pwsh", identity("pwsh"), { command: "C:\\Tools\\go.exe test" }, workspace)), entry.id);
   assert.equal(nativeCommandMatch(policy(entry), "pwsh", identity("pwsh"), { command: "go.exe test" }, workspace), undefined);
   assert.equal(nativeCommandMatch(policy(entry), "pwsh", identity("pwsh"), { command: "C:\\tools\\go.exe test" }, workspace), undefined);

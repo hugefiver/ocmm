@@ -58,15 +58,16 @@ export function PermissionRuleEntries({ value, inherited, controller, disabled, 
   };
   const remove = (index: number) => change(entries.filter((_, position) => position !== index));
   const held = disabled || locked;
+  const isGlobal = controller.layer === "global";
+  const unsetLabel = isGlobal ? t("useDefaults") : t("restoreInheritance");
   return <details className="dsmm-deployment-group" data-field={name} open={expanded} onToggle={event => onExpandedChange?.(event.currentTarget.open)}><summary>{t("configRules")} <code>{name}</code></summary><div className="dsmm-structured">
     <p className="dsmm-hint">{t("configRulesHint")}</p>
-    <p className="dsmm-hint">{t(value === undefined ? "inheritedRules" : "explicitRules")}</p>
     {!valid && <p className="dsmm-issue" role="alert">{t("invalidRule")}</p>}
     {entries.length === 0 && <p>{t("configRulesEmpty")}</p>}
     {entries.map((rule, index) => <Row key={index} rule={rule} index={index} disabled={held} t={t}
       change={next => change(entries.map((row, position) => position === index ? next : row))} remove={() => remove(index)} />)}
     <div className="dsmm-actions"><Button type="button" variant="outline" disabled={held || entries.length >= 1024} onClick={() => change([...entries, newRule()])}>{t("addRule")}</Button>
-      <Button type="button" variant="outline" data-dsmm-unset={name} disabled={disabled || value === undefined && raw === undefined} onClick={() => { controller.clearRaw(name); onChange(undefined); }}>{t("unset")}</Button></div>
+      <Button type="button" variant="outline" data-dsmm-unset={name} disabled={disabled || value === undefined && raw === undefined} onClick={() => { controller.clearRaw(name); onChange(undefined); }}>{unsetLabel}</Button></div>
     <details><summary id={`${id}-advanced-label`}>{t("advancedRules")}</summary><div className="dsmm-field">
       <textarea id={`${id}-advanced`} rows={6} maxLength={32768} value={text} disabled={disabled} aria-labelledby={`${id}-advanced-label`} aria-invalid={locked} aria-describedby={`${id}-error`} onChange={event => {
         const next = event.currentTarget.value; let parsed: unknown, ok = false;

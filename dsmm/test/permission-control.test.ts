@@ -24,17 +24,17 @@ test("nativeCommands default off, strict full entries, sparse transport and whol
 test("wire cwd validation preserves Host path data while Host validation and matching canonicalize locally", () => {
   const withCwd = (workingDirectory: string) => ({ enabled: true, entries: [{ ...entry, match: { ...entry.match, workingDirectory } }] });
   for (const cwd of ["/owned/workspace", "C:/owned/workspace", "C:\\owned\\workspace", "\\\\server\\share\\workspace"]) {
-    assert.equal(parseNativeCommands(withCwd(cwd)).entries[0].match.workingDirectory, cwd);
-    assert.equal(DSMM_CONFIG_SCHEMA({ permissionControl: { nativeCommands: withCwd(cwd) } }).permissionControl!.nativeCommands!.entries![0].match.workingDirectory, cwd);
+    assert.deepEqual(parseNativeCommands(withCwd(cwd)).entries, withCwd(cwd).entries);
+    assert.deepEqual(DSMM_CONFIG_SCHEMA({ permissionControl: { nativeCommands: withCwd(cwd) } }).permissionControl!.nativeCommands!.entries, withCwd(cwd).entries);
   }
   for (const cwd of ["relative", "C:relative", "\\workspace", "\\\\server", "", " \t", "C:/bad\0cwd"]) {
     assert.throws(() => parseNativeCommands(withCwd(cwd)), { code: "validation" });
   }
   const cwd = resolve("owned", ".."), nonCanonical = `${cwd}/child/..`;
-  assert.equal(parseHostNativeCommands(withCwd(nonCanonical)).entries[0].match.workingDirectory, normalize(nonCanonical));
+  assert.deepEqual(parseHostNativeCommands(withCwd(nonCanonical)).entries, withCwd(normalize(nonCanonical)).entries);
   const canonicalMatch = nativeCommandMatch(parseNativeCommands(withCwd(nonCanonical)), "pwsh", identity, { command: "go test -count=1 .", workdir: cwd }, cwd);
   assert.ok(typeof canonicalMatch === "object" && canonicalMatch !== null); assert.equal(canonicalMatch.id, entry.id);
-  assert.equal(parseHostNativeCommands(withCwd(parse(cwd).root)).entries[0].match.workingDirectory, parse(cwd).root);
+  assert.deepEqual(parseHostNativeCommands(withCwd(parse(cwd).root)).entries, withCwd(parse(cwd).root).entries);
   const foreignCwd = isAbsolute("C:/owned/workspace") ? "/owned/workspace" : "C:/owned/workspace";
   assert.doesNotThrow(() => parseNativeCommands(withCwd(foreignCwd)));
   assert.throws(() => parseHostNativeCommands(withCwd(foreignCwd)), { code: "validation" });

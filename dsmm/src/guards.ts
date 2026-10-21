@@ -14,6 +14,7 @@ import { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import { nativeStandingFullAccess } from "./permission-native-access.js";
 import { DsmmProfileError } from "./profiles.js";
+import { simpleShellCommand, simpleShellDialect } from "./permission-native-command.js";
 
 export const DSMM_GUARD_PREFIX = "[dsmm safety]";
 
@@ -23,23 +24,12 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
-function stringField(value: unknown, keys: readonly string[]): string | undefined {
-  const record = asRecord(value);
-  if (record === undefined) return undefined;
-
-  for (const key of keys) {
-    if (typeof record[key] === "string") return record[key];
-  }
-
-  return undefined;
-}
-
 function toolName(exec: DshToolExecution): string {
   return exec.name.toLowerCase();
 }
 
 function commandText(exec: DshToolExecution): string | undefined {
-  return stringField(exec.arguments, ["command", "cmd", "script"]);
+  return simpleShellCommand(exec.arguments);
 }
 
 function allText(content: readonly DshContentBlock[]): string | undefined {
@@ -104,10 +94,7 @@ export function isSafetyScopeActive(exec: DshToolExecution, settings: DsmmSettin
 }
 
 function shellDialect(exec: DshToolExecution): ShellDialect | undefined {
-  const name = toolName(exec);
-  if (name === "bash" || name === "sh" || name === "zsh") return "posix";
-  if (name === "pwsh" || name === "powershell") return "powershell";
-  return undefined;
+  return simpleShellDialect(exec.name);
 }
 
 function shellSafetyDecision(exec: DshToolExecution): DshPreToolDecision | undefined {
@@ -145,7 +132,7 @@ function shellDialectViolationDecision(violation: ShellDialectViolation): DshPre
   };
 }
 
-function gitWriteDecision(exec: DshToolExecution, settings: DsmmSettings): DshPreToolDecision | undefined {
+function gitWriteDecision(exec: DshToolExecution, settings: DsmmSettings, simple = false): DshPreToolDecision | undefined {
   if (settings.guards.gitWriteGuard === "off") return undefined;
 
   const command = commandText(exec);
@@ -160,6 +147,7 @@ function gitWriteDecision(exec: DshToolExecution, settings: DsmmSettings): DshPr
     };
   }
 
+  if (simple) return undefined;
   return {
     kind: "ask",
     reason: `${DSMM_GUARD_PREFIX} git write command requires explicit user approval before running: git ${operation}`
@@ -219,8 +207,9 @@ function todoDisciplineDecision(exec: DshToolExecution, settings: DsmmSettings):
   };
 }
 
-export function decidePreToolExecution(exec: DshToolExecution, settings: DsmmSettings, controller: DeepworkModeController, nativeFullAccess = false): DshPreToolDecision | undefined {
+export function decidePreToolExecution(exec: DshToolExecution, settings: DsmmSettings, controller: DeepworkModeController, nativeFullAccess = false, simple = false): DshPreToolDecision | undefined {
   if (!isSafetyScopeActive(exec, settings, controller)) return undefined;
+  if (simple) return undefined;
   if (nativeFullAccess) return settings.guards.gitWriteGuard === "deny" ? gitWriteDecision(exec, settings) : undefined;
 
   if (settings.guards.shellCommandSafety) {
@@ -228,7 +217,7 @@ export function decidePreToolExecution(exec: DshToolExecution, settings: DsmmSet
     if (shell !== undefined) return shell;
   }
 
-  const git = gitWriteDecision(exec, settings);
+  const git = gitWriteDecision(exec, settings, simple);
   if (git !== undefined) return git;
   if (!settings.modules.deepwork.enabled) return undefined;
 
@@ -285,7 +274,8 @@ export function registerSafetyGuards(ctx: DshContext, controller: DeepworkModeCo
     let settings: DsmmSettings;
     try { settings = getSettings(exec.agent); }
     catch (error) { if (full && error instanceof DsmmProfileError && !["disposed", "not-owned", "cancelled"].includes(error.code)) return next(); throw error; }
-    const decision = decidePreToolExecution(exec, settings, controller, full);
+    const simple = Context.is(ctx) && await ctx.get("dsmmPermissionController")?.simpleCommandAllowed(execution) === true;
+    const decision = decidePreToolExecution(exec, settings, controller, full, simple);
     if (!full && settings.modules.deepwork.enabled && settings.guards.toolOutputTruncation.enabled && isSafetyScopeActive(exec, settings, controller)) truncationLimits.set(exec, settings.guards.toolOutputTruncation.maxInlineBytes);
     if (decision === undefined) return next();
     if (decision.kind === "deny") return decision;

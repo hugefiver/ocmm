@@ -8,10 +8,61 @@ import { parseProfileDocument } from "../src/profiles.ts";
 import { readOnlySettings } from "../src/status.ts";
 import { importPermissionRules } from "../src/permission-rules.ts";
 import { nativeConfigRun } from "./native-config-fixture.ts";
+import { parseNativeCommands } from "../src/permission-settings.ts";
+import { parseHostNativeCommands } from "../src/permission-native-command.ts";
+import { parsePermissionRulesResult } from "../src/permission-remote.ts";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { DshAgent } from "../src/dsh-types.ts";
 
 const admissionAgent = (agent: Agent): Omit<DshAgent, "ctx"> => agent;
+
+const legacyCommand = { id: "legacy", mode: "ask" as const, sandboxMode: "workspace-write" as const,
+  match: { tool: "pwsh" as const, workingDirectory: process.cwd(), commandPattern: "go test" } };
+
+test("simple command config preserves mixed arrays through strict schemas, deployment and permission RPC parsing", () => {
+  const nativeCommands = { enabled: true, entries: ["git", "git remote add", "go build|test *", legacyCommand] };
+  const global = { permissionControl: { nativeCommands } };
+  assert.deepEqual(DSMM_CONFIG_SCHEMA(global), global);
+  const native = DSMM_NATIVE_CONFIG_SCHEMA(global).permissionControl as unknown as { get(): unknown };
+  assert.deepEqual(native.get(), global.permissionControl);
+  assert.deepEqual(parseHostNativeCommands(nativeCommands), nativeCommands);
+  const policy = resolvePermissionControl(global.permissionControl);
+  const snapshot = { revision: "mixed", policy };
+  const runtime = { savedRevision: "mixed", runtimeRevision: "mixed", state: "synced", mounted: true, restartRequired: false };
+  assert.deepEqual(parsePermissionRulesResult(JSON.parse(JSON.stringify({ snapshot, runtime }))).snapshot, snapshot);
+  assert.deepEqual(resolveDeployment(global, {}).permissionControl.nativeCommands, nativeCommands);
+  assert.deepEqual(resolveDeployment(global, { permissionControl: { nativeCommands: { entries: [] } } }).permissionControl.nativeCommands.entries, []);
+  assert.deepEqual(resolveDeployment(global, { permissionControl: { nativeCommands: { entries: ["node"] } } }).permissionControl.nativeCommands.entries, ["node"]);
+  for (const entry of ["", "git * extra", "git; node", null, { ...legacyCommand, extra: true }, { id: "partial" }, { ...legacyCommand, match: { ...legacyCommand.match, extra: true } }]) {
+    const invalid = { permissionControl: { nativeCommands: { enabled: false, entries: ["git", entry] } } };
+    assert.throws(() => parseNativeCommands(invalid.permissionControl.nativeCommands));
+    assert.throws(() => resolvePermissionControl(invalid.permissionControl as never));
+    assert.throws(() => DSMM_CONFIG_SCHEMA(invalid as never));
+    assert.throws(() => DSMM_NATIVE_CONFIG_SCHEMA(invalid as never));
+  }
+});
+
+test("simple command Global and native SettingsForms persist mixed arrays with CAS and inherit on unset", async () => {
+  const run = nativeConfigRun({ managedRuntime: true });
+  try {
+    const profile = await run.createProfile("simple-commands", {});
+    const entries = ["git", legacyCommand];
+    const saved = await profile.deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["permissionControl", "nativeCommands"], value: { enabled: true, entries } }] }, () => {});
+    assert.deepEqual((await profile.deployment.readGlobal()).config.permissionControl?.nativeCommands?.entries, entries);
+    const descriptor = profile.descriptor();
+    await profile.settings.mutate(descriptor.ns, [{ op: "set", path: ["permissionControl", "nativeCommands", "entries"], value: ["python", legacyCommand] }], descriptor.revision);
+    assert.deepEqual(profile.persistedConfig().permissionControl?.nativeCommands?.entries, ["python", legacyCommand]);
+    assert.deepEqual((await profile.deployment.readDesired()).settings.permissionControl.nativeCommands.entries, ["python", legacyCommand]);
+    await assert.rejects(profile.settings.mutate(descriptor.ns, [{ op: "set", path: ["permissionControl", "nativeCommands", "entries"], value: [] }], descriptor.revision));
+    const fresh = profile.descriptor();
+    await assert.rejects(profile.settings.mutate(fresh.ns, [{ op: "set", path: ["permissionControl", "nativeCommands", "entries"], value: ["git; other"] }], fresh.revision));
+    assert.deepEqual(profile.persistedConfig().permissionControl?.nativeCommands?.entries, ["python", legacyCommand]);
+    await profile.settings.mutate(fresh.ns, [{ op: "unset", path: ["permissionControl", "nativeCommands", "entries"] }], fresh.revision);
+    assert.deepEqual((await profile.deployment.readDesired()).settings.permissionControl.nativeCommands.entries, entries);
+    await assert.rejects(profile.deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["permissionControl", "nativeCommands", "entries"], value: [] }] }, () => {}), { code: "conflict" });
+    assert.equal((await profile.deployment.readGlobal()).revision, saved.revision);
+  } finally { await run.dispose(); }
+});
 
 test("permission-control uses the shared Core default and sparse deployment schema, not named overlays", () => {
   assert.deepEqual(resolveConfig().permissionControl, DEFAULT_PERMISSION_CONTROL);

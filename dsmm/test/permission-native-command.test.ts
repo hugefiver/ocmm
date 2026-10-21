@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { literalCommand, nativeCommandMatch } from "../src/permission-native-command.ts";
+import { literalCommand, nativeCommandMatch, simpleCommandMatch, simpleShellCommand, simpleShellDialect } from "../src/permission-native-command.ts";
+import { parseSimpleCommandPattern } from "../src/permission-settings.ts";
 import type { NativeCommandEntry, NativeCommandsSettings } from "../src/permission-settings.ts";
 import type { PermissionShellIdentity } from "../src/permission-shell.ts";
 
@@ -72,9 +73,39 @@ test("native patterns require exact executable, subcommand, tool and cwd while a
   assert.equal(nativeCommandMatch(policy, "bash", posix, { script: 'go test Case "two words"' }, workspace), undefined);
   assert.equal(matchedId(match('go test Case "two words"', join(workspace, "nested", ".."))), "pattern");
   assert.equal(nativeCommandMatch({ ...policy, enabled: false }, "pwsh", powershell, { command: 'go test Case "two words"' }, workspace), undefined);
-  const ask: NativeCommandEntry = { ...policy.entries[0], id: "ask", mode: "ask" };
+  const original = policy.entries[0];
+  assert.notEqual(typeof original, "string");
+  if (typeof original === "string") return;
+  const ask: NativeCommandEntry = { ...original, id: "ask", mode: "ask" };
   assert.equal(matchedId(nativeCommandMatch({ ...policy, entries: [...policy.entries, ask] }, "pwsh", powershell, { command: 'go test Case "two words"' }, workspace)), "ask");
   assert.equal(nativeCommandMatch({ ...policy, entries: [...policy.entries, { ...ask, sandboxMode: "workspace-write" }] }, "pwsh", powershell, { command: 'go test Case "two words"' }, workspace), "ambiguous");
+});
+
+test("simple prefixes match complete literal tokens across dialects without legacy interpreter exclusions", () => {
+  const match = (entry: string, command: string, dialect: "posix" | "powershell" = "powershell") => simpleCommandMatch({ enabled: true, entries: [entry] }, command, dialect);
+  for (const dialect of ["posix", "powershell"] as const) {
+    for (const [entry, command] of [["git", "git"], ["git", "git status -sb"], ["go build|test *", "go test -exec runner"], ["git remote add", "git remote add origin url"],
+      ["node", "node -e 'console.log(1)'"], ["python", 'python -c \'print("ok")\''], ["env", "env git status"], ["bash", "bash -c 'git status'"], ["pwsh", "pwsh -Command 'git status'"]]) {
+      assert.equal(match(entry, command, dialect), true, command);
+    }
+    for (const command of ["git status-extra", "git -C repo status", "git status; other", "git status | other", "git status > out", "git status $(other)", 'git status "$HOME"', "git status *.ts", "git status\nother", "env git status"]) assert.equal(match("git status", command, dialect), false, command);
+    for (const command of ["node a.js; other", "node $(other)", "python -c $code", "if true"]) assert.equal(match(command.split(" ")[0], command, dialect), false, command);
+    assert.equal(match("git", "bash -c 'git status'", dialect), false);
+    assert.equal(literalCommand("node -e 'console.log(1)'", dialect), undefined);
+  }
+  assert.equal(match("go", "go.exe test"), true);
+  assert.equal(match("go.exe", "go test"), true);
+  assert.equal(match("go test", "go.exe Test"), false);
+  assert.equal(match("go", "./go.exe test"), false);
+  assert.equal(match("go", "go.exe test", "posix"), false);
+  assert.equal(literalCommand('python -c \'print("ok")\'', "powershell"), undefined);
+  assert.deepEqual(literalCommand('python -c \'print("ok")\'', "powershell", "simple"), ["python", "-c", 'print("ok")']);
+  for (const input of ["", "*", "git|node", "git status|", "git status * x", "git **", "git status extra|other", "git status;other", "git\nstatus", "git $HOME"]) assert.throws(() => parseSimpleCommandPattern(input));
+  assert.equal(simpleShellCommand({ command: 1, cmd: "git status", script: "ignored" }), "git status");
+  assert.equal(simpleShellCommand({ command: "", cmd: "git status" }), "");
+  for (const name of ["bash", "sh", "ZSH"]) assert.equal(simpleShellDialect(name), "posix");
+  for (const name of ["pwsh", "PowerShell"]) assert.equal(simpleShellDialect(name), "powershell");
+  assert.equal(simpleShellDialect("terminal"), undefined);
 });
 
 test("real PowerShell native Node argv agrees with accepted literals and exposes embedded quotes", t => {

@@ -257,7 +257,7 @@ test("Host command cwd validation fences invalid source before publication and r
       match: { tool: "pwsh", commandPattern: "go test", workingDirectory } }] });
     const nonCanonical = `${run.root}/child/..`, invalidCwd = isAbsolute("C:/owned/workspace") ? "/owned/workspace" : "C:/owned/workspace";
     await owner.deployment.saveGlobal({ expectedRevision: "absent", edits: [{ op: "set", path: ["permissionControl", "nativeCommands"], value: commands(nonCanonical) }] }, () => {});
-    assert.equal(owner.backend.runtime.getPolicy().policy.nativeCommands.entries[0].match.workingDirectory, normalize(nonCanonical));
+    assert.deepEqual(owner.backend.runtime.getPolicy().policy.nativeCommands.entries, commands(normalize(nonCanonical)).entries);
     const saved = await owner.deployment.readGlobal(), descriptor = profile.descriptor();
     await assert.rejects(owner.deployment.saveGlobal({ expectedRevision: saved.revision, edits: [{ op: "set", path: ["permissionControl", "nativeCommands"], value: commands(invalidCwd) }] }, () => {}));
     assert.equal((await owner.deployment.readGlobal()).revision, saved.revision);
@@ -269,7 +269,7 @@ test("Host command cwd validation fences invalid source before publication and r
     assert.equal(owner.backend.runtime.status().state, "unsynced"); assert.throws(() => owner.backend.runtime.getPolicy());
     writeFileSync(join(run.home, "plugins", "dsmm", "config.json"), JSON.stringify({ permissionControl: { nativeCommands: commands(nonCanonical) } }));
     await owner.backend.runtime.refresh(); assert.equal(owner.backend.runtime.status().state, "synced");
-    assert.equal(owner.backend.runtime.getPolicy().policy.nativeCommands.entries[0].match.workingDirectory, normalize(nonCanonical));
+    assert.deepEqual(owner.backend.runtime.getPolicy().policy.nativeCommands.entries, commands(normalize(nonCanonical)).entries);
     assert.equal(signal.aborted, true);
   } finally { await run.dispose(); }
 });

@@ -223,7 +223,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     await openGroup(global, "modelParameters");
     const globalField = global.getByRole("combobox", { name: /^(?:Model parameter passthrough|模型参数透传)$/u });
     await globalField.waitFor(); assert.equal(await globalField.inputValue(), "inherit");
-    assert.equal(await globalField.locator('option[value="inherit"]').textContent(), `${deploymentEn.unset} · ${deploymentEn.on}`);
+    assert.equal(await globalField.locator('option[value="inherit"]').textContent(), `${deploymentEn.useDefaults} · ${deploymentEn.on}`);
     await globalField.selectOption("false");
     // Explicit dirty state, with no save in flight.
     assert.equal(await saveBar.getByRole("status").textContent(), deploymentEn.dirty);
@@ -243,7 +243,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     await openGroup(native, "modelParameters");
     const nativeField = native.getByRole("combobox", { name: "Model parameter passthrough", exact: true });
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLSelectElement>('[data-dsmm-layer="profile"] select')].some(select => !select.disabled));
-    assert.equal(await nativeField.locator('option[value="inherit"]').textContent(), `${deploymentEn.unset} · ${deploymentEn.off}`);
+    assert.equal(await nativeField.locator('option[value="inherit"]').textContent(), `${deploymentEn.restoreInheritance} · ${deploymentEn.off}`);
     await nativeField.selectOption("true"); await saveBar.getByRole("button", { name: "Save", exact: true }).click();
     await saved();
     assert.equal(profile.persistedConfig().modelParameters?.passthrough, true);
@@ -305,16 +305,13 @@ test("Core deployment controls save sparse desired values through native Gateway
     await commands.waitFor();
     await commands.locator(":scope > details > summary").click();
     await commands.getByRole("button", { name: permissionEn.addEntry, exact: true }).click();
-    const commandEntry = commands.locator("fieldset").first();
-    await commandEntry.getByRole("textbox", { name: permissionEn.entryId, exact: true }).fill("browser-pattern");
-    await commandEntry.getByRole("combobox", { name: permissionEn.tool, exact: true }).selectOption("pwsh");
-    await commandEntry.getByRole("textbox", { name: permissionEn.cwd, exact: true }).fill(profile.dir);
+    const commandEntry = commands.locator(".dsmm-command-entry").first();
     const pattern = commandEntry.getByRole("textbox", { name: permissionEn.pattern, exact: true });
     const saveCommand = saveBar.getByRole("button", { name: "Save", exact: true });
-    await pattern.fill("go build test");
+    await pattern.fill("go build||test");
     assert.equal(await pattern.getAttribute("aria-invalid"), "true");
     assert.equal(await commandEntry.getByText(permissionEn.invalidPattern, { exact: true }).isVisible(), true);
-    assert.equal(await pattern.inputValue(), "go build test");
+    assert.equal(await pattern.inputValue(), "go build||test");
     assert.equal(await saveBar.getByRole("status").textContent(), deploymentEn.dirty);
     assert.equal(await saveCommand.isDisabled(), true);
     await capture("state-command-pattern-invalid");
@@ -324,8 +321,7 @@ test("Core deployment controls save sparse desired values through native Gateway
     assert.equal(await saveCommand.isDisabled(), false);
     await saveCommand.click();
     await saved();
-    const commandRule = { id: "browser-pattern", mode: "ask", sandboxMode: "workspace-write",
-      match: { tool: "pwsh", workingDirectory: profile.dir, commandPattern: "go build|test *" } };
+    const commandRule = "go build|test *";
     assert.deepEqual(profile.persistedConfig().permissionControl?.nativeCommands?.entries, [commandRule]);
     assert.deepEqual((await profile.deployment.readDesired()).settings.permissionControl.nativeCommands.entries, [commandRule]);
     assert.equal(await pattern.inputValue(), "go build|test *");

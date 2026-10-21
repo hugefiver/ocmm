@@ -43,6 +43,7 @@ interface NativePermissionAuthority {
 }
 export interface NativePermissionRulesOptions {
   readonly runtime: PermissionRulesRuntimeSync;
+  simpleCommandAllowed?(execution: Readonly<ToolExecution>): boolean;
   captureIntegrity?(execution: Readonly<ToolExecution>): PermissionExecutionIntegrity;
   /** Exact registration identity, never trust a matching tool name alone. */
   identify(definition: ToolDefinition, execution: Readonly<ToolExecution>): NativePermissionToolIdentity | undefined;
@@ -51,7 +52,7 @@ export interface NativePermissionRulesOptions {
   /** Pure restriction fallback for standalone consumers without an authority capture. */
   assertCurrent(execution: Readonly<ToolExecution>): void;
   /** Compose this exact registration's native request; never creates an independent approval UI. */
-  managedShellDecision?(execution: Readonly<ToolExecution>, action: Exclude<PermissionRuleAction, "deny">, downstream: () => Promise<PreToolDecision>): Promise<PreToolDecision>;
+  managedShellDecision?(execution: Readonly<ToolExecution>, action: Exclude<PermissionRuleAction, "deny">, downstream: () => Promise<PreToolDecision>, snapshot: PermissionRuleSnapshot | undefined): Promise<PreToolDecision>;
 }
 interface NativeBinding {
   readonly definition: ToolDefinition;
@@ -202,6 +203,7 @@ export function registerNativePermissionRules(ctx: Context, options: NativePermi
     return intersectPermissionActions([access, ...rules]);
   };
   const unhook = ctx.on("tools/pre-execute", async (exec, next): Promise<PreToolDecision> => {
+    if (options.simpleCommandAllowed?.(exec)) return next();
     const definition = tools.get(exec.name, exec.agent);
     if (definition === undefined) return next();
     const identity = options.identify(definition, exec);
@@ -224,7 +226,7 @@ export function registerNativePermissionRules(ctx: Context, options: NativePermi
     }
     check(exec, binding);
     if (action === "deny") return { kind: "deny", reason: "DSMM native permission rule denied this tool call." };
-    if (identity.kind === "shell" && options.managedShellDecision !== undefined) return options.managedShellDecision(exec, action, next);
+    if (identity.kind === "shell" && options.managedShellDecision !== undefined) return options.managedShellDecision(exec, action, next, snapshot);
     const downstream = await next();
     if (exec.signal.aborted) return { kind: "cancel" };
     checkIntegrity(exec, binding);
