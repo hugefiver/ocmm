@@ -5,7 +5,6 @@
 !.agents/plugins/marketplace.json
 node_modules/
 dist/
-dsmm/lib/
 target/
 *.log
 .DS_Store
