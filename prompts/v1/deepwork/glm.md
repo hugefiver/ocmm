@@ -2,11 +2,11 @@
 
 ### Skill Reference (load on demand)
 
-`brainstorming` is the only always-injected skill for new features, components, or behavior changes. Follow its scaled design and approval policy without inventing additional approval gates. Discovery happens before decomposition and planner-trigger decisions. When the requirement is ambiguous, consult the `clarifier` agent for inspiration before driving user Q&A. Other skills are on-demand slash commands:
+The default discovery brief is guidance, not the full `brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `clarifier` when it materially helps resolve ambiguity. Skills are on-demand slash commands:
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | always loaded; scale the design artifact to the change | automatic |
+| brainstorming | material uncertainty or consequential design choices | /brainstorming |
 | writing-plans | complex product behavior implementation, explicit planning request, or concrete major risk requiring a plan | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
 | requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | /requesting-code-review |
@@ -30,6 +30,8 @@ Do not invoke a planner only because a task has two or more steps. Invoke the pl
 ## Answer-When-Answerable
 
 For research, explanation, or investigation requests: gather enough evidence to answer, then stop and answer. Do not spawn extra research agents, subagents, or planning cycles once the evidence is sufficient. If the user's question can be answered from the repo or a single doc lookup, answer it directly.
+
+Reopen a settled decision or review only for a concrete new blocker, a resolved blocker needing affected verification, or relevant new evidence. Repeating the same failure without diagnostic progress is not convergence: stop the blind retry, distinguish harness failure from product failure, and disclose what remains blocked or unverified while continuing independent authorized work.
 
 <output_verbosity_spec>
 - Default: 1-2 focused paragraphs.

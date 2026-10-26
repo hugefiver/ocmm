@@ -67,7 +67,7 @@ function delegationContract(agentMap: Record<string, unknown>, name: string): st
 const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_POLICY_TAG = "ocmm-review-session-efficiency-policy"
 const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
-const KIMI_K27_MARKER = "# KIMI K2.7/K2.8 CODE CALIBRATION"
+const KIMI_MARKER = "<kimi-calibration>"
 const SWE_2_MARKER = "# SWE-2 EXECUTION CALIBRATION"
 
 type ConfigTarget = {
@@ -1159,7 +1159,7 @@ test("v1 non-GPT agents and planners retain their existing layers without GPT ca
   loadAllPrompts(join(process.cwd(), "prompts"), "v1")
   for (const [model, layer] of [
     ["zhipu/glm-5.2", "glm"], ["google/gemini-3.1-pro", "gemini"],
-    ["anthropic/claude-opus-5", "default"], ["kimi-for-coding/kimi-for-coding", "kimi-k27"],
+    ["anthropic/claude-opus-5", "default"], ["kimi-for-coding/kimi-for-coding", "kimi"],
     ["devin/swe-2-high", "swe-2"], ["unknown/model", "default"],
   ] as const) {
     const configured = {
@@ -1171,7 +1171,7 @@ test("v1 non-GPT agents and planners retain their existing layers without GPT ca
     for (const name of ["reviewer", "planner"]) {
       const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
       assert.equal(countText(prompt, gptCalibration()), 0, `${model}/${name}`)
-      if (name === "reviewer" || layer === "kimi-k27" || layer === "swe-2") {
+      if (name === "reviewer" || layer === "kimi" || layer === "swe-2") {
         assert.equal(countText(prompt, getDeepworkPrompt(layer).trim()), 1, `${model}/${name}: existing layer`)
       }
     }
@@ -1245,28 +1245,55 @@ test("explicit host prompts bypass GPT assembly while configured promptAppend st
   }
 })
 
-test("config composes Kimi Code calibration after each agent's workflow base", async () => {
-  const configured = {
-    ...defaultConfig(),
-    agents: {
-      reviewer: { model: "kimi-for-coding/kimi-for-coding" },
-      planner: { model: "moonshot/KIMI-K2-8-PREVIEW" },
-    },
+test("prompt-only calibrations reach roles and categories without changing selected models or permissions", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-model-calibration-"))
+  try {
+    for (const area of ["agents", "category", "deepwork"]) {
+      mkdirSync(join(root, "v1", area), { recursive: true })
+    }
+    for (const role of ["planner", "reviewer"]) {
+      writeFileSync(join(root, "v1", "agents", `${role}.md`), `[role:${role}]`)
+    }
+    writeFileSync(join(root, "v1", "category", "coding.md"), "[role:coding]")
+    for (const variant of ["planner", "default", "gemini", "kimi", "gemini-4"]) {
+      writeFileSync(join(root, "v1", "deepwork", `${variant}.md`), `[layer:${variant}]`)
+    }
+    loadAllPrompts(root, "v1")
+    for (const [model, layer] of [
+      ["moonshot/kimi-k2.6", "kimi"], ["moonshot/kimi-k3.1", "kimi"],
+      ["kimi-for-coding/k2-p8", "kimi"], ["google/gemini-4-argon", "gemini-4"],
+      ["provider/us.google.gemini-4.1-pro", "gemini-4"],
+      ["google/gemini-3.1-pro", ""], ["google/gemini-5-pro", ""], ["google/gemini-40-pro", ""],
+      ["provider-kimi/unrelated", ""],
+    ]) {
+      const configured = {
+        ...defaultConfig(),
+        agents: { reviewer: { model }, planner: { model } },
+        categories: { coding: { model } },
+      }
+      const target: ConfigTarget = { agent: {} }
+      const handler = createConfigHandler({ getConfig: () => configured })
+      await handler(target, undefined)
+      await handler(target, undefined)
+      for (const name of ["reviewer", "planner", "coding"]) {
+        const entry = target.agent[name] as Record<string, unknown>
+        assert.equal(entry.model, model, `${model}/${name}: model preserved`)
+        const prompt = String(entry.prompt)
+        assert.equal(countText(prompt, `[role:${name}]`), 1, `${model}/${name}: role preserved`)
+        assert.equal(countText(prompt, "<ocmm-workflow-boundaries>"), 1, `${model}/${name}: shared boundary once`)
+        for (const candidate of ["kimi", "gemini-4"]) {
+          assert.equal(countText(prompt, `[layer:${candidate}]`), candidate === layer ? 1 : 0, `${model}/${name}/${candidate}`)
+        }
+        if (layer) assert.ok(prompt.indexOf(`[role:${name}]`) < prompt.indexOf(`[layer:${layer}]`))
+      }
+      assertExactTaskRules(agentPermission(target.agent, "coding").task, UTILITY_TASK_RULES, model!)
+      assertExactTaskRules(agentPermission(target.agent, "planner").task, PLANNER_TASK_RULES, model!)
+      assert.equal(countText(String((target.agent.planner as Record<string, unknown>).prompt), "[layer:planner]"), 1)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    loadAllPrompts(join(process.cwd(), "prompts"), "v1")
   }
-  const target: ConfigTarget = { agent: {} }
-  await createConfigHandler({ getConfig: () => configured })(target, undefined)
-
-  const reviewer = String((target.agent.reviewer as Record<string, unknown>).prompt)
-  assert.match(reviewer, /Agent Role: implementation reviewer/)
-  assert.match(reviewer, /Deepwork Workflow Prompt - default/)
-  assert.equal(countText(reviewer, KIMI_K27_MARKER), 1)
-  assert.equal(countText(reviewer, SWE_2_MARKER), 0)
-
-  const planner = String((target.agent.planner as Record<string, unknown>).prompt)
-  assert.match(planner, /Agent Role: planner/)
-  assert.match(planner, /# Deepwork Planner Injection/)
-  assert.equal(countText(planner, KIMI_K27_MARKER), 1)
-  assert.equal(countText(planner, SWE_2_MARKER), 0)
 })
 
 test("config keeps SWE-2 calibration independent from Kimi and unknown models", async () => {
@@ -1282,12 +1309,12 @@ test("config keeps SWE-2 calibration independent from Kimi and unknown models", 
 
   const swe = String((target.agent.builder as Record<string, unknown>).prompt)
   assert.equal(countText(swe, SWE_2_MARKER), 1)
-  assert.equal(countText(swe, KIMI_K27_MARKER), 0)
+  assert.equal(countText(swe, KIMI_MARKER), 0)
   assert.match(swe, /SWE-2 is not a Kimi reasoning family/)
 
   const adjacent = String((target.agent.clarifier as Record<string, unknown>).prompt)
   assert.equal(countText(adjacent, SWE_2_MARKER), 0)
-  assert.equal(countText(adjacent, KIMI_K27_MARKER), 0)
+  assert.equal(countText(adjacent, KIMI_MARKER), 0)
 })
 
 test("supported workflows compose shell safety once into every builtin agent and category", async () => {
@@ -1305,6 +1332,7 @@ test("supported workflows compose shell safety once into every builtin agent and
       ]) {
         const prompt = String((target.agent[name] as Record<string, unknown>).prompt ?? "")
         assert.equal(countText(prompt, SHELL_SAFETY_MARKER), 1, `${workflow}/${name}`)
+        assert.equal(countText(prompt, "<ocmm-workflow-boundaries>"), 1, `${workflow}/${name}: model-independent boundaries`)
         assert.match(prompt, /do not use `\$home` or any case variant/i, `${workflow}/${name}: PowerShell collision`)
         assert.match(prompt, /explicitly assigned and non-empty/i, `${workflow}/${name}: assigned target`)
         assert.match(prompt, /filesystem root.*user home.*workspace.*unexpected parent/is, `${workflow}/${name}: protected paths`)
@@ -1338,6 +1366,7 @@ test("shell safety preserves existing prompts and remains idempotent across conf
         const prompt = String((target.agent[name] as Record<string, unknown>).prompt ?? "")
         assert.match(prompt, new RegExp(`Custom prompt for ${name}\\.`), `${workflow}/${name}: custom prompt`)
         assert.equal(countText(prompt, SHELL_SAFETY_MARKER), 1, `${workflow}/${name}: shell safety`)
+        assert.equal(countText(prompt, "<ocmm-workflow-boundaries>"), 1, `${workflow}/${name}: shared boundaries`)
       }
     }
   } finally {

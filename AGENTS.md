@@ -305,7 +305,7 @@ opencode run --model <provider>/<model-a> --agent orchestrator "Say hello in exa
 
 Should produce a model response with no errors. The header line shows `> orchestrator · <model-a>`.
 
-**Verify chat.params routing and v1 skill injection with debug logs:**
+**Verify chat.params routing and the v1 brainstorming orientation with debug logs:**
 
 ```powershell
 $env:OCMM_DEBUG='1'
@@ -314,12 +314,12 @@ opencode run --print-logs --log-level DEBUG --model <provider>/<model-a> --agent
 
 Expected (v1 workflow):
 ```
-[ocmm] v1 skills queued: N chars (sessionID=ses_...)
+[ocmm] v1 skill briefs queued: N chars (sessionID=ses_...)
 [ocmm] system.transform: prepended N chars (sessionID=ses_...)
 [ocmm] routed agent=orchestrator model=<provider>/<model-a> variant=max source=user-config
 ```
 
-`OCMM_DEBUG=1` enables all `[ocmm]` info and debug lines — startup diagnostics (`config loaded`, `loaded prompts`, `registered N agents..., N MCPs`) and runtime routing (`v1 skills queued`, `system.transform`, `routed ...`). The `debug: true` config field alone does not enable them; both are needed for full verbosity.
+`OCMM_DEBUG=1` enables all `[ocmm]` info and debug lines — startup diagnostics (`config loaded`, `loaded prompts`, `registered N agents..., N MCPs`) and runtime routing (`v1 skill briefs queued`, `system.transform`, `routed ...`). The `debug: true` config field alone does not enable them; both are needed for full verbosity.
 
 ### 6. Clean up
 
@@ -339,7 +339,7 @@ rm.exe -rf "$env:LOCALAPPDATA\Temp\opencode\ocmm-test"
 |---|---|---|
 | `config` | `registered N agents..., N MCPs` | Plugin loaded, agents/categories, skills, commands, and MCPs registered with your provider's models |
 | `chat.params` | `routed agent=... variant=... source=...` | Variant resolved via 4-tier priority, translated to model params |
-| `chat.message` | `v1 skills queued: N chars` | v1 skill content queued on first message per session |
+| `chat.message` | `v1 skill briefs queued: N chars` | Short brainstorming orientation queued on first message per session |
 | `experimental.chat.system.transform` | `prepended N chars` | Queued content injected into system message |
 | `event` | (no output on success) | Session lifecycle hooks fire without errors |
 
@@ -358,7 +358,7 @@ Interruption-recovery event coverage (same `event` + output-adapter surface):
 - The temp directory is outside the repo so it does not pollute git status.
 - `opencode debug config` reads from both `$testDir\opencode.json` and `$testDir\.opencode\*` — both must exist.
 - If `opencode run` shows no `[ocmm]` lines even with `OCMM_DEBUG=1` set, the plugin failed to load. Check `--print-logs --log-level DEBUG` for import errors.
-- To test the default OpenCode workflow explicitly, add `"workflow": "v1"` to your `ocmm.jsonc`. v1 injects 5 superpowers skills into the system message.
+- To test the default OpenCode workflow explicitly, add `"workflow": "v1"` to your `ocmm.jsonc`. v1 injects only a short brainstorming orientation; full skills load on demand.
 - If you see `max_tokens` errors (`integer above maximum value`), lower the model's `output` limit in `opencode.json` — OpenCode adds internal overhead to the configured limit.
 
 ## Prompt Maintenance

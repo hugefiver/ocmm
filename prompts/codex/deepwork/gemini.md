@@ -4,11 +4,11 @@
 
 ### Skill Reference (load on demand)
 
-`brainstorming` is the only always-injected skill for new features, components, or behavior changes. Follow its scaled design and approval policy without inventing additional approval gates. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `dw-clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed. Other skills are loaded on demand by name:
+The default discovery brief is guidance, not the full `deepwork-brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `dw-clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed. Skills are loaded on demand by name:
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | injected into the agent profile; scale the design artifact to the change | automatic |
+| brainstorming | material uncertainty or consequential design choices | load skill `deepwork-brainstorming` |
 | writing-plans | complex product behavior implementation, explicit planning request, or concrete major risk requiring a plan | load skill `deepwork-writing-plans` |
 | subagent-driven-development | executing a plan with independent tasks | load skill `deepwork-subagent-driven-development` |
 | requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | load skill `deepwork-requesting-code-review` |

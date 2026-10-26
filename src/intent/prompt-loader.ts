@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,claude-opus-5,gemini,glm,codex,planner,kimi-k27,swe-2}.md
+ *     deepwork/{default,gpt,claude-opus-5,gemini,gemini-4,glm,codex,planner,kimi,swe-2}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting,cross-cutting}.md
  *
@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, isKimiK2CodePromptModel, isSwe2Model, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, isGemini4PromptModel, isKimiPromptModel, isSwe2Model, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -27,7 +27,7 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 export type Workflow = "v1" | "codex"
 
 type DeepworkVariant = "default" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner" | ModelCalibrationVariant
-export type ModelCalibrationVariant = "gpt" | "kimi-k27" | "swe-2"
+export type ModelCalibrationVariant = "gpt" | "kimi" | "gemini-4" | "swe-2"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -42,7 +42,7 @@ type CategoryName =
   | "documenting"
   | "cross-cutting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi-k27", "swe-2"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "gemini-4", "swe-2"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -144,10 +144,11 @@ export function pickModelCalibrationVariants(
   modelID: string,
   carryAhead = false,
 ): ModelCalibrationVariant[] {
-  if (carryAhead) return ["gpt", "kimi-k27", "swe-2"]
+  if (carryAhead) return ["gpt", "kimi", "gemini-4", "swe-2"]
   const family = classifyModelFamily({ modelID })
   if (family === "gpt" || family === "codex") return ["gpt"]
-  if (isKimiK2CodePromptModel(modelID)) return ["kimi-k27"]
+  if (isKimiPromptModel(modelID)) return ["kimi"]
+  if (isGemini4PromptModel(modelID)) return ["gemini-4"]
   if (isSwe2Model(modelID)) return ["swe-2"]
   return []
 }
@@ -170,7 +171,7 @@ export function getCategoryModelCalibration(
   const calibrations = categoryModelCalibrations.get(name)
   const family = classifyModelFamily({ modelID })
   const variants = carryAhead
-    ? pickModelCalibrationVariants(modelID, true)
+    ? ["gpt", "kimi-k27", "swe-2", "kimi", "gemini-4"]
     : [family === "codex" ? "gpt" : family]
   return variants.map((variant) => calibrations?.get(variant) ?? "").filter(Boolean).join("\n\n---\n\n")
 }

@@ -7,6 +7,8 @@ import { basename, dirname, extname, isAbsolute, join, relative } from "node:pat
 import { defaultConfig } from "../config/schema.ts"
 import { loadConfig, stripJsoncCommentsAndTrailingCommas } from "../config/load.ts"
 import { createConfigHandler } from "../hooks/config.ts"
+import { createChatMessageHandler, createSessionIntentStore, createSystemTransformHandler } from "../hooks/chat-message.ts"
+import { loadV1SkillBriefs } from "../intent/skill-loader.ts"
 import { isRecord } from "../shared/logger.ts"
 import {
   getAgentPrompt,
@@ -171,7 +173,7 @@ function writeFixtureFile(root: string, file: string, contents: string | Buffer)
 function makePromptFixture(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codex-prompt-fixture-"))
   const inventory = {
-    deepwork: ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi-k27", "swe-2"],
+    deepwork: ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi", "gemini-4", "swe-2"],
     agents: ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"],
     category: ["frontend", "creative", "hard-reasoning", "research", "quick", "coding", "normal-task", "complex", "deep", "documenting", "cross-cutting"],
   }
@@ -184,6 +186,7 @@ function makePromptFixture(): string {
   }
   writeFixtureFile(root, "shared/shell-safety.md", "[fixture:shared:shell-safety]")
   writeFixtureFile(root, "skills/v1/brainstorming/SKILL.md", "---\nname: brainstorming\ndescription: Fixture\n---\n[fixture:brainstorming]\n")
+  writeFixtureFile(root, "skills/v1/brainstorming/brief.md", "[fixture:brief] `brainstorming`")
   return root
 }
 
@@ -587,7 +590,7 @@ test("Codex agent composition shares one synthetic GPT layer across generations,
         }
         if (workflow === "codex") {
           assert.equal(countOccurrences(assembled, adapter), 1, `${sourceName}: unguarded adapter base`)
-          for (const variant of ["kimi-k27", "swe-2"] as const) {
+          for (const variant of ["kimi", "gemini-4", "swe-2"] as const) {
             assert.equal(countOccurrences(assembled, getDeepworkPrompt(variant).trim()), 1, `${sourceName}: ${variant} carry-ahead`)
           }
         }
@@ -599,7 +602,7 @@ test("Codex agent composition shares one synthetic GPT layer across generations,
 test("Codex non-GPT model selections retain synthetic role, planner, adapter, and one GPT carry-ahead", async (t) => {
   const promptsRoot = makePromptFixture()
   t.after(() => rmSync(promptsRoot, { recursive: true, force: true }))
-  for (const model of ["github-copilot/claude-sonnet-4-6", "github-copilot/gemini-3.1-pro", "github-copilot/glm-5.2", "github-copilot/kimi-k2.8", "github-copilot/swe-2-high"]) {
+  for (const model of ["github-copilot/claude-sonnet-4-6", "github-copilot/gemini-3.1-pro", "github-copilot/gemini-4-argon", "github-copilot/glm-5.2", "github-copilot/kimi-k3.1", "github-copilot/swe-2-high"]) {
     const agents = await buildCodexAgents({
       config: {
         ...defaultConfig(),
@@ -628,7 +631,41 @@ test("Codex non-GPT model selections retain synthetic role, planner, adapter, an
   }
 })
 
-test("Codex agents carry synthetic Kimi and SWE-2 calibrations once without replacing planner role", async (t) => {
+test("runtime and Codex consume the same default brief while explicit commands retrieve the full skill", async (t) => {
+  const promptsRoot = makePromptFixture()
+  t.after(() => rmSync(promptsRoot, { recursive: true, force: true }))
+  const skillsRoot = join(promptsRoot, "skills")
+  const config = { ...defaultConfig(), workflow: "v1" as const, promptsRoot }
+  const store = createSessionIntentStore()
+  const message = createChatMessageHandler({
+    getConfig: () => config,
+    getV1SkillBriefs: () => loadV1SkillBriefs(skillsRoot),
+    skillsRoot,
+    store,
+  })
+  const transform = createSystemTransformHandler({ getConfig: () => config, store })
+  await message({ sessionID: "brief" }, { parts: [{ type: "text", text: "hello" }] })
+  const system = { system: ["[fixture:system]"] }
+  await transform({ sessionID: "brief" }, system)
+  assert.equal(countOccurrences(system.system.join("\n"), "[fixture:brief]"), 1)
+  assert.equal(countOccurrences(system.system.join("\n"), "[fixture:brainstorming]"), 0)
+
+  const agents = await buildCodexAgents({
+    config: { ...config, workflow: "codex" }, cwd: process.cwd(), skillsRoot,
+  })
+  for (const agent of agents) {
+    assert.equal(countOccurrences(agent.developerInstructions, "[fixture:brief] `deepwork-brainstorming`"), 1)
+    assert.equal(countOccurrences(agent.developerInstructions, "[fixture:brainstorming]"), 0)
+  }
+
+  await message({ sessionID: "brief" }, { parts: [{ type: "text", text: "/brainstorming investigate the boundary" }] })
+  const explicit = { system: ["[fixture:system]"] }
+  await transform({ sessionID: "brief" }, explicit)
+  assert.equal(countOccurrences(explicit.system.join("\n"), "[fixture:brief]"), 1)
+  assert.equal(countOccurrences(explicit.system.join("\n"), "[fixture:brainstorming]"), 1)
+})
+
+test("Codex agents carry synthetic Kimi, Gemini 4, and SWE-2 calibrations once without replacing planner role", async (t) => {
   const promptsRoot = makePromptFixture()
   t.after(() => rmSync(promptsRoot, { recursive: true, force: true }))
   const agents = await buildCodexAgents({
@@ -636,13 +673,15 @@ test("Codex agents carry synthetic Kimi and SWE-2 calibrations once without repl
     cwd: process.cwd(),
     skillsRoot: join(promptsRoot, "skills"),
   })
-  const kimi = getDeepworkPrompt("kimi-k27").trim()
+  const kimi = getDeepworkPrompt("kimi").trim()
+  const gemini4 = getDeepworkPrompt("gemini-4").trim()
   const swe2 = getDeepworkPrompt("swe-2").trim()
 
   for (const agent of agents) {
     const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
     assert.equal(countOccurrences(prompt, getDeepworkPrompt("gpt").trim()), 1, `${agent.sourceName}: generic GPT carry-ahead`)
     assert.equal(countOccurrences(prompt, kimi), 1, `${agent.sourceName}: Kimi calibration`)
+    assert.equal(countOccurrences(prompt, gemini4), 1, `${agent.sourceName}: Gemini 4 calibration`)
     assert.equal(countOccurrences(prompt, swe2), 1, `${agent.sourceName}: SWE-2 calibration`)
   }
 
@@ -1624,6 +1663,9 @@ test("generated Codex bundle delivers configured agent fields and discoverable s
     }
 
     const skillsRoot = join(result.pluginRoot, "skills")
+    const reportFidelity = readFileSync(join(skillsRoot, "deepwork-report-fidelity", "SKILL.md"), "utf8")
+    assert.equal(reportFidelity.match(/^name:\s*(.+)$/m)?.[1], "deepwork-report-fidelity")
+    assert.ok(reportFidelity.slice(reportFidelity.indexOf("\n---", 3) + 4).trim().length > 0)
     const normalizedSkillNames = readdirSync(skillsRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
@@ -1637,6 +1679,34 @@ test("generated Codex bundle delivers configured agent fields and discoverable s
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+for (const field of ["skills.disable", "disabledSkills"] as const) {
+  for (const name of ["report-fidelity", "deepwork-report-fidelity"] as const) {
+    test(`report-fidelity delivery respects ${field} using ${name}`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "ocmm-codex-disabled-report-"))
+      try {
+        const config = { ...defaultConfig(), workflow: "codex" as const }
+        config.skills.enable = ["report-fidelity"]
+        if (field === "skills.disable") config.skills.disable = [name]
+        else config.disabledSkills = [name]
+        const result = await generateCodexPlugin({
+          projectRoot: process.cwd(),
+          pluginRoot: join(root, "plugins", "deepwork"),
+          marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+          projectAgentsRoot: false,
+          config,
+          packageVersion: "9.9.9",
+        })
+        const skillsRoot = join(result.pluginRoot, "skills")
+        assert.equal(existsSync(join(skillsRoot, "deepwork-report-fidelity")), false)
+        assert.equal(existsSync(join(skillsRoot, "deepwork", "SKILL.md")), true)
+        assert.equal(readdirSync(skillsRoot).length, result.skillCount)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+  }
+}
 
 test("Codex normalization preserves synthetic payloads, rewrites skill identity, and sanitizes agent metadata", () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codex-normalization-"))

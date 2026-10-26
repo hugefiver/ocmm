@@ -16,7 +16,7 @@ import { loadConfig, type ConfigHost } from "../config/load.ts"
 import { createConfigHandler } from "../hooks/config.ts"
 import { classifyModelFamily, isGpt61OrLaterSolModel, isGpt6LunaModel, supportsNativeGptMaxReasoning } from "../intent/model-family.ts"
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
-import { DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1Skills, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
+import { DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillBriefs, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
 import { LOGICAL_TIER_ORDER } from "../logical-tiers/names.ts"
 import { loadMcpJsonSync, resolveMcpServers } from "../mcp/index.ts"
 import { PLANNING_AGENT_NAMES, parsePlanningAgentName } from "../planning-agents/names.ts"
@@ -201,10 +201,8 @@ export async function buildCodexAgents(args: {
   skillsRoot?: string
 }): Promise<CodexAgentSpec[]> {
   loadAllPrompts(args.config.promptsRoot ?? join(args.cwd, "prompts"), args.config.workflow)
-  // Load brainstorming skill for injection into agent TOML (Codex has no runtime
-  // system message injection, so the brainstorming skill is embedded
-  // at packaging time).
-  const brainstormingSkill = loadV1Skills(args.skillsRoot ?? DEFAULT_SKILLS_ROOT)
+  // Codex embeds the same default brief used by OpenCode's runtime injection.
+  const skillBriefs = loadV1SkillBriefs(args.skillsRoot ?? DEFAULT_SKILLS_ROOT)
   const target: { agent: Record<string, unknown> } = { agent: {} }
   const handler = createConfigHandler({
     getConfig: () => args.config,
@@ -255,7 +253,7 @@ export async function buildCodexAgents(args: {
         prompt,
         workflow: args.config.workflow,
         preferredChain,
-        brainstormingSkill,
+        skillBriefs,
       }),
     })
   }
@@ -395,6 +393,7 @@ function writeCodexSkills(args: {
   const outDir = join(args.pluginRoot, "skills")
   resetGeneratedDir(outDir, args.pluginRoot)
   let count = 0
+  const disabled = new Set([...(args.config.skills.disable ?? []), ...(args.config.disabledSkills ?? [])])
 
   const sharedSkills = loadSharedSkills({
     rootDir: args.skillsRoot,
@@ -403,13 +402,14 @@ function writeCodexSkills(args: {
     disable: [...args.config.skills.disable, ...(args.config.disabledSkills ?? [])],
   })
   for (const skill of sharedSkills) {
-    const target = join(outDir, basename(skill.path))
+    const codexName = skill.name === "report-fidelity" ? "deepwork-report-fidelity" : basename(skill.path)
+    if (skill.name === "report-fidelity" && (disabled.has(skill.name) || disabled.has(codexName))) continue
+    const target = join(outDir, codexName)
     copySkillDirectory(skill.path, target)
-    normalizeSkillForCodex(target)
+    normalizeSkillForCodex(target, skill.name === "report-fidelity" ? codexName : undefined)
     count += 1
   }
 
-  const disabled = new Set([...(args.config.skills.disable ?? []), ...(args.config.disabledSkills ?? [])])
   for (const name of V1_SKILL_DIRS) {
     const codexName = `deepwork-${name}`
     if (disabled.has(name) || disabled.has(codexName)) continue
@@ -740,7 +740,7 @@ function codexAgentInstructions(args: {
   prompt: string
   workflow: OcmmConfig["workflow"]
   preferredChain: readonly string[]
-  brainstormingSkill: string
+  skillBriefs: string
 }): string {
   return [
     `You are the deepwork Codex adapter for Deepwork agent "${args.sourceName}".`,
@@ -755,10 +755,9 @@ function codexAgentInstructions(args: {
     "- Treat AGENTS.md as native Codex project guidance.",
     "- The model and reasoning_effort in your profile are defaults. The main agent may override them only when its current dispatch tool exposes those parameters.",
     "",
-    "## Injected Brainstorming Skill",
-    "The following skill is always loaded. Establish the approved goal, constraints, and acceptance before changing behavior; use the skill's proportionate design and approval routes rather than requiring repeated approval for equivalent implementation decisions.",
+    "## Discovery Brief",
     "",
-    args.brainstormingSkill,
+    args.skillBriefs.replaceAll("`brainstorming`", "`deepwork-brainstorming`"),
     "",
     "Original Deepwork prompt:",
     args.prompt,

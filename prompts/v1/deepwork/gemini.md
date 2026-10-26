@@ -4,11 +4,11 @@
 
 ### Skill Reference (load on demand)
 
-`brainstorming` is the only always-injected skill for new features, components, or behavior changes. Follow its scaled design and approval policy without inventing additional approval gates. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed. Other skills are on-demand slash commands:
+The default discovery brief is guidance, not the full `brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed. Skills are on-demand slash commands:
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | always loaded; scale the design artifact to the change | automatic |
+| brainstorming | material uncertainty or consequential design choices | /brainstorming |
 | writing-plans | complex product behavior implementation, explicit planning request, or concrete major risk requiring a plan | /writing-plans |
 | subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
 | requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | /requesting-code-review |

@@ -207,11 +207,13 @@ const DELEGATION_CONTRACT_TAG = "ocmm-delegation-contract"
 const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_EFFICIENCY_POLICY_TAG = "ocmm-review-session-efficiency-policy"
 const SHELL_SAFETY_TAG = "ocmm-shell-command-safety"
+const WORKFLOW_BOUNDARIES_TAG = "ocmm-workflow-boundaries"
 const TERMINAL_POLICY_TAGS = [
   DELEGATION_CONTRACT_TAG,
   COMPRESSION_POLICY_TAG,
   REVIEW_SESSION_EFFICIENCY_POLICY_TAG,
   SHELL_SAFETY_TAG,
+  WORKFLOW_BOUNDARIES_TAG,
 ].join("|")
 const TERMINAL_POLICY_BLOCK = new RegExp(
   `(?:\\n\\n---\\n\\n)?(?:<(${TERMINAL_POLICY_TAGS})>(?:(?!<\\/\\1>)[\\s\\S])*<\\/\\1>(?:\\s*---\\s*|\\s*))+\\s*$`,
@@ -220,6 +222,8 @@ const TERMINAL_POLICY_BLOCK = new RegExp(
 function appendPromptSuffix(prompt: string, suffix: string): string {
   const body = prompt.replace(TERMINAL_POLICY_BLOCK, "").trim()
   const cleanSuffix = suffix.trim()
+  // Shared boundaries alone are not a role when prompt resources are missing.
+  if (!body && cleanSuffix === workflowBoundariesPolicy()) return ""
   return body ? `${body}\n\n---\n\n${cleanSuffix}` : cleanSuffix
 }
 
@@ -308,6 +312,17 @@ function shellSafetyPolicy(): string {
   return prompt ? `<${SHELL_SAFETY_TAG}>\n${prompt}\n</${SHELL_SAFETY_TAG}>` : ""
 }
 
+function workflowBoundariesPolicy(): string {
+  return wrapTerminalPolicy(WORKFLOW_BOUNDARIES_TAG, "Shared Workflow Boundaries", [
+    "Keep the authoritative role, requested scope, acceptance, and permissions. Research, explanation, planning, and review do not authorize implementation. Escalate changes to scope/acceptance, security/data guarantees, public APIs/protocols, permissions, or irreversible actions. Git authorization is operation-specific: implement/fix is not commit; commit is not push, tag, rebase, or release.",
+    "The orchestrator owns planner/critic dispatch, workflow coordination, and final acceptance. Complex product behavior implementation requires planner → plan-critic → implementation unless the governing policy permits a limited/simple/low-risk/bounded exception or the user explicitly requests a skip; state the applicable exception. Workers never start nested workflows or claim the parent goal complete. Explicit process and safety requirements remain binding.",
+    "Reuse passing evidence by relevance: rerun affected or missing checks when behavior/interfaces change, not unchanged checks for reassurance. Workers run lightweight local checks; the orchestrator consolidates global verification. Report unresolved blockers, harness failures, and unverified requirements honestly; never weaken a valid failing check to claim completion.",
+    "Artifacts state final requirements/design/behavior, not development histories or rejected alternatives; history belongs in Git except chronological documents. Product specs/plans alone belong in docs/superpowers/specs/ and docs/superpowers/plans/; keep other coordination in conversation or task-owned temporary plans. Uncommitted edits do not erase committed API/security/data/permission contracts.",
+    "Tests protect valid behavior and external boundaries, never incidental prose, package metadata, local environment snapshots, or removed components' absence. Update tests for changed requirements and delete dedicated tests for removed components. Preserve real safety/protocol/integrity coverage.",
+    "Zero tolerance: immediately abort invented hash/receipt locks, redundant verification, ceremony tests, gate inflation, and unnecessary confirmation. Discard only task-owned artifacts they produced, disclose the correction briefly, and continue authorized work; never resume the prohibited behavior under another name. Required integrity/release checks and substantive approval boundaries are not optional.",
+  ])
+}
+
 function terminalPromptSuffixFor({
   name,
   includeCompressionPolicy,
@@ -321,6 +336,7 @@ function terminalPromptSuffixFor({
 }): string {
   const policies = [
     shellSafetyPolicy(),
+    workflowBoundariesPolicy(),
     includeCompressionPolicy ? compressionPolicyFor(compressionIdentity) : "",
     includeReviewSessionEfficiency ? reviewSessionEfficiencyPolicy() : "",
     delegationContractFor(name),

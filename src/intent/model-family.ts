@@ -119,18 +119,16 @@ export function isKimiK27Model(modelID: string): boolean {
   return /kimi-k2[.-]?7/.test(lc) || /k2[-.]?p7/.test(lc)
 }
 
-export function isKimiK28Model(modelID: string): boolean {
+/** Kimi prompt selection spans generations without changing effort-family routing. */
+export function isKimiPromptModel(modelID: string): boolean {
   const name = extractModelName(modelID).toLowerCase()
-  return name === "kimi-for-coding"
-    || /^(?:kimi-k2[.-]?8|k2[-.]?p8)(?:$|[-_.])/.test(name)
+  return /^kimi(?:$|[-_.])/.test(name)
+    || /^k2[-.]?p[5678](?:$|[-_.])/.test(name)
 }
 
-/** Exact prompt-only match; intentionally independent from reasoning-family classification. */
-export function isKimiK2CodePromptModel(modelID: string): boolean {
-  const name = extractModelName(modelID).toLowerCase()
-  const k27 = name === "kimi-for-coding-highspeed"
-    || /^(?:kimi-k2[.-]?7|k2[-.]?p7)(?:$|[-_.])/.test(name)
-  return k27 || isKimiK28Model(modelID)
+/** Gemini 4.x prompt-only calibration; adjacent numeric generations stay out. */
+export function isGemini4PromptModel(modelID: string): boolean {
+  return /^gemini-4(?:\.\d+)*(?:$|[-_])/.test(extractModelName(modelID).toLowerCase())
 }
 
 /** Devin SWE-2 effort lanes. This is a prompt match, not a Kimi reasoning family. */

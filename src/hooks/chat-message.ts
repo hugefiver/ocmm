@@ -61,7 +61,7 @@ export function getSessionPrompt(sessionID: string): string | null {
 
 export function createChatMessageHandler(args: {
   getConfig: () => OcmmConfig
-  getV1Skills?: () => string
+  getV1SkillBriefs?: () => string
   skillsRoot?: string
   store?: SessionIntentStore
 }): (input: unknown, output: unknown) => Promise<void> {
@@ -77,11 +77,11 @@ export function createChatMessageHandler(args: {
     state.oncePrompts = []
 
     if (cfg.workflow === "v1" && !state.v1SkillsQueued) {
-      const skills = args.getV1Skills ? args.getV1Skills() : ""
-      if (skills) {
-        state.prompts.push(skills)
+      const briefs = args.getV1SkillBriefs ? args.getV1SkillBriefs() : ""
+      if (briefs) {
+        state.prompts.push(briefs)
         log.info(
-          `v1 skills queued: ${skills.length} chars (sessionID=${sessionID.slice(0, 16)}…)`,
+          `v1 skill briefs queued: ${briefs.length} chars (sessionID=${sessionID.slice(0, 16)}…)`,
         )
       }
       state.v1SkillsQueued = true

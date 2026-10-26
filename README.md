@@ -804,7 +804,7 @@ OpenCode sources and the independent Codex adapter are organized separately:
 ```
 prompts/
   v1/                               # OpenCode deepwork prompts
-    deepwork/{default,gpt,claude-opus-5,gemini,glm,codex,planner,kimi-k27,swe-2}.md
+    deepwork/{default,gpt,claude-opus-5,gemini,gemini-4,glm,codex,planner,kimi,swe-2}.md
     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
     category/*.md (11 sources; 10 default categories, cross-cutting opt-in)
   codex/                            # Codex adapter sources
@@ -833,18 +833,18 @@ Model-family variant selection (`pickDeepworkVariantForAgent`):
 - Codex family -> `codex.md`
 - others (Claude/Kimi/Minimax/unknown) -> `default.md`
 
-Variant is selected at config time using the final selected agent model after explicit user configuration, inherited aliases, and catalog-confirmed upgrades are considered. Built-in functional agents compose their authoritative `agents/<name>.md` role before subordinate workflow/model calibration. Each adapter's `deepwork/gpt.md` is the sole GPT/Codex behavioral calibration, applied once to detected GPT/Codex models, including planners and categories. Planner retains its planning doctrine; `codex.md` contains only host tool compatibility. Category roles remain authoritative, with no Astra-only inline addenda. Opus calibration remains orchestrator-only; Kimi/SWE keep their separate additive layers. Explicit prompt overrides retain priority.
+Variant is selected at config time using the final selected agent model after explicit user configuration, inherited aliases, and catalog-confirmed upgrades are considered. Built-in functional agents compose their authoritative `agents/<name>.md` role before subordinate workflow/model calibration. Each adapter's `deepwork/gpt.md` is the sole GPT/Codex behavioral calibration, applied once to detected GPT/Codex models, including planners and categories. Planner retains its planning doctrine; `codex.md` contains only host tool compatibility. Category roles remain authoritative, with no Astra-only inline addenda. Opus calibration remains orchestrator-only. Kimi uses one current-generation calibration shared across Kimi names; Gemini 4.x receives the guarded `gemini-4` layer, and SWE-2 retains its own layer. These prompt selections do not change provider, effort, or model routing. Explicit prompt overrides retain priority.
 
 Codex profiles carry one guarded shared GPT layer ahead of runtime selection: GPT/Codex-family models apply it, non-GPT models ignore it without ignoring their role, planner, embedded skills, or adapter tool instructions. GPT generations share prompt behavior, not parameter capabilities: runtime model detection, native `max` support, effort translation, and review floors remain model-dependent. Generated profiles are refreshed only through the generator. Prompts are attached declaratively, not selected by conversation keywords.
 
-For OpenCode, v1 skills are injected on the first message per session via `chat.message` (queue) + `system.transform` (prepend).
+For OpenCode, a short brainstorming orientation is injected on the first message per session via `chat.message` (queue) + `system.transform` (prepend). Full brainstorming guidance is loaded only when needed through the skill catalog or `/brainstorming`. Codex profiles embed the short orientation and expose the full `deepwork-brainstorming` skill on demand. Role, safety, authorization, and workflow rules remain authoritative without loading the full skill.
 
 ## Slash Commands
 
 ocmm registers OpenCode `config.command` entries for:
 
 - Shared skills under `skills/`, available as `/git-master`, `/ast-grep`, `/coding-agent-sessions`, `/frontend`, `/debugging`, and `/init-deep` by default.
-- v1 injected deepwork skills when `workflow:"v1"` is active, available as `/brainstorming`, `/writing-plans`, `/subagent-driven-development`, `/requesting-code-review`, and `/receiving-code-review`. In v1, ocmm also adds `skills/v1` to OpenCode skill paths so native skill slash resolution works without "skill not found" noise.
+- On-demand deepwork skills when `workflow:"v1"` is active, available as `/brainstorming`, `/writing-plans`, `/subagent-driven-development`, `/requesting-code-review`, and `/receiving-code-review`. In v1, ocmm also adds `skills/v1` to OpenCode skill paths so native skill slash resolution works without "skill not found" noise.
 - Loop protocol commands `/ralph-loop`, `/audit-loop`, and `/dwloop` (`/dwloop` is the deepwork-loop alias for `/audit-loop`).
 
 Interactive OpenCode uses its native slash-command parser. For noninteractive `opencode run "/command args"` calls, OpenCode 1.17.9 passes the first message directly and does not parse project commands; ocmm compensates by expanding bare ocmm command text during `chat.message` and injecting the expanded command once through `system.transform`.

@@ -10,7 +10,7 @@ import { loadAllPrompts } from "./prompt-loader.ts"
 
 test("planning role composition orders and deduplicates synthetic model layers", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-planning-composition-"))
-  const variants = ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi-k27", "swe-2"]
+  const variants = ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi", "gemini-4", "swe-2"]
   const roles = ["orchestrator", "planner", "plan-critic"]
   const marker = (area: string, name: string) => `[fixture:${area}:${name}]`
   try {
@@ -31,8 +31,10 @@ test("planning role composition orders and deduplicates synthetic model layers",
         ["openai/codex-mini-latest", "codex", "gpt"],
         ["anthropic/claude-opus-5", "claude-opus-5", ""],
         ["google/gemini-3-pro", "gemini", ""],
+        ["google/gemini-4-argon", "gemini", "gemini-4"],
         ["zhipu/glm-5.1", "glm", ""],
-        ["moonshot/kimi-k2.8", "default", "kimi-k27"],
+        ["moonshot/kimi-k2.8", "default", "kimi"],
+        ["moonshot/kimi-k3.1", "default", "kimi"],
         ["devin/swe-2-high", "default", "swe-2"],
       ]) {
         const configured = {
@@ -55,7 +57,7 @@ test("planning role composition orders and deduplicates synthetic model layers",
               ...(role === "planner" ? ["planner"] : []),
               "codex",
               ...(role === "orchestrator" ? ["claude-opus-5"] : []),
-              "gpt", "kimi-k27", "swe-2",
+              "gpt", "kimi", "gemini-4", "swe-2",
             ]
             : [...new Set([
               ...(role === "planner" ? ["planner"] : selectedVariant === "claude-opus-5" && role === "orchestrator"

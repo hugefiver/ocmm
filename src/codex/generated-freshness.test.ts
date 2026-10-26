@@ -89,7 +89,8 @@ test("tracked Codex artifacts deliver current configured runtime fields and reso
     })
     const skillNames = [
       CODEX_WORKFLOW_SKILL_NAME,
-      ...sharedSkills.map((skill) => basename(skill.path)),
+      ...sharedSkills.filter((skill) => skill.name !== "report-fidelity" || !disabled.has("deepwork-report-fidelity"))
+        .map((skill) => skill.name === "report-fidelity" ? "deepwork-report-fidelity" : basename(skill.path)),
       ...V1_SKILL_DIRS.filter((name) => !disabled.has(name) && !disabled.has(`deepwork-${name}`)
         && existsSync(join(sourceSkillsRoot, "v1", name, "SKILL.md"))).map((name) => `deepwork-${name}`),
     ].sort()

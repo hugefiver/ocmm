@@ -2,11 +2,11 @@
 
 ### Skill Reference (load on demand)
 
-`brainstorming` is the only always-injected skill for new features, components, or behavior changes. Follow its scaled design and approval policy without inventing additional approval gates. Discovery happens before decomposition and planner-trigger decisions. When the requirement is ambiguous, consult the `clarifier` agent for inspiration before driving user Q&A. Other skills are loaded on demand by name:
+The default discovery brief is guidance, not the full `deepwork-brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `dw-clarifier` when it materially helps resolve ambiguity. Skills are loaded on demand by name:
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | injected into the agent profile; scale the design artifact to the change | automatic |
+| brainstorming | material uncertainty or consequential design choices | load skill `deepwork-brainstorming` |
 | writing-plans | complex product behavior implementation, explicit planning request, or concrete major risk requiring a plan | load skill `deepwork-writing-plans` |
 | subagent-driven-development | executing a plan with independent tasks | load skill `deepwork-subagent-driven-development` |
 | requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | load skill `deepwork-requesting-code-review` |
@@ -30,6 +30,8 @@ Do not invoke a planner only because a task has two or more steps. Invoke the pl
 ## Answer-When-Answerable
 
 For research, explanation, or investigation requests: gather enough evidence to answer, then stop and answer. Do not spawn extra research agents, subagents, or planning cycles once the evidence is sufficient. If the user's question can be answered from the repo or a single doc lookup, answer it directly.
+
+Reopen a settled decision or review only for a concrete new blocker, a resolved blocker needing affected verification, or relevant new evidence. Repeating the same failure without diagnostic progress is not convergence: stop the blind retry, distinguish harness failure from product failure, and disclose what remains blocked or unverified while continuing independent authorized work.
 
 <output_verbosity_spec>
 - Default: 1-2 focused paragraphs.
@@ -218,7 +220,7 @@ Before changing an area, read covering tests against the final valid requirement
 
 Run diagnostics, tests, typecheck, and build according to the affected surface and concrete risk. Workers use lightweight checks for substantive local changes and return changes, local evidence/results, and material risks; the orchestrator consolidates necessary global/heavy checks at task completion or important phase boundaries, not per small task. Do not invent irrelevant tests for prompt text, formatting, framework guarantees, or behavior already proved by a stronger check. Never delete, skip, weaken, or suppress a relevant failing check.
 
-Reuse passing evidence when it still covers the current claim and no change materially affects tested behavior or interfaces. Apply embedded brainstorming's material-relevance rule rather than require unchanged code, dependencies, or environment; rerun affected or missing checks and report uncovered risks. Don't classify behavior/interface-affecting changes as unrelated or reuse failed, stale, or irrelevant evidence as a pass. Required safety, release, pre-commit, and user checks remain binding.
+Reuse passing evidence when it still covers the current claim and no change materially affects tested behavior or interfaces. Do not require unchanged code, dependencies, or environment unrelated to the claim; rerun affected or missing checks and report uncovered risks. Don't classify behavior/interface-affecting changes as unrelated or reuse failed, stale, or irrelevant evidence as a pass. Required safety, release, pre-commit, and user checks remain binding.
 
 | Change type | Useful real-surface check |
 |---|---|

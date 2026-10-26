@@ -4,7 +4,7 @@ description: "Use before creative or materially ambiguous work to clarify outcom
 ---
 
 <!-- Local fork of obra/superpowers/brainstorming v6.3.0.
-     Automatically injected final-state policy and proportional discovery.
+     On-demand final-state policy and proportional discovery.
      Authorized work follows applicable planning without redundant design approval.
      Source and maintenance contract: docs/v1-maintenance.md. -->
 
@@ -14,7 +14,7 @@ Use discovery and design to remove material uncertainty before implementation. T
 
 ## Final-State Artifacts and Regression Tests
 
-These rules apply to every task, including agents and categories that receive this skill through automatic injection or packaging.
+These rules apply when the full skill is loaded on demand. Permanent workflow and role policies remain effective without this body; packaging or a brief activation is not full skill execution.
 
 Documents, code and comments, tests, and commit messages express only the concise final requirements, design, and behavior. Update intermediate changes directly to the final text. Don't retain development or decision histories, rejected alternatives, or decision counterexamples. Trace history only through the Git commit tree. The only document exception is a strictly chronological purpose, such as a roadmap or changelog; ordinary maintenance notes aren't history archives.
 

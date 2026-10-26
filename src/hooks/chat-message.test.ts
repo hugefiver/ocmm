@@ -45,7 +45,7 @@ test("v1 workflow: chat.message queues skills on first message", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const handler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL CONTENT HERE",
+    getV1SkillBriefs: () => "SKILL CONTENT HERE",
   })
   clearSessionIntent("s2")
   await handler(makeInput({ sessionID: "s2" }), makeOutput())
@@ -58,7 +58,7 @@ test("v1 workflow: second message does not re-queue (latching)", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const handler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "FIRST SKILL",
+    getV1SkillBriefs: () => "FIRST SKILL",
   })
   clearSessionIntent("s3")
   await handler(makeInput({ sessionID: "s3" }), makeOutput())
@@ -72,7 +72,7 @@ test("v1 workflow: empty skills content is not queued", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const handler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "",
+    getV1SkillBriefs: () => "",
   })
   clearSessionIntent("s4")
   await handler(makeInput({ sessionID: "s4" }), makeOutput())
@@ -172,7 +172,7 @@ test("v1 workflow queues skills plus one-shot slash command", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const handler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL TEXT",
+    getV1SkillBriefs: () => "SKILL TEXT",
   })
   const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   clearSessionIntent("cmd-v1")
@@ -206,7 +206,7 @@ test("system.transform prepends queued skills to system array", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const msgHandler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL TEXT",
+    getV1SkillBriefs: () => "SKILL TEXT",
   })
   const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   clearSessionIntent("s5")
@@ -222,7 +222,7 @@ test("system.transform tolerates string system shape", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const msgHandler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL TEXT",
+    getV1SkillBriefs: () => "SKILL TEXT",
   })
   const sysHandler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: ["commit-guard-injector"] }) as unknown as OcmmConfig })
   clearSessionIntent("s6")
@@ -276,7 +276,7 @@ test("system.transform builds array systems idempotently", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const msgHandler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL TEXT",
+    getV1SkillBriefs: () => "SKILL TEXT",
   })
   const handler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: [] }) as unknown as OcmmConfig })
   clearSessionIntent(sessionID)
@@ -301,7 +301,7 @@ test("system.transform builds string systems idempotently", async () => {
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const msgHandler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL TEXT",
+    getV1SkillBriefs: () => "SKILL TEXT",
   })
   const handler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: [] }) as unknown as OcmmConfig })
   clearSessionIntent(sessionID)
@@ -328,7 +328,7 @@ test("system.transform independently builds distinct outputs for one session", a
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const msgHandler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL TEXT",
+    getV1SkillBriefs: () => "SKILL TEXT",
   })
   const handler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: [] }) as unknown as OcmmConfig })
   clearSessionIntent(sessionID)
@@ -354,7 +354,7 @@ test("system.transform only treats exact array boundaries as owned blocks", asyn
   const cfg = { ...defaultConfig(), workflow: "v1" as const }
   const msgHandler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL TEXT",
+    getV1SkillBriefs: () => "SKILL TEXT",
   })
   const handler = createSystemTransformHandler({ getConfig: () => ({ disabledHooks: [] }) as unknown as OcmmConfig })
   clearSessionIntent(sessionID)
@@ -425,12 +425,12 @@ test("independent stores do not share v1SkillsQueued state", async () => {
 
   const handlerA = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL-A",
+    getV1SkillBriefs: () => "SKILL-A",
     store: storeA,
   })
   const handlerB = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "SKILL-B",
+    getV1SkillBriefs: () => "SKILL-B",
     store: storeB,
   })
 
@@ -506,7 +506,7 @@ test("injected store: chat+transform share custom store, default transform is is
 
   const chatHandler = createChatMessageHandler({
     getConfig: () => cfg,
-    getV1Skills: () => "CUSTOM SKILLS",
+    getV1SkillBriefs: () => "CUSTOM SKILLS",
     store: customStore,
   })
   const customSysHandler = createSystemTransformHandler({

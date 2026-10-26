@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
-import { buildSkillCommand, loadSharedSkills, loadV1SkillCommands, loadV1Skills, V1_COMMAND_SKILLS, V1_INJECTED_SKILLS, V1_SKILL_DIRS } from "./skill-loader.ts"
+import { buildSkillCommand, loadSharedSkills, loadV1SkillCommands, loadV1SkillBriefs, V1_COMMAND_SKILLS, V1_SKILL_DIRS } from "./skill-loader.ts"
 
 function makeSkillsRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-skills-"))
@@ -14,27 +14,21 @@ function makeSkillsRoot(): string {
   return root
 }
 
-test("loadV1Skills injects only brainstorming", () => {
+test("default briefs and explicit full skill commands use separate resources", () => {
   const root = makeSkillsRoot()
   try {
     for (const dir of V1_COMMAND_SKILLS) {
       writeFileSync(join(root, "v1", dir, "SKILL.md"), `# Skill ${dir}`)
     }
-    const skills = loadV1Skills(root)
-    // Only brainstorming is injected
-    assert.ok(skills.includes("# Skill brainstorming"))
-    assert.ok(!skills.includes("# Skill writing-plans"))
-    assert.ok(!skills.includes("# Skill subagent-driven-development"))
-    assert.ok(!skills.includes("# Skill requesting-code-review"))
-    assert.ok(!skills.includes("# Skill receiving-code-review"))
-    assert.ok(!skills.includes("# Skill dispatching-parallel-agents"))
+    writeFileSync(join(root, "v1", "brainstorming", "brief.md"), "[fixture:brief]")
+    assert.equal(loadV1SkillBriefs(root), "[fixture:brief]")
+    const command = loadV1SkillCommands({ rootDir: root }).find(({ name }) => name === "brainstorming")
+    assert.ok(command?.template.includes("# Skill brainstorming"))
+    writeFileSync(join(root, "v1", "brainstorming", "brief.md"), "[fixture:updated-brief]")
+    assert.equal(loadV1SkillBriefs(root), "[fixture:updated-brief]")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
-})
-
-test("V1_INJECTED_SKILLS contains only brainstorming", () => {
-  assert.deepEqual([...V1_INJECTED_SKILLS], ["brainstorming"])
 })
 
 test("V1_COMMAND_SKILLS contains all 6 v1 skills", () => {
@@ -44,12 +38,11 @@ test("V1_COMMAND_SKILLS contains all 6 v1 skills", () => {
   assert.ok(V1_COMMAND_SKILLS.includes("dispatching-parallel-agents"))
 })
 
-test("loadV1Skills tolerates missing skill files", () => {
+test("missing briefs do not fall back to full skill documents", () => {
   const root = makeSkillsRoot()
   try {
     writeFileSync(join(root, "v1", "brainstorming", "SKILL.md"), "only one skill")
-    const skills = loadV1Skills(root)
-    assert.ok(skills.includes("only one skill"))
+    assert.equal(loadV1SkillBriefs(root), "")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -78,8 +71,19 @@ test("shared publish skill is discovered outside v1 injection and commands", () 
   assert.ok(publish, "shared publish skill must be discovered")
   assert.equal(relative(join(process.cwd(), "skills", "v1"), publish.path).startsWith(".."), true)
 
-  assert.equal((V1_INJECTED_SKILLS as readonly string[]).includes("publish"), false)
   assert.equal((V1_COMMAND_SKILLS as readonly string[]).includes("publish"), false)
+})
+
+test("shared report-fidelity is discoverable, loadable, and respects skill filters", () => {
+  const [skill] = loadSharedSkills({ enable: ["report-fidelity"] })
+  assert.ok(skill)
+  assert.equal(skill.name, "report-fidelity")
+  assert.ok(skill.description.length > 0)
+  const command = buildSkillCommand(skill)
+  assert.ok(command)
+  assert.equal(command?.name, skill.name)
+  assert.ok(command.template.length > 0)
+  assert.equal(loadSharedSkills({ enable: ["report-fidelity"], disable: ["report-fidelity"] }).length, 0)
 })
 
 test("shared coding-agent-sessions skill is discovered and remains outside v1 injection", () => {
@@ -89,7 +93,6 @@ test("shared coding-agent-sessions skill is discovered and remains outside v1 in
   assert.ok(skill, "shared coding-agent-sessions skill must be discovered")
   assert.equal(skill.path, join(process.cwd(), "skills", "coding-agent-sessions"))
   assert.equal(relative(join(process.cwd(), "skills", "v1"), skill.path).startsWith(".."), true)
-  assert.equal((V1_INJECTED_SKILLS as readonly string[]).includes(skill.name), false)
   assert.equal((V1_COMMAND_SKILLS as readonly string[]).includes(skill.name), false)
 
   const command = buildSkillCommand(skill)

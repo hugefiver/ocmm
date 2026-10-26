@@ -15,7 +15,7 @@ import {
   pickModelCalibrationVariants,
 } from "./prompt-loader.ts"
 
-const DEEPWORK_VARIANTS = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi-k27", "swe-2"] as const
+const DEEPWORK_VARIANTS = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "gemini-4", "swe-2"] as const
 
 function makeTempRoot(workflow: "v1" | "codex"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
@@ -90,14 +90,16 @@ test("loadAllPrompts loads specialized deepwork variants", () => {
     writeFileSync(join(root, "codex", "deepwork", "codex.md"), "codex-content")
     writeFileSync(join(root, "codex", "deepwork", "gpt.md"), "gpt-content")
     writeFileSync(join(root, "codex", "deepwork", "claude-opus-5.md"), "claude-opus-5-content")
-    writeFileSync(join(root, "codex", "deepwork", "kimi-k27.md"), "kimi-k27-content")
+    writeFileSync(join(root, "codex", "deepwork", "kimi.md"), "kimi-content")
+    writeFileSync(join(root, "codex", "deepwork", "gemini-4.md"), "gemini-4-content")
     writeFileSync(join(root, "codex", "deepwork", "swe-2.md"), "swe-2-content")
     loadAllPrompts(root, "codex")
     assert.equal(getDeepworkPrompt("glm"), "glm-content")
     assert.equal(getDeepworkPrompt("codex"), "codex-content")
     assert.equal(getDeepworkPrompt("gpt"), "gpt-content")
     assert.equal(getDeepworkPrompt("claude-opus-5"), "claude-opus-5-content")
-    assert.equal(getDeepworkPrompt("kimi-k27"), "kimi-k27-content")
+    assert.equal(getDeepworkPrompt("kimi"), "kimi-content")
+    assert.equal(getDeepworkPrompt("gemini-4"), "gemini-4-content")
     assert.equal(getDeepworkPrompt("swe-2"), "swe-2-content")
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -280,18 +282,23 @@ test("pickDeepworkVariantForAgent defaults for unknown families", () => {
   )
 })
 
-test("additive model calibration selector distinguishes Kimi Code, SWE-2, and carry-ahead", () => {
+test("additive model calibration selector distinguishes Kimi, Gemini 4, SWE-2, and carry-ahead", () => {
   const cases: Array<[string, readonly string[]]> = [
-    ["moonshot/KIMI-K2.7", ["kimi-k27"]],
-    ["moonshot/kimi-k2-8-preview", ["kimi-k27"]],
-    ["kimi-for-coding/kimi-for-coding", ["kimi-k27"]],
-    ["kimi-for-coding/kimi-for-coding-highspeed", ["kimi-k27"]],
+    ["moonshot/KIMI-K2.7", ["kimi"]],
+    ["moonshot/kimi-k2-8-preview", ["kimi"]],
+    ["kimi-for-coding/kimi-for-coding", ["kimi"]],
+    ["kimi-for-coding/kimi-for-coding-highspeed", ["kimi"]],
     ["devin/swe-2-high", ["swe-2"]],
     ["DEVIN/SWE-2.MAX", ["swe-2"]],
     ["devin/swe-20", []],
     ["provider-kimi-for-coding/unrelated", []],
-    ["moonshot/kimi-k2.6", []],
-    ["moonshot/kimi-k3", []],
+    ["moonshot/kimi-k2.6", ["kimi"]],
+    ["moonshot/kimi-k3", ["kimi"]],
+    ["moonshot/kimi-k3.1", ["kimi"]],
+    ["moonshot/k2-p5", ["kimi"]],
+    ["google/gemini-4-argon", ["gemini-4"]],
+    ["provider/us.google.gemini-4.1-pro", ["gemini-4"]],
+    ["google/gemini-40-pro", []],
     ["unknown/model", []],
     ["zhipu/glm-5.2", []],
     ["google/gemini-3.1-pro", []],
@@ -300,7 +307,7 @@ test("additive model calibration selector distinguishes Kimi Code, SWE-2, and ca
   for (const [modelID, expected] of cases) {
     assert.deepEqual(pickModelCalibrationVariants(modelID), expected, modelID)
   }
-  assert.deepEqual(pickModelCalibrationVariants("unknown/model", true), ["gpt", "kimi-k27", "swe-2"])
+  assert.deepEqual(pickModelCalibrationVariants("unknown/model", true), ["gpt", "kimi", "gemini-4", "swe-2"])
 })
 
 test("shipped categories have no separate generation-specific calibration", () => {
@@ -323,6 +330,8 @@ test("category extension seam selects model families, ignores unsupported keys, 
       "category-role",
       '<model-calibration model="gpt">\ngeneric-gpt-extension\n</model-calibration>',
       '<model-calibration model="gemini">\ngemini-extension\n</model-calibration>',
+      '<model-calibration model="kimi-k27">\nkimi-family-extension\n</model-calibration>',
+      '<model-calibration model="swe-2">\nswe-extension\n</model-calibration>',
       '<model-calibration model="unsupported-family">\nunsupported-extension\n</model-calibration>',
     ].join("\n"))
     loadAllPrompts(root, "v1")
@@ -332,7 +341,8 @@ test("category extension seam selects model families, ignores unsupported keys, 
     }
     assert.equal(getCategoryModelCalibration("deep", "google/gemini-3-pro"), "gemini-extension")
     assert.equal(getCategoryModelCalibration("deep", "anthropic/claude-opus-5"), "")
-    assert.equal(getCategoryModelCalibration("deep", "unknown/model", true), "generic-gpt-extension")
+    assert.equal(getCategoryModelCalibration("deep", "moonshot/kimi-k2.7"), "kimi-family-extension")
+    assert.equal(getCategoryModelCalibration("deep", "unknown/model", true), "generic-gpt-extension\n\n---\n\nkimi-family-extension\n\n---\n\nswe-extension")
     writeFileSync(join(root, "v1", "category", "deep.md"), "replacement-role")
     loadAllPrompts(root, "v1")
     assert.equal(getCategoryPrompt("deep"), "replacement-role")

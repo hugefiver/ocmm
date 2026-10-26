@@ -1,12 +1,11 @@
 /**
  * Loads v1 workflow skills from disk.
  *
- * Reads skills/v1/{brainstorming,writing-plans,subagent-driven-development,
- * requesting-code-review,receiving-code-review}/SKILL.md and concatenates
- * them into a single string for injection via the system.transform hook.
+ * Reads default brief.md resources for runtime/Codex guidance. Full SKILL.md
+ * documents are loaded separately for explicit skill commands.
  *
  * In v1 workflow, the config hook also registers skills/v1 as an OpenCode
- * skill path so these injected skills can be invoked with slash commands.
+ * skill path so the full skills can be invoked on demand.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
@@ -46,8 +45,8 @@ type SkillMetadata = {
   subtask?: boolean
 }
 
-// Skills injected into the system message (only brainstorming — HARD-GATE protection).
-export const V1_INJECTED_SKILLS = [
+// Default guidance reads each skill's brief, never its full SKILL.md.
+export const V1_BRIEF_SKILLS = [
   "brainstorming",
 ] as const
 
@@ -61,20 +60,20 @@ export const V1_COMMAND_SKILLS = [
   "dispatching-parallel-agents",
 ] as const
 
-/** @deprecated Use V1_INJECTED_SKILLS or V1_COMMAND_SKILLS. Kept for backward compat. */
+/** @deprecated Use V1_COMMAND_SKILLS. Kept for backward compat. */
 export const V1_SKILL_DIRS = V1_COMMAND_SKILLS
 
-export function loadV1Skills(
+export function loadV1SkillBriefs(
   rootDir: string = DEFAULT_SKILLS_ROOT,
 ): string {
   const parts: string[] = []
-  for (const dir of V1_INJECTED_SKILLS) {
-    const skillPath = join(rootDir, "v1", dir, "SKILL.md")
+  for (const dir of V1_BRIEF_SKILLS) {
+    const skillPath = join(rootDir, "v1", dir, "brief.md")
     try {
       const content = readFileSync(skillPath, "utf8")
       parts.push(content)
     } catch {
-      log.warn(`v1 skill missing: ${dir}/SKILL.md (root=${rootDir})`)
+      log.warn(`v1 skill brief missing: ${dir}/brief.md (root=${rootDir})`)
     }
   }
   return parts.join("\n\n---\n\n")

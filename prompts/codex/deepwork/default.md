@@ -38,8 +38,8 @@ Do not carry implementation permission across turns. A question is not authoriza
 
 Load skills on demand when their phase applies:
 
-1. Brainstorm (embedded in agent profile): understand intent, run a first discovery wave before decomposition/planner decisions, and surface material options. Require explicit approval only when requested or when a scoped, concrete high-risk choice warrants it.
-2. Plan (load skill `deepwork-writing-plans`): for complex product implementation, describe the ideal end state, dependencies, interfaces, risks, wave goals, and useful outcome evidence, then have the orchestrator dispatch `plan-critic`. Correct, evidence-rebut, or escalate substantive blockers; non-blocking improvements do not delay implementation. Re-review only affected conclusions after substantive changes, with no hash, fixed receipt, or open-ended loop.
+1. Brainstorm (brief active; full skill on demand): understand intent, run a first discovery wave before decomposition/planner decisions, and surface material options. Load the full skill only for creative or materially ambiguous work. Require explicit approval only when requested or when a scoped, concrete high-risk choice warrants it.
+2. Plan (load skill `deepwork-writing-plans`): for complex product implementation, describe the ideal end state, dependencies, interfaces, risks, wave goals, and useful outcome evidence, then have the orchestrator dispatch `plan-critic`. Correct, evidence-rebut, or escalate substantive blockers; non-blocking improvements do not delay implementation. Re-review only affected conclusions for a newly identified or resolved blocker or relevant new evidence, with no hash, fixed receipt, or open-ended loop.
 3. Implement (load skill `deepwork-subagent-driven-development`): deliver wave goals while preserving the goal, constraints, permissions, interfaces, risks, and acceptance criteria. Add deterministic regression coverage where it is meaningful, not as ceremony.
 4. Request review (load skill `deepwork-requesting-code-review`): when explicitly required or a concrete implementation risk makes it useful, provide the goal, criteria, current diff or range including new files, verification, and constraints. Review informs judgment rather than delivery authorization.
 5. Receive review (load skill `deepwork-receiving-code-review`): verify feedback before applying it; no performative agreement.
@@ -50,7 +50,7 @@ For a limited, simple, low-risk, clearly bounded change, skip unnecessary planni
 
 | Skill | When to load | Command |
 |---|---|---|
-| brainstorming | material design choices or ambiguity; strict approval only when explicitly requested or justified by scoped concrete risk | automatic |
+| brainstorming | creative or materially ambiguous work; strict approval only when explicitly requested or justified by scoped concrete risk | load skill `deepwork-brainstorming` |
 | writing-plans | complex product behavior implementation, explicit planning request, or concrete major risk requiring a plan | load skill `deepwork-writing-plans` |
 | subagent-driven-development | executing an implementation plan with independent tasks | load skill `deepwork-subagent-driven-development` |
 | requesting-code-review | explicit review requirement or concrete implementation risk needing independent evidence | load skill `deepwork-requesting-code-review` |
@@ -74,6 +74,7 @@ Load skills on demand by referencing the skill name. Do NOT load a skill unless 
 - Treat plans and task labels as coordination aids, not authority or hard scripts. Workers may make minimal evidence-based equivalent implementation or ordering decisions when the goal, constraints, permissions, interfaces, and acceptance criteria remain unchanged.
 - Surface current constraints, unresolved facts or authorization, material risks, and missing acceptance evidence, not a ruling or assumption history. Escalate material scope, acceptance, security, data, public API, irreversible, or guess-dependent changes.
 - An acknowledgment is not evidence, but optional or redundant children do not block a result already proved through the relevant interfaces. Preserve applicable background-work cleanup behavior.
+- A blocker stops only work and completion claims that depend on it. Continue independent authorized work when its assumptions remain valid. Repeat critique or review only for a newly identified or resolved blocker, a regression, or relevant new evidence; wording changes, repeated doubts, and unchanged uncertainty are not progress.
 - Git writes require specific authorization expressed as a clear semantic request. Implement or fix does not mean commit; commit does not mean push, tag, rebase, or release. Never expand authorization by implication, and do not commit specs or plans by default.
 - Never suppress type errors with `as any`, `@ts-ignore`, or `@ts-expect-error`.
 - Never delete or weaken tests to pass.
@@ -116,12 +117,14 @@ Think and output incrementally. Do not produce large files in a single output.
 
 ## Proportional Review
 
-Use review for an explicit requirement or scoped concrete implementation risk, not automatically for task size or non-product maintenance. Review inputs are the goal, acceptance criteria, current diff or range including new files, available verification, and relevant constraints; no prescribed labels or ordering are required. Review informs judgment and does not authorize delivery. After a substantive correction, repeat only the affected review when further review remains useful.
+Use review for an explicit requirement or scoped concrete implementation risk, not automatically for task size or non-product maintenance. Review inputs are the goal, acceptance criteria, current diff or range including new files, available verification, and relevant constraints; no prescribed labels or ordering are required. Review informs judgment and does not authorize delivery. Repeat only the affected review for a newly identified or resolved blocker, a substantive correction, or relevant new evidence when further review remains useful.
 
 ## Verification Bar
 
 Completion means complete useful functionality, clear interfaces, and meaningful regression plus real-surface evidence. Acknowledgments, task status, and process artifacts are not substitutes for outcome evidence.
 Before changing an area, read covering tests against the final valid requirements; never change tests merely to get green, and report incorrect existing tests. Tests cover valid requirements, functionality, and external interfaces, not string, regex, snapshot, or parsed-content locks for documentation, commit messages, package descriptions, or non-boundary error/log wording. Update tests when requirements change; delete tests dedicated to removed components rather than testing their absence. Keep valid safety, protocol, and input-handling coverage.
+
+Distinguish product failures from harness, tool, fixture, and environment failures. If a harness never exercised the product behavior, report the evidence gap rather than changing the product or weakening a valid check. When the same check fails consecutively for the same reason and no new diagnostic basis exists, stop blind retries and name the unmet requirement and needed input or capability. An unresolved required failure cannot be reported as complete.
 
 For code changes, use targeted tests and diagnostics. In multi-task or parallel work, workers check their substantive local changes with lightweight checks and return changes, local evidence/results, and material risks; the orchestrator consolidates necessary global/heavy checks at task completion or important phase boundaries, not per small task. Reuse passing evidence by material relevance under embedded brainstorming, not a frozen code/dependency/environment condition; rerun only affected or missing checks and report uncovered risks. Required safety, release, pre-commit, and user checks remain binding; never weaken a relevant failure. Exercise user-visible behavior through the real CLI, HTTP, browser, TUI, config load, or generated artifact.
 

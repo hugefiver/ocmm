@@ -9,14 +9,14 @@ import {
   isCodexModel,
   isDeepSeekModel,
   isGeminiModel,
+  isGemini4PromptModel,
   isGpt61OrLaterSolModel,
   isGpt6LunaModel,
   isGpt6SolModel,
   isGptModel,
   isMiniModel,
-  isKimiK2CodePromptModel,
+  isKimiPromptModel,
   isKimiK27Model,
-  isKimiK28Model,
   isKimiK2Model,
   isSwe2Model,
   parseGptVersion,
@@ -184,7 +184,7 @@ test("isGeminiModel covers provider + name signals", () => {
   assert.equal(isGeminiModel("gpt-5.5"), false)
 })
 
-test("Kimi K2.7 and K2.8 coding aliases share one precise prompt calibration", () => {
+test("Kimi prompt selection covers generations and coding aliases without provider-name matches", () => {
   assert.equal(isKimiK2Model("kimi-k2.6"), true)
   assert.equal(isKimiK2Model("k2p5"), true)
   assert.equal(isKimiK2Model("k2-p7"), true)
@@ -192,30 +192,33 @@ test("Kimi K2.7 and K2.8 coding aliases share one precise prompt calibration", (
   assert.equal(isKimiK2Model("gpt-5"), false)
 
   for (const modelID of [
-    "kimi-k2.7",
-    "MOONSHOT/KIMI-K2-7-PREVIEW",
-    "kimi-for-coding/k2p7-fast",
-  ]) {
-    assert.equal(isKimiK27Model(modelID), true, modelID)
-    assert.equal(isKimiK2CodePromptModel(modelID), true, modelID)
-  }
-  assert.equal(isKimiK2CodePromptModel("kimi-for-coding/kimi-for-coding-highspeed"), true)
-  for (const modelID of [
+    "kimi-k2", "kimi-k2.5", "kimi-k2.6", "kimi-k2.7",
+    "MOONSHOT/KIMI-K2-7-PREVIEW", "kimi-for-coding/k2p7-fast",
     "kimi-k2.8",
     "MOONSHOT/KIMI-K2-8-PREVIEW",
     "kimi-for-coding/k2.p8-fast",
     "kimi-for-coding/kimi-for-coding",
+    "kimi-for-coding/kimi-for-coding-highspeed",
+    "moonshot/kimi-k3", "moonshot/kimi-k3.1-preview", "MOONSHOT/KIMI-K3-1",
+    "k2-p5", "k2.p6", "k2p7", "k2p8",
   ]) {
-    assert.equal(isKimiK28Model(modelID), true, modelID)
-    assert.equal(isKimiK2CodePromptModel(modelID), true, modelID)
+    assert.equal(isKimiPromptModel(modelID), true, modelID)
   }
-  for (const modelID of ["kimi-k2.6", "kimi-k2.70", "kimi-k2.80", "xkimi-k2.8", "provider-kimi-for-coding/model"]) {
-    assert.equal(isKimiK2CodePromptModel(modelID), false, modelID)
+  for (const modelID of ["xkimi-k2.8", "provider-kimi-for-coding/model", "kimi-provider/gpt-6", "k2p80", "k2p9", "prefix-kimi-k3.1"]) {
+    assert.equal(isKimiPromptModel(modelID), false, modelID)
   }
   assert.equal(isKimiK27Model("prefix-kimi-k2.7-snapshot"), true, "legacy K2.7 matcher remains compatible")
   assert.equal(isKimiK27Model("kimi-for-coding/kimi-for-coding-highspeed"), false)
   assert.equal(isKimiK27Model("kimi-for-coding/kimi-for-coding"), false)
-  assert.equal(isKimiK28Model("kimi-for-coding/kimi-for-coding-highspeed"), false)
+})
+
+test("Gemini 4 prompt matching is numeric-boundary and provider safe", () => {
+  for (const modelID of ["gemini-4", "gemini-4-argon", "GEMINI-4.1-PRO", "google/gemini-4.0-flash", "providers/google/gemini-4.2-preview", "bedrock/google.gemini-4-argon", "bedrock/us.google.gemini-4.1-pro"]) {
+    assert.equal(isGemini4PromptModel(modelID), true, modelID)
+  }
+  for (const modelID of ["gemini-3.1-pro", "gemini-5-pro", "gemini-40-pro", "gemini-4argon", "gemini-4.1foo", "gemini-4.", "prefix-gemini-4", "gemini-provider/model", "google/gpt-6", "provider/custom.gemini-4"]) {
+    assert.equal(isGemini4PromptModel(modelID), false, modelID)
+  }
 })
 
 test("SWE-2 detection is provider-safe and does not absorb adjacent model names", () => {
@@ -260,6 +263,8 @@ test("additive prompt routing does not change reasoning-family classification", 
     ["kimi-for-coding/kimi-for-coding", "kimi"],
     ["kimi-for-coding/kimi-for-coding-highspeed", "kimi"],
     ["kimi-for-coding/k2p8", "unknown"],
+    ["moonshot/kimi-k3.1", "kimi"],
+    ["google/gemini-4-argon", "gemini"],
     ["devin/swe-2-high", "unknown"],
   ] as const
 

@@ -32,7 +32,7 @@ const LOCAL_COORDINATOR_TASK_RULES = {
 } as const
 
 const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
-const KIMI_K27_MARKER = "# KIMI K2.7/K2.8 CODE CALIBRATION"
+const KIMI_MARKER = "<kimi-calibration>"
 const SWE_2_MARKER = "# SWE-2 EXECUTION CALIBRATION"
 
 function countText(text: string, needle: string): number {
@@ -286,17 +286,17 @@ test("Kimi and SWE category selections preserve the category role and isolate ca
 
   const coding = String((target.agent.coding as Record<string, unknown>).prompt)
   assert.ok(coding.startsWith(getCategoryPrompt("coding").trim()))
-  assert.equal(countText(coding, KIMI_K27_MARKER), 1)
+  assert.equal(countText(coding, KIMI_MARKER), 1)
   assert.equal(countText(coding, SWE_2_MARKER), 0)
 
   const research = String((target.agent.research as Record<string, unknown>).prompt)
   assert.ok(research.startsWith(getCategoryPrompt("research").trim()))
   assert.equal(countText(research, SWE_2_MARKER), 1)
-  assert.equal(countText(research, KIMI_K27_MARKER), 0)
+  assert.equal(countText(research, KIMI_MARKER), 0)
 
   const adjacent = String((target.agent.quick as Record<string, unknown>).prompt)
   assert.equal(countText(adjacent, SWE_2_MARKER), 0)
-  assert.equal(countText(adjacent, KIMI_K27_MARKER), 0)
+  assert.equal(countText(adjacent, KIMI_MARKER), 0)
 })
 
 test("Codex generation gives every builtin category one guarded generic GPT calibration", async () => {
@@ -312,7 +312,7 @@ test("Codex generation gives every builtin category one guarded generic GPT cali
     assert.match(gpt, /(?:apply|use)[^\n]*only[^\n]*(?:runtime|selected)[^\n]*(?:GPT|Codex)/i, "runtime family guard")
     assert.match(gpt, /(?:non-GPT|every other runtime model)[^\n]*ignore/i, "non-GPT must ignore calibration")
     const opus5 = getDeepworkPrompt("claude-opus-5").trim()
-    const kimi = getDeepworkPrompt("kimi-k27").trim()
+    const kimi = getDeepworkPrompt("kimi").trim()
     const swe2 = getDeepworkPrompt("swe-2").trim()
 
     for (const category of BUILTIN_CATEGORIES) {
@@ -328,7 +328,7 @@ test("Codex generation gives every builtin category one guarded generic GPT cali
       assert.ok(prompt.startsWith(getCategoryPrompt(category.name).trim()), `${category.name}: category role remains first`)
       assert.ok(!prompt.includes(opus5), `${category.name}: Opus 5 calibration must remain excluded`)
       assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
-      assert.equal(countText(prompt, KIMI_K27_MARKER), 1, `${category.name}: Kimi carry-ahead`)
+      assert.equal(countText(prompt, KIMI_MARKER), 1, `${category.name}: Kimi carry-ahead`)
       assert.equal(countText(prompt, SWE_2_MARKER), 1, `${category.name}: SWE-2 carry-ahead`)
       assert.ok(prompt.includes(kimi), `${category.name}: exact Kimi calibration`)
       assert.ok(prompt.includes(swe2), `${category.name}: exact SWE-2 calibration`)

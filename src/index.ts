@@ -26,7 +26,7 @@ import { createDirectoryAgentsInjector } from "./hooks/directory-agents-injector
 import { createHashlineReadEnhancer } from "./hooks/hashline-read-enhancer.ts"
 import { createRulesInjector } from "./hooks/rules-injector.ts"
 import { loadAllPrompts } from "./intent/prompt-loader.ts"
-import { loadV1Skills } from "./intent/skill-loader.ts"
+import { loadV1SkillBriefs } from "./intent/skill-loader.ts"
 import { createConfiguredMcpManager, resolveMcpServers } from "./mcp/index.ts"
 import { createPermissionGuards } from "./permissions/index.ts"
 import { createHashlineEditTool, type HashlineToolDefinition } from "./tools/hashline-edit.ts"
@@ -73,7 +73,7 @@ export function createPlugin(input?: ServerInput): {
   let config: OcmmConfig
   let fastMode = parseFastModeValue(process.env.OCMM_FAST)
   let promptsLoaded = false
-  let v1SkillsCache: string | null = null
+  let v1BriefsCache: string | null = null
 
   function loadOrDefault(): OcmmConfig {
     try {
@@ -99,11 +99,11 @@ export function createPlugin(input?: ServerInput): {
     }
     if (config.workflow === "v1") {
       try {
-        v1SkillsCache = loadV1Skills()
-        log.info(`v1 skills loaded: ${v1SkillsCache.length} chars`)
+        v1BriefsCache = loadV1SkillBriefs()
+        log.info(`v1 skill briefs loaded: ${v1BriefsCache.length} chars`)
       } catch (err) {
-        log.warn(`v1 skill load failed: ${(err as Error).message}`)
-        v1SkillsCache = ""
+        log.warn(`v1 skill brief load failed: ${(err as Error).message}`)
+        v1BriefsCache = ""
       }
     }
     promptsLoaded = true
@@ -164,7 +164,7 @@ export function createPlugin(input?: ServerInput): {
     }),
     "chat.message": createChatMessageHandler({
       getConfig,
-      ...(v1SkillsCache !== null ? { getV1Skills: () => v1SkillsCache! } : {}),
+      ...(v1BriefsCache !== null ? { getV1SkillBriefs: () => v1BriefsCache! } : {}),
       store: sessionIntentStore,
     }),
     "experimental.chat.messages.transform": createHistoryCacheMitigationHandler({ getConfig }),
@@ -203,7 +203,7 @@ export function createPlugin(input?: ServerInput): {
       config = loadOrDefault()
       fastMode = parseFastModeValue(process.env.OCMM_FAST)
       promptsLoaded = false
-      v1SkillsCache = null
+      v1BriefsCache = null
       ensurePromptsLoaded()
       syncIdleEnabled()
       refreshTools()
