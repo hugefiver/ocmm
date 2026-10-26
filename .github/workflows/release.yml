@@ -100,7 +100,7 @@ jobs:
 
       - name: Check generated Codex plugin bundle
         run: |
-          pnpm run gen:codex-plugin
+          pnpm run gen:codex-plugin --release
           changed="$(git status --short -- .agents/plugins/marketplace.json .codex/agents plugins/deepwork)"
           if [ -n "$changed" ]; then
             echo "$changed"
@@ -388,7 +388,7 @@ jobs:
       - name: Generate Codex bundle and smoke test wrappers
         run: |
           find dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
-          pnpm run gen:codex-plugin
+          pnpm run gen:codex-plugin --release
           find plugins/deepwork/dist/bin -type f -name 'ocmm-lsp-*' ! -name '*.exe' -exec chmod 755 {} +
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node dist/cli/ocmm-lsp.js mcp
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n' | node plugins/deepwork/dist/cli/ocmm-lsp.js mcp

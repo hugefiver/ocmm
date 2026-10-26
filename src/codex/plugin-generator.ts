@@ -18,7 +18,7 @@ import { classifyModelFamily, isGpt61OrLaterSolModel, isGpt6LunaModel, supportsN
 import { loadAllPrompts } from "../intent/prompt-loader.ts"
 import { DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillBriefs, V1_SKILL_DIRS } from "../intent/skill-loader.ts"
 import { LOGICAL_TIER_ORDER } from "../logical-tiers/names.ts"
-import { loadMcpJsonSync, resolveMcpServers } from "../mcp/index.ts"
+import { createBuiltinMcps, loadMcpJsonSync, mergeMcpServers } from "../mcp/index.ts"
 import { PLANNING_AGENT_NAMES, parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
 import { resolveEffectiveRequirement } from "../routing/resolver.ts"
@@ -132,6 +132,7 @@ export async function generateCodexPlugin(options: {
   marketplacePath?: string
   projectAgentsRoot?: string | false
   config?: OcmmConfig
+  includeProjectMcp?: boolean
   packageVersion?: string
 } = {}): Promise<CodexPluginGenerationResult> {
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
@@ -148,13 +149,15 @@ export async function generateCodexPlugin(options: {
   writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), createPluginManifest(version))
   writeJson(join(pluginRoot, "package.json"), createPluginRuntimePackage(version))
   stageCodexRuntime(projectRoot, pluginRoot)
-  const mcpManifest = createCodexMcpManifest(loaded.config, projectRoot, pluginRoot)
+  const mcpManifest = createCodexMcpManifest(loaded.config, projectRoot, pluginRoot, options.includeProjectMcp)
   writeJson(join(pluginRoot, ".mcp.json"), mcpManifest)
 
   const agents = await buildCodexAgents({
     config: loaded.config,
     cwd: projectRoot,
     skillsRoot,
+    // The config handler also resolves MCPs; point it at the manifest just written.
+    ...(options.includeProjectMcp === false ? { mcpCwd: pluginRoot } : {}),
   })
   writeCodexAgents(pluginRoot, agents)
   if (projectAgentsRoot) {
@@ -199,6 +202,7 @@ export async function buildCodexAgents(args: {
   config: OcmmConfig
   cwd: string
   skillsRoot?: string
+  mcpCwd?: string
 }): Promise<CodexAgentSpec[]> {
   loadAllPrompts(args.config.promptsRoot ?? join(args.cwd, "prompts"), args.config.workflow)
   // Codex embeds the same default brief used by OpenCode's runtime injection.
@@ -206,7 +210,7 @@ export async function buildCodexAgents(args: {
   const target: { agent: Record<string, unknown> } = { agent: {} }
   const handler = createConfigHandler({
     getConfig: () => args.config,
-    cwd: args.cwd,
+    cwd: args.mcpCwd ?? args.cwd,
     skillsRoot: args.skillsRoot ?? DEFAULT_SKILLS_ROOT,
   })
   await handler(target, undefined)
@@ -260,12 +264,17 @@ export async function buildCodexAgents(args: {
   return agents
 }
 
-export function createCodexMcpManifest(config: OcmmConfig, cwd: string, pluginRoot = join(cwd, CODEX_PLUGIN_DIR)): CodexMcpManifest {
-  const servers = resolveMcpServers(config.mcp, { disabledMcps: config.disabledMcps, cwd })
-  const projectMcpServers = loadMcpJsonSync(cwd)
+export function createCodexMcpManifest(config: OcmmConfig, cwd: string, pluginRoot = join(cwd, CODEX_PLUGIN_DIR), includeProjectMcp = true): CodexMcpManifest {
+  const projectMcpServers = includeProjectMcp ? loadMcpJsonSync(cwd) : {}
+  const servers = mergeMcpServers(
+    config.mcp.enabled ? createBuiltinMcps(config.mcp, config.disabledMcps, { cwd }) : {},
+    projectMcpServers,
+    config.mcp.servers,
+  )
   const hasExplicitLsp = Boolean(config.mcp.servers.lsp ?? projectMcpServers.lsp)
   const mcpServers: CodexMcpManifest["mcpServers"] = {}
   for (const [name, server] of Object.entries(servers)) {
+    if (config.disabledMcps?.includes(name)) continue
     if (name === "lsp" && !hasExplicitLsp) {
       mcpServers.lsp = createCodexPackageLspServer(cwd, pluginRoot)
       continue

@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { cpSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path"
 
@@ -1323,6 +1324,89 @@ test("Codex generation resolves arbitrary multi-hop reviewer and oracle-2nd alia
     assert.ok(agent)
     assert.equal(countOccurrences(extractOriginalDeepworkPrompt(agent.developerInstructions), getDeepworkPrompt("gpt").trim()), 1, `${role}: alias calibration`)
   }
+})
+
+test("release CLI delivers defaults independently of project configuration and MCP files", (t) => {
+  const root = makePromptFixture()
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  cpSync(join(root, "codex"), join(root, "prompts", "codex"), { recursive: true })
+  cpSync(join(root, "shared"), join(root, "prompts", "shared"), { recursive: true })
+  writeFixtureFile(root, "package.json", JSON.stringify({ version: "9.9.9" }))
+  const script = join(process.cwd(), "scripts", "gen-codex-plugin.ts")
+  const env = {
+    ...process.env,
+    CODEX_HOME: join(root, "home"),
+    XDG_CONFIG_HOME: join(root, "xdg-config"),
+    OCMM_PROFILE: "release-fixture",
+    OCMM_NO_PROFILE: "",
+  }
+  const generate = () => execFileSync(process.execPath, ["--experimental-strip-types", script, "--release"], { cwd: root, env })
+  const profiles = () => Object.fromEntries(readdirSync(join(root, CODEX_PROJECT_AGENTS_DIR)).map((file) => {
+    const agent = parseGeneratedAgentToml(readFileSync(join(root, CODEX_PROJECT_AGENTS_DIR, file), "utf8"), file)
+    return [agent.name, [agent.model, agent.model_reasoning_effort]]
+  }))
+  const manifest = () => JSON.parse(readFileSync(join(root, CODEX_PLUGIN_DIR, ".mcp.json"), "utf8"))
+
+  generate()
+  const defaults = profiles()
+  const defaultMcps = manifest()
+  assert.deepEqual(defaults["dw-orchestrator"], ["gpt-6-astra", "high"])
+  assert.deepEqual(defaults["dw-planner"], ["gpt-6-astra", "xhigh"])
+  assert.deepEqual(defaultMcps.mcpServers.lsp, { command: "node", args: ["./dist/cli/ocmm-lsp.js", "mcp"], cwd: "." })
+
+  const custom = {
+    agents: { orchestrator: { model: "openai/gpt-6.1-sol", variant: "medium" } },
+    disabledAgents: ["builder"],
+    mcp: { servers: { privateConfig: { type: "remote", url: "https://config.invalid/mcp" } } },
+    promptsRoot: join(root, "custom-prompts"),
+  }
+  writeFixtureFile(root, ".codex/ocmm.jsonc", JSON.stringify(custom))
+  writeFixtureFile(root, ".opencode/ocmm.jsonc", JSON.stringify(custom))
+  writeFixtureFile(root, "home/ocmm-profiles/release-fixture.jsonc", JSON.stringify(custom))
+  writeFixtureFile(root, "xdg-config/opencode/ocmm-profiles/release-fixture.jsonc", JSON.stringify(custom))
+  writeFixtureFile(root, ".mcp.json", JSON.stringify({ mcp: {
+    lsp: { type: "local", command: ["synthetic-private-lsp"] },
+    privateProject: { type: "remote", url: "https://project.invalid/mcp" },
+  } }))
+
+  generate()
+  assert.deepEqual(profiles(), defaults)
+  assert.deepEqual(manifest(), defaultMcps)
+})
+
+test("custom CLI keeps Codex then OpenCode precedence and explicit adapter config wins", (t) => {
+  const root = makePromptFixture()
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  cpSync(join(root, "codex"), join(root, "prompts", "codex"), { recursive: true })
+  writeFixtureFile(root, "package.json", JSON.stringify({ version: "9.9.9" }))
+  writeFixtureFile(root, ".codex/ocmm.jsonc", JSON.stringify({
+    agents: { orchestrator: { model: "openai/gpt-6.1-sol", variant: "medium" } },
+    disabledMcps: ["websearch"],
+    mcp: { servers: { docs: { type: "remote", url: "https://config.invalid/mcp" } } },
+  }))
+  writeFixtureFile(root, ".opencode/ocmm.jsonc", JSON.stringify({ agents: { orchestrator: { model: "openai/gpt-6-luna", variant: "high" } } }))
+  writeFixtureFile(root, ".mcp.json", JSON.stringify({ mcp: {
+    lsp: { type: "local", command: ["synthetic-custom-lsp"] },
+    docs: { type: "remote", url: "https://project.invalid/mcp" },
+    websearch: { type: "remote", url: "https://disabled.invalid/mcp" },
+  } }))
+  const script = join(process.cwd(), "scripts", "gen-codex-plugin.ts")
+  const env = { ...process.env, CODEX_HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "xdg-config"), OCMM_NO_PROFILE: "1" }
+  const generate = () => execFileSync(process.execPath, ["--experimental-strip-types", script], { cwd: root, env })
+  const orchestrator = () => parseGeneratedAgentToml(readFileSync(join(root, CODEX_PROJECT_AGENTS_DIR, "dw-orchestrator.toml"), "utf8"), "orchestrator")
+
+  const explicit = { ...defaultConfig(), workflow: "codex" as const, agents: { orchestrator: { model: "openai/gpt-5.6-sol" } } }
+  assert.deepEqual(loadAdapterConfig(root, explicit), { config: explicit, host: "provided" })
+  generate()
+  assert.deepEqual([orchestrator().model, orchestrator().model_reasoning_effort], ["gpt-6.1-sol", "medium"])
+  const mcp = JSON.parse(readFileSync(join(root, CODEX_PLUGIN_DIR, ".mcp.json"), "utf8"))
+  assert.equal(mcp.mcpServers.lsp.command, "synthetic-custom-lsp")
+  assert.equal(mcp.mcpServers.docs.url, "https://config.invalid/mcp")
+  assert.equal(mcp.mcpServers.websearch, undefined)
+
+  rmSync(join(root, ".codex", "ocmm.jsonc"))
+  generate()
+  assert.deepEqual([orchestrator().model, orchestrator().model_reasoning_effort], ["gpt-6-luna", "high"])
 })
 
 test("generateCodexPlugin writes a self-contained bundle", async () => {

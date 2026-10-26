@@ -113,7 +113,7 @@ git push origin ocmm-lsp-vA.B.W
 #    If you skip this, the release workflow will fail at the
 #    "Check generated Codex plugin bundle" step.
 pnpm run build:ts
-pnpm run gen:codex-plugin
+pnpm run gen:codex-plugin --release
 git add .agents/plugins/marketplace.json .codex/agents plugins/deepwork
 git commit -m "chore: bump version to X.Y.W"
 
@@ -129,7 +129,7 @@ git push origin vX.Y.W
 #    On success, "GitHub Release" publishes assets automatically.
 ```
 
-Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's generated-bundle check fails if `.agents/plugins/marketplace.json`, `.codex/agents`, or `plugins/deepwork` do not match what `gen:codex-plugin` produces from the current `package.json` version.
+Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's generated-bundle check fails if `.agents/plugins/marketplace.json`, `.codex/agents`, or `plugins/deepwork` do not match what `gen:codex-plugin --release` produces from the current `package.json` version. Release generation uses source defaults with the Codex workflow and bundled model table, ignoring local OCMM config, profiles, and project `.mcp.json`; the command without `--release` retains project-config customization.
 
 `package.json.ocmm.lspVersion` pins the default LSP version for the main package release. This must match an already-published `ocmm-lsp-vA.B.C` release — the `stage-pinned-lsp` job downloads the pinned release assets by constructing `ocmm-lsp-v${lspVersion}`. The `ocmm` and `ocmm-lsp` versions are independent and do not need to be equal.
 

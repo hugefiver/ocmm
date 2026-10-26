@@ -1141,7 +1141,7 @@ ocmm publishes through two independent release lanes.
 ### ocmm release
 
 1. Set `package.json.version` and `package.json.ocmm.lspVersion` (must match an already-published `ocmm-lsp-vA.B.C` release).
-2. Regenerate the Codex plugin bundle: `pnpm run build:ts && pnpm run gen:codex-plugin`.
+2. Regenerate the Codex plugin bundle: `pnpm run build:ts && pnpm run gen:codex-plugin --release`. Release generation uses source defaults with the Codex workflow and bundled model table, ignoring local OCMM config, profiles, and project `.mcp.json`. The command without `--release` retains project-config customization.
 3. Tag `vX.Y.Z` and push.
 4. CI downloads pinned `ocmm-lsp-v<lspVersion>` release assets, bundles them into GitHub Release tarballs.
 5. CI publishes to npmjs.org as `ocmm` through npm Trusted Publishing (GitHub Actions OIDC).
