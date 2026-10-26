@@ -20,11 +20,15 @@ function writeConfig(xdg: string, raw: unknown): void {
   writeFileSync(join(xdg, "opencode", "ocmm.jsonc"), JSON.stringify(raw, null, 2))
 }
 
-function loadWithXdg(xdg: string, cwd?: string) {
+function loadWithXdg(
+  xdg: string,
+  cwd?: string,
+  env: Partial<Record<PluginEnvKey, string | undefined>> = {},
+) {
   const prev = process.env.XDG_CONFIG_HOME
   process.env.XDG_CONFIG_HOME = xdg
   try {
-    return loadConfig({ cwd: cwd ?? xdg })
+    return withPluginEnv(env, () => loadConfig({ cwd: cwd ?? xdg }))
   } finally {
     if (prev === undefined) delete process.env.XDG_CONFIG_HOME
     else process.env.XDG_CONFIG_HOME = prev
@@ -141,7 +145,7 @@ test("loadOpenCodePluginConfig restores lower selected inline profile values aft
       },
     }))
 
-    const generic = withPluginEnv({}, () => loadWithXdg(xdg, project))
+    const generic = loadWithXdg(xdg, project)
     const plugin = loadPluginWithXdg(xdg, project)
 
     assert.equal(generic.config.locale, "zh-CN")
@@ -198,7 +202,7 @@ test("layered loading removes invalid planning tier fields while preserving vali
       },
     }))
 
-    const generic = withPluginEnv({}, () => loadWithXdg(xdg, project)).config
+    const generic = loadWithXdg(xdg, project).config
     const plugin = loadPluginWithXdg(xdg, project).config
     for (const config of [generic, plugin]) {
       assert.equal(config.agents?.planner?.model, "openai/BASE")
@@ -226,7 +230,7 @@ test("loadOpenCodePluginConfig does not inject profile defaults over omitted bas
       activeProfile: "selected",
     })
 
-    const generic = withPluginEnv({}, () => loadWithXdg(xdg))
+    const generic = loadWithXdg(xdg)
     const plugin = loadPluginWithXdg(xdg)
 
     assert.deepEqual(generic.config.disabledHooks, ["custom-hook"])
@@ -256,7 +260,7 @@ test("loadOpenCodePluginConfig restores lower inline qualified-alias targets aft
       },
     }))
 
-    const generic = withPluginEnv({}, () => loadWithXdg(xdg, project))
+    const generic = loadWithXdg(xdg, project)
     const plugin = loadPluginWithXdg(xdg, project)
 
     assert.equal(generic.config.agents?.source?.alias, "precision:reviewer")
@@ -992,16 +996,9 @@ test("OCMM_PROFILE env var overrides config activeProfile", () => {
       },
       activeProfile: "a",
     })
-    const prev = process.env.OCMM_PROFILE
-    process.env.OCMM_PROFILE = "b"
-    try {
-      const { config, activeProfile } = loadWithXdg(xdg)
-      assert.equal(activeProfile, "b")
-      assert.equal(config.agents?.orchestrator?.model, "anthropic/claude-opus-4-7")
-    } finally {
-      if (prev === undefined) delete process.env.OCMM_PROFILE
-      else process.env.OCMM_PROFILE = prev
-    }
+    const { config, activeProfile } = loadWithXdg(xdg, undefined, { OCMM_PROFILE: "b" })
+    assert.equal(activeProfile, "b")
+    assert.equal(config.agents?.orchestrator?.model, "anthropic/claude-opus-4-7")
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
@@ -1314,15 +1311,8 @@ test("OCMM_PROFILE set to empty string falls back to config activeProfile", () =
       },
       activeProfile: "a",
     })
-    const prev = process.env.OCMM_PROFILE
-    process.env.OCMM_PROFILE = ""
-    try {
-      const { activeProfile } = loadWithXdg(xdg)
-      assert.equal(activeProfile, "a")
-    } finally {
-      if (prev === undefined) delete process.env.OCMM_PROFILE
-      else process.env.OCMM_PROFILE = prev
-    }
+    const { activeProfile } = loadWithXdg(xdg, undefined, { OCMM_PROFILE: "" })
+    assert.equal(activeProfile, "a")
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }
@@ -1338,21 +1328,13 @@ test("OCMM_NO_PROFILE ignores even an invalid active review profile", () => {
       },
       activeProfile: "a",
     })
-    const prevNo = process.env.OCMM_NO_PROFILE
-    const prevProf = process.env.OCMM_PROFILE
-    process.env.OCMM_NO_PROFILE = "1"
-    process.env.OCMM_PROFILE = "a"
-    try {
-      const { config, activeProfile } = loadWithXdg(xdg)
-      assert.equal(activeProfile, undefined)
-      // Base config loads unchanged — profile overlay NOT applied
-      assert.equal(config.agents?.orchestrator?.model, "hoo/glm-5.2")
-    } finally {
-      if (prevNo === undefined) delete process.env.OCMM_NO_PROFILE
-      else process.env.OCMM_NO_PROFILE = prevNo
-      if (prevProf === undefined) delete process.env.OCMM_PROFILE
-      else process.env.OCMM_PROFILE = prevProf
-    }
+    const { config, activeProfile } = loadWithXdg(xdg, undefined, {
+      OCMM_NO_PROFILE: "1",
+      OCMM_PROFILE: "a",
+    })
+    assert.equal(activeProfile, undefined)
+    // Base config loads unchanged — profile overlay NOT applied
+    assert.equal(config.agents?.orchestrator?.model, "hoo/glm-5.2")
   } finally {
     rmSync(xdg, { recursive: true, force: true })
   }

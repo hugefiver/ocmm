@@ -3,7 +3,7 @@
 > **Source**: `omo/packages/omo-opencode/src/hooks/ralph-loop/`, `src/hooks/stop-continuation-guard/`, `src/hooks/compaction-context-injector/`, `src/hooks/compaction-todo-preserver/`, `src/hooks/todo-continuation-enforcer/`, `src/hooks/unstable-agent-babysitter/`, `src/hooks/background-notification/`, `src/hooks/atlas/`
 > **Current ocmm status**: Slash command templates (`/ralph-loop`, `/audit-loop`, `/dwloop`) and a basic session-scoped, todo-driven idle continuation path are implemented. The commands are registered through OpenCode `config.command`; ocmm also expands bare noninteractive `opencode run "/ralph-loop ..."` input as command context. When enabled by `idleContinuation.enabled` or `/idle-continuation`, `session.idle` re-prompts sessions that still have unfinished todos, subject to abort and continuation-count guards. Full Ralph/audit iteration state, completion/no-progress detection, verifier orchestration, cancel/stop state, compaction persistence, Boulder, and Atlas hooks remain future work.
 > **Status**: Research complete
-> **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
+> **Note**: `omo/` refers to the gitignored reference implementation at `./omo/` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 
 ## Overview
 

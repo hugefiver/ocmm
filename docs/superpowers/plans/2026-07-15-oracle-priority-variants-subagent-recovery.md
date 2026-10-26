@@ -58,11 +58,9 @@
 - `src/review-agents/expand.ts` — pure normal-slot and logical-tier expansion, inheritance, deep cloning, and disabled policy.
 - `src/review-agents/expand.test.ts` — expansion, fallback preservation, non-mutation, priority ordering, and disable tests.
 - `src/shared/opencode-events.ts` — pure decoding for current and legacy session lineage and parent task-part evidence.
-- `src/shared/opencode-events.test.ts` — nested/flat payload and malformed-event tests, including the sanitized live fixture.
+- `src/shared/opencode-events.test.ts` — synthetic nested/flat payload and malformed-event tests.
 - `src/runtime-fallback/interruption-output-adapter.ts` — task transport-output notice adapter with no dispatch authority.
 - `src/runtime-fallback/interruption-output-adapter.test.ts` — notice, deduplication, disabled-hook, abort/denial/unknown/empty exclusions.
-- `src/runtime-fallback/fixtures/opencode-task-interruption.json` — sanitized event and task-output shapes captured by the isolated live probe.
-- `docs/superpowers/evidence/2026-07-15-subagent-interruption-open-code.md` — probe commands, sanitized observations, and the original-call/resume/notice-only outcome decision.
 
 **Modify:**
 - `src/config/schema.ts` — strict review variants, canonical slot enum entries, reserved-name semantic validation, and `subagent-interruption-recovery` hook name.
@@ -212,8 +210,6 @@ Report the live `git status --short`, marker-gate output, focused test counts, t
 ### Task 2: Capture the Live OpenCode Task/Interruption Contract
 
 **Files:**
-- Create: `src/runtime-fallback/fixtures/opencode-task-interruption.json`
-- Create: `docs/superpowers/evidence/2026-07-15-subagent-interruption-open-code.md`
 - Temporary only: a fresh task-owned interruption-probe directory under the approved OS temporary parent.
 
 **Interfaces:**
@@ -718,7 +714,7 @@ try {
 
 Expected: both processes stop in `finally`; `$probeRoot\result.json` exists; `retry429`, `resume-disconnect`, and `abort-hold` were called; observed `success` calls are recorded rather than invented; a terminal parent task part is persisted when present and otherwise remains JSON `null`; a successful resume requires exactly one additional `resume-disconnect` call and preserves the child count; explicit abort makes no second `abort-hold` request; and `handoff` is exactly one allowed value. A child session ID is evidence only and is never copied into `taskIDObserved`.
 
-- [ ] **Step 6: Persist the sanitized fixture and evidence with exact observed values**
+- [ ] **Step 6: Preserve reusable protocol fixtures and keep probe evidence temporary**
 
 Run:
 
@@ -737,12 +733,7 @@ $fixture = [ordered]@{
 }
 $fixtureText = $fixture | ConvertTo-Json -Depth 30
 $fixtureText = $fixtureText -replace 'ses_[A-Za-z0-9_-]+', 'ses_REDACTED'
-$fixtureDirectory = 'src/runtime-fallback/fixtures'
-$evidenceDirectory = 'docs/superpowers/evidence'
-if (-not (Test-Path -LiteralPath 'src/runtime-fallback')) { throw 'Missing expected parent: src/runtime-fallback' }
-if (-not (Test-Path -LiteralPath 'docs/superpowers')) { throw 'Missing expected parent: docs/superpowers' }
-New-Item -ItemType Directory -Path $fixtureDirectory, $evidenceDirectory -Force | Out-Null
-[System.IO.File]::WriteAllText('src/runtime-fallback/fixtures/opencode-task-interruption.json', $fixtureText, [System.Text.UTF8Encoding]::new($false))
+[System.IO.File]::WriteAllText("$probeRoot\protocol-observations.json", $fixtureText, [System.Text.UTF8Encoding]::new($false))
 
 $eventOrder = @($result.eventOrder) -join ' -> '
 $taskIDLine = if ([string]::IsNullOrWhiteSpace([string]$result.taskIDObserved)) { 'No explicit task_id was exposed; childSessionID was not substituted.' } else { 'An explicit task_id field was exposed and preserved independently of childSessionID.' }
@@ -761,10 +752,10 @@ $evidence = @"
 
 The deterministic path exercised a 429 response, a surfaced rate-limit error, a socket disconnect, and explicit abort. `session.error` remained the provider-error source of record. The selected handoff value comes from REST-visible parent/child behavior plus terminal parent task evidence when present; a missing terminal part remains null. No synthetic parent prompt, fabricated task ID, or duplicate child was introduced by the probe.
 "@
-[System.IO.File]::WriteAllText('docs/superpowers/evidence/2026-07-15-subagent-interruption-open-code.md', $evidence, [System.Text.UTF8Encoding]::new($false))
+[System.IO.File]::WriteAllText("$probeRoot\evidence.md", $evidence, [System.Text.UTF8Encoding]::new($false))
 ```
 
-Expected: both target directories exist; the fixture contains only sanitized wrapper fields and redacted session IDs. It contains no prompt, API key, auth object, full provider error, local user path, or fabricated task ID. The evidence records the exact ports, event order, branch provenance, and branch decision, including a null terminal/task-ID shape when that is the live runtime result.
+Expected: protocol observations contain only sanitized fields and redacted session IDs, with no prompt, API key, auth object, full provider error, local user path, or fabricated task ID. Per-run observations stay under the temporary probe root and are not committed; report useful verification results in conversation before cleanup. Regression tests use synthetic inputs for the required protocol behavior.
 
 - [ ] **Step 7: Clean every temporary process, file, and environment variable**
 
@@ -2620,7 +2611,7 @@ Report changed skill sections, maintenance rows, generated files, RED/GREEN evid
 **Interfaces:**
 - Consumes: the sanitized live evidence from Task 2 and the integrated `Subagent429Controller` from Task 1.
 - Produces: `SessionLineage`, `TaskPartInterruptionEvidence`, `resolveSessionLineageProperties(props)`, `resolveSessionLineage(raw)`, `resolveTaskPartInterruption(raw)`, exact `SubagentInterruptionCorrelation`, durable child records keyed by child session ID, and correlation methods on the one existing controller.
-- Runtime-truth adaptation: OpenCode `1.18.3` may validly produce `terminalParentTaskPart: null` and `taskIDObserved: null` for the transport child. Fixture-driven Task 10 decoder/output tests branch on that observed no-terminal-part shape instead of stopping or fabricating a task ID; the safety rule against child-session-ID substitution remains unchanged.
+- Decoder/output tests cover a missing terminal task part and task ID with synthetic inputs; no child-session ID may substitute for a task ID.
 
 - [ ] **Step 1: Write failing current/legacy event decoder tests**
 
@@ -2629,39 +2620,12 @@ Create `src/shared/opencode-events.test.ts`:
 ```typescript
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 
 import {
   resolveSessionLineage,
   resolveSessionLineageProperties,
   resolveTaskPartInterruption,
 } from "./opencode-events.ts"
-
-const liveFixture = JSON.parse(readFileSync(
-  new URL("../runtime-fallback/fixtures/opencode-task-interruption.json", import.meta.url),
-  "utf8",
-)) as {
-  sessionCreated: unknown
-  terminalParentTaskPart: unknown
-  taskIDObserved: string | null
-}
-
-test("decodes the sanitized live fixture without inventing task identity", () => {
-  const lineage = resolveSessionLineage(liveFixture.sessionCreated)
-  const task = resolveTaskPartInterruption(liveFixture.terminalParentTaskPart)
-  assert.ok(lineage?.sessionID)
-  if (liveFixture.terminalParentTaskPart === null) {
-    assert.equal(task, null)
-    assert.equal(liveFixture.taskIDObserved, null)
-    return
-  }
-  assert.equal(task?.terminalTaskErrorObserved, true)
-  const terminal = liveFixture.terminalParentTaskPart as {
-    part?: { state?: { input?: { task_id?: string } } }
-  }
-  assert.equal(task?.taskID, terminal.part?.state?.input?.task_id)
-  if (task?.taskID !== undefined) assert.equal(task.taskID, liveFixture.taskIDObserved)
-})
 
 test("resolves current nested and legacy flat session lineage", () => {
   assert.deepEqual(resolveSessionLineage({
@@ -4117,13 +4081,13 @@ Expected: no invariant throws; `rg` finds ordered/tier/non-fan-out guidance; the
 
 - [ ] **Step 6: Repeat the isolated live XDG probe against the implemented hook**
 
-Repeat Task 2 Steps 1-8 with a fresh probe directory, but omit only the initial `pnpm run build` command from Task 2 Step 1 and reuse the final root `dist/` produced by this Task's Step 3. Do not rebuild during or after the probe. Compare the new sanitized result with the saved fixture/evidence: preserve the files and record an exact match when equal; update both files and rerun decoder tests when any sanitized field or outcome differs. Verify all three real surfaces:
+Repeat Task 2 Steps 1-8 with a fresh probe directory, but omit only the initial `pnpm run build` command from Task 2 Step 1 and reuse the final root `dist/` produced by this Task's Step 3. Do not rebuild during or after the probe. Keep observations in the task-owned temporary directory, not in tracked fixtures or evidence files. If observations expose a protocol defect, reproduce it with synthetic protocol inputs and verify the affected decoder behavior. Verify all three real surfaces:
 
 1. a retryable child provider/transport failure produces exactly one existing-controller recovery or clean fallback;
 2. after a terminal parent task part, the implemented policy follows the captured `handoff` enum—original result, manual continuation using an explicitly observed `task_id`, or notice-only—with no child-ID substitution, duplicate child, or synthetic parent prompt;
 3. explicit child abort produces no automatic dispatch and no misleading continuation notice.
 
-Expected: raw JSONL shows no duplicate dispatch generation; sanitized fixture still matches decoder tests; cleanup removes the isolated XDG/config/log tree; no auth file was copied or created; root `dist/` remains byte-identical to the build already staged and checked in Steps 4-5.
+Expected: raw JSONL shows no duplicate dispatch generation; observed events satisfy the decoder's protocol contract; cleanup removes the isolated XDG/config/log tree; no auth file was copied or created; the probe uses the build already staged and checked in Steps 4-5.
 
 - [ ] **Step 7: Run final static and diff checks**
 

@@ -3,7 +3,7 @@
 > **Source**: `omo/packages/delegate-core/` (pure functions), `omo/packages/omo-opencode/src/features/background-agent/` (engine)
 > **Status**: Not migrated. Port delegate-core (380 LOC) + ConcurrencyManager (175 LOC) — OPTIONAL (Phase 7). BackgroundManager: SKIP (OpenCode built-in).
 > **Principle**: omo-own — reimplement (delegate-core is pure functions, easy to port; BackgroundManager is tightly coupled to OpenCode session API)
-> **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
+> **Note**: `omo/` refers to the gitignored reference implementation at `./omo/` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 > **Important**: OpenCode already provides `task`, `background_output`, `background_cancel` as built-in tools. The design spec marks BackgroundManager as **Skip** and Phase 7 (task enhancement) as **optional**. This KB doc is reference material; only port delegate-core + ConcurrencyManager if Phase 7 is pursued.
 
 ## Critical Distinction

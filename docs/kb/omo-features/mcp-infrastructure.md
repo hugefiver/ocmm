@@ -3,7 +3,7 @@
 > **Source**: `omo/packages/mcp-stdio-core/`, `omo/packages/mcp-client-core/`, `omo/packages/omo-opencode/src/mcp/`, `omo/packages/skills-loader-core/`
 > **Status**: Partially migrated. ocmm now has built-in MCP registration, `.mcp.json` and skill MCP config parsing, the `skill_mcp` dispatcher stub, and a native project-owned `ocmm-lsp` stdio MCP. Full `mcp-client-core` OAuth/lifecycle parity remains future work.
 > **Principle**: mcp-stdio-core + mcp-client-core = third-party (import); built-in MCPs + skill embedding = omo-own (reimplement config)
-> **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
+> **Note**: `omo/` refers to the gitignored reference implementation at `./omo/` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 
 ## Architecture
 

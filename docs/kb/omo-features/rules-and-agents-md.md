@@ -3,7 +3,7 @@
 > **Source**: `omo/packages/rules-engine/`, `omo/packages/agents-md-core/`, `omo/packages/omo-opencode/src/hooks/rules-injector/`, `omo/packages/omo-opencode/src/hooks/directory-agents-injector/`
 > **Status**: Not migrated. HIGH migration value.
 > **Principle**: omo-own → reimplement (matching + discovery logic)
-> **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
+> **Note**: `omo/` refers to the gitignored reference implementation at `./omo/` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 
 ## Architecture
 

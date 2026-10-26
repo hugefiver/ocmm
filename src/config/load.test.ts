@@ -14,6 +14,30 @@ import {
 } from "./load.ts"
 import { defaultConfig } from "./schema.ts"
 
+const PLUGIN_ENV_KEYS = ["OCMM_PROFILE", "OCMM_NO_PROFILE", "OCMM_FAST", "OPENCODE_CONFIG_CONTENT"] as const
+type PluginEnvKey = (typeof PLUGIN_ENV_KEYS)[number]
+
+function withPluginEnv<T>(overrides: Partial<Record<PluginEnvKey, string | undefined>>, run: () => T): T {
+  const previous = new Map<PluginEnvKey, string | undefined>()
+  for (const key of PLUGIN_ENV_KEYS) {
+    previous.set(key, process.env[key])
+    delete process.env[key]
+  }
+  for (const [key, value] of Object.entries(overrides) as [PluginEnvKey, string | undefined][]) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  try {
+    return run()
+  } finally {
+    for (const key of PLUGIN_ENV_KEYS) {
+      const value = previous.get(key)
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
 const UNSAFE_CONFIG_KEYS = ["__proto__", "constructor", "prototype"] as const
 
 function collectUnsafeOwnKeyPaths(value: unknown, path = "$"): string[] {
@@ -158,11 +182,6 @@ test("deepMerge preserves ordinary, accumulating, and profile-overlay array poli
 
 test("loadConfig removes dangerous keys parsed from project JSONC including array elements", () => {
   const cwd = mkdtempSync(join(tmpdir(), "ocmm-prototype-hardening-"))
-  const saved = new Map<string, string | undefined>()
-  for (const key of ["OCMM_PROFILE", "OCMM_NO_PROFILE", "OCMM_FAST"]) {
-    saved.set(key, process.env[key])
-    delete process.env[key]
-  }
 
   try {
     mkdirSync(join(cwd, ".opencode"), { recursive: true })
@@ -195,7 +214,7 @@ test("loadConfig removes dangerous keys parsed from project JSONC including arra
       },
     }`)
 
-    const loaded = loadConfig({ cwd, includeUser: false })
+    const loaded = withPluginEnv({}, () => loadConfig({ cwd, includeUser: false }))
     const options = loaded.config.fastModels.rules[0]?.options
 
     assert.ok(options)
@@ -206,21 +225,12 @@ test("loadConfig removes dangerous keys parsed from project JSONC including arra
       items: [{ kept: "array" }, null],
     })
   } finally {
-    for (const [key, value] of saved) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
     rmSync(cwd, { recursive: true, force: true })
   }
 })
 
 test("generic OpenCode loading preserves qualified aliases without materializing or validating targets", () => {
   const cwd = mkdtempSync(join(tmpdir(), "ocmm-qualified-generic-"))
-  const saved = new Map<string, string | undefined>()
-  for (const key of ["OCMM_PROFILE", "OCMM_NO_PROFILE", "OCMM_FAST", "OPENCODE_CONFIG_CONTENT"]) {
-    saved.set(key, process.env[key])
-    delete process.env[key]
-  }
   try {
     mkdirSync(join(cwd, ".opencode"), { recursive: true })
     writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({
@@ -233,7 +243,7 @@ test("generic OpenCode loading preserves qualified aliases without materializing
       },
     }))
 
-    const loaded = loadConfig({ cwd, host: "opencode", includeUser: false })
+    const loaded = withPluginEnv({}, () => loadConfig({ cwd, host: "opencode", includeUser: false }))
     assert.equal(loaded.config.agents?.valid?.alias, "precision:reviewer")
     assert.equal(loaded.config.agents?.valid?.requirement, undefined)
     assert.equal(loaded.config.agents?.missing?.alias, "missing:reviewer")
@@ -245,10 +255,6 @@ test("generic OpenCode loading preserves qualified aliases without materializing
     assert.equal(loaded.config.agents?.["oracle-4th"]?.alias, "precision:")
     assert.equal(loaded.config.agents?.["oracle-4th"]?.requirement, undefined)
   } finally {
-    for (const [key, value] of saved) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
     rmSync(cwd, { recursive: true, force: true })
   }
 })
@@ -366,7 +372,7 @@ test("project config cannot extend mcp envAllowlist", () => {
     writeFileSync(join(xdg, "opencode", "ocmm.jsonc"), JSON.stringify({ mcp: { envAllowlist: ["USER_KEY"] } }))
     writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({ mcp: { envAllowlist: ["PROJECT_KEY"] } }))
 
-    const { config } = loadConfig({ cwd })
+    const { config } = withPluginEnv({}, () => loadConfig({ cwd }))
     assert.deepEqual(config.mcp.envAllowlist, ["USER_KEY"])
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
@@ -395,7 +401,7 @@ test("default user config path uses ~/.config/opencode instead of APPDATA", () =
     writeFileSync(join(fakeHome, ".config", "opencode", "ocmm.jsonc"), JSON.stringify({ debug: true }))
     writeFileSync(join(fakeAppData, "opencode", "ocmm.jsonc"), JSON.stringify({ workflow: "v1" }))
 
-    const loaded = loadConfig({ cwd })
+    const loaded = withPluginEnv({}, () => loadConfig({ cwd }))
     assert.equal(loaded.sources.user, join(fakeHome, ".config", "opencode", "ocmm.jsonc"))
     assert.equal(loaded.config.debug, true)
     assert.equal(loaded.config.workflow, "v1")
@@ -428,13 +434,13 @@ test("codex host reads CODEX_HOME and project .codex config without changing ope
     writeFileSync(join(cwd, ".codex", "ocmm.jsonc"), JSON.stringify({ debug: true }))
     writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({ workflow: "codex", debug: false }))
 
-    const loaded = loadConfig({ cwd, host: "codex" })
+    const loaded = withPluginEnv({}, () => loadConfig({ cwd, host: "codex" }))
     assert.equal(loaded.sources.user, join(codexHome, "ocmm.jsonc"))
     assert.equal(loaded.sources.project, join(cwd, ".codex", "ocmm.jsonc"))
     assert.equal(loaded.config.workflow, "v1")
     assert.equal(loaded.config.debug, true)
 
-    const opencodeLoaded = loadConfig({ cwd, includeUser: false })
+    const opencodeLoaded = withPluginEnv({}, () => loadConfig({ cwd, includeUser: false }))
     assert.equal(opencodeLoaded.sources.project, join(cwd, ".opencode", "ocmm.jsonc"))
     assert.equal(opencodeLoaded.config.workflow, "codex")
     assert.equal(opencodeLoaded.config.debug, false)
@@ -457,7 +463,7 @@ test("includeUser=false ignores user config while keeping project config", () =>
     writeFileSync(join(xdg, "opencode", "ocmm.jsonc"), JSON.stringify({ workflow: "v1", debug: false }))
     writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify({ debug: true }))
 
-    const loaded = loadConfig({ cwd, includeUser: false })
+    const loaded = withPluginEnv({}, () => loadConfig({ cwd, includeUser: false }))
     assert.equal(loaded.sources.user, undefined)
     assert.equal(loaded.sources.project, join(cwd, ".opencode", "ocmm.jsonc"))
     assert.equal(loaded.config.workflow, "v1")
@@ -475,7 +481,7 @@ function withProjectConfig(value: unknown, run: (config: ReturnType<typeof loadC
   try {
     mkdirSync(join(cwd, ".opencode"), { recursive: true })
     writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify(value))
-    run(loadConfig({ cwd, includeUser: false }).config)
+    run(withPluginEnv({}, () => loadConfig({ cwd, includeUser: false })).config)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -495,7 +501,7 @@ function withUserAndProjectConfigs(
     mkdirSync(join(cwd, ".opencode"), { recursive: true })
     writeFileSync(join(xdg, "opencode", "ocmm.jsonc"), JSON.stringify(user))
     writeFileSync(join(cwd, ".opencode", "ocmm.jsonc"), JSON.stringify(project))
-    run(loadConfig({ cwd }).config)
+    run(withPluginEnv({}, () => loadConfig({ cwd })).config)
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
     else process.env.XDG_CONFIG_HOME = previousXdg
@@ -757,13 +763,9 @@ test("loadConfig reads BOM-prefixed base, project, and profile JSONC", () => {
     `\uFEFF${JSON.stringify({ agents: { orchestrator: { model: "BOM-PROFILE" } } })}`,
   )
   const previousXdg = process.env.XDG_CONFIG_HOME
-  const previousProfile = process.env.OCMM_PROFILE
-  const previousNoProfile = process.env.OCMM_NO_PROFILE
   process.env.XDG_CONFIG_HOME = xdg
-  delete process.env.OCMM_PROFILE
-  delete process.env.OCMM_NO_PROFILE
   try {
-    const { config, activeProfile } = loadConfig({ cwd })
+    const { config, activeProfile } = withPluginEnv({}, () => loadConfig({ cwd }))
     assert.equal(activeProfile, "focused")
     assert.equal(config.locale, "en-US")
     assert.equal(config.debug, true)
@@ -771,10 +773,6 @@ test("loadConfig reads BOM-prefixed base, project, and profile JSONC", () => {
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME
     else process.env.XDG_CONFIG_HOME = previousXdg
-    if (previousProfile === undefined) delete process.env.OCMM_PROFILE
-    else process.env.OCMM_PROFILE = previousProfile
-    if (previousNoProfile === undefined) delete process.env.OCMM_NO_PROFILE
-    else process.env.OCMM_NO_PROFILE = previousNoProfile
     rmSync(xdg, { recursive: true, force: true })
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -805,7 +803,7 @@ test("loadConfig applies a directory profile, shadowing inline same-name", () =>
   const prevXdg = process.env.XDG_CONFIG_HOME
   process.env.XDG_CONFIG_HOME = xdg
   try {
-    const { config, activeProfile } = loadConfig({ cwd })
+    const { config, activeProfile } = withPluginEnv({}, () => loadConfig({ cwd }))
     assert.equal(activeProfile, "co")
     assert.equal(
       (config.agents!.orchestrator as Record<string, unknown>).model,
@@ -837,7 +835,7 @@ test("loadConfig uses inline profile when no directory file exists", () => {
   const prevXdg = process.env.XDG_CONFIG_HOME
   process.env.XDG_CONFIG_HOME = xdg
   try {
-    const { config, activeProfile } = loadConfig({ cwd })
+    const { config, activeProfile } = withPluginEnv({}, () => loadConfig({ cwd }))
     assert.equal(activeProfile, "oa")
     assert.equal(
       (config.agents!.orchestrator as Record<string, unknown>).model,
@@ -866,11 +864,9 @@ test("loadConfig: OCMM_PROFILE selects a directory profile", () => {
     JSON.stringify({ agents: { orchestrator: { model: "ENV-MODEL" } } }),
   )
   const prevXdg = process.env.XDG_CONFIG_HOME
-  const prevEnv = process.env.OCMM_PROFILE
   process.env.XDG_CONFIG_HOME = xdg
-  process.env.OCMM_PROFILE = "env"
   try {
-    const { config, activeProfile } = loadConfig({ cwd })
+    const { config, activeProfile } = withPluginEnv({ OCMM_PROFILE: "env" }, () => loadConfig({ cwd }))
     assert.equal(activeProfile, "env")
     assert.equal(
       (config.agents!.orchestrator as Record<string, unknown>).model,
@@ -879,8 +875,6 @@ test("loadConfig: OCMM_PROFILE selects a directory profile", () => {
   } finally {
     if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME
     else process.env.XDG_CONFIG_HOME = prevXdg
-    if (prevEnv === undefined) delete process.env.OCMM_PROFILE
-    else process.env.OCMM_PROFILE = prevEnv
     rmSync(xdg, { recursive: true, force: true })
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -909,7 +903,7 @@ test("loadConfig: project profiles dir shadows user profiles dir", () => {
   const prevXdg = process.env.XDG_CONFIG_HOME
   process.env.XDG_CONFIG_HOME = xdg
   try {
-    const { config, activeProfile } = loadConfig({ cwd })
+    const { config, activeProfile } = withPluginEnv({}, () => loadConfig({ cwd }))
     assert.equal(activeProfile, "p")
     assert.equal(
       (config.agents!.orchestrator as Record<string, unknown>).model,
@@ -938,7 +932,7 @@ test("loadConfig silently ignores missing directory profile", () => {
   const prevXdg = process.env.XDG_CONFIG_HOME
   process.env.XDG_CONFIG_HOME = xdg
   try {
-    const { config, activeProfile } = loadConfig({ cwd })
+    const { config, activeProfile } = withPluginEnv({}, () => loadConfig({ cwd }))
     assert.equal(activeProfile, "nonexistent")
     // base config unchanged
     assert.equal(
@@ -1074,7 +1068,7 @@ test("loadConfig tolerates logical-tier violations without discarding valid sibl
           ...scenario.agents,
         },
       }))
-      const config = loadConfig({ cwd }).config
+      const config = withPluginEnv({}, () => loadConfig({ cwd })).config
       assert.equal(config.workflow, "codex", JSON.stringify(scenario.agents))
       assert.equal(config.agents?.orchestrator?.model, "openai/gpt-5.6-sol")
       scenario.verify(config)
@@ -1084,7 +1078,7 @@ test("loadConfig tolerates logical-tier violations without discarding valid sibl
       workflow: "codex",
       agents: { orchestrator: { model: "openai/gpt-5.6-terra", temperature: 3 } },
     }))
-    const tolerant = loadConfig({ cwd }).config
+    const tolerant = withPluginEnv({}, () => loadConfig({ cwd })).config
     assert.equal(tolerant.workflow, "codex")
     assert.equal(tolerant.agents?.orchestrator?.model, "openai/gpt-5.6-terra")
     assert.equal(tolerant.agents?.orchestrator?.temperature, undefined)

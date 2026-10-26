@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { tmpdir } from "node:os"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 export type ProbeStatus = "PASS" | "FAIL" | "SKIP" | "DEFER"
@@ -537,7 +538,7 @@ export type AttemptRecord = {
 export type CliOptions = {
   providerConfig: string | null
   model: string | null
-  fixtureOut: string
+  fixtureOut: string | null
   opencode: string
   timeoutMs: number
 }
@@ -576,6 +577,9 @@ export type TopologyCleanupResult = {
 }
 
 export type ProbeDependencies = {
+  tempParent?: string
+  findNativeLsp?: () => string | null
+  artifactsAvailable?: (nativeLsp: string | null) => boolean
   removeRoot?: (path: string) => void
   runAttempt?: RunAttemptFn
   runCommand?: typeof runCommand
@@ -615,7 +619,6 @@ const DYNAMIC_XDG_LABELS = ["data", "bin", "log", "repos", "cache", "config", "s
 const MAX_COMMAND_OUTPUT = 16 * 1024 * 1024
 const UNUSABLE_TOOL_IDENTITY = "unusable_tool_identity"
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const DEFAULT_FIXTURE = join(REPO_ROOT, "scripts", "fixtures", "opencode-codemode-execute-compatibility.json")
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -662,7 +665,8 @@ export function parseCliOptions(argv: string[]): CliOptions {
   const providerConfig = providerValue && isAbsolute(providerValue) ? resolve(providerValue) : null
   const modelValue = values.get("--model")
   const model = modelValue && /^[^/\s]+\/[^/\s]+$/.test(modelValue) ? modelValue : null
-  const fixtureOut = resolve(values.get("--fixture-out") ?? DEFAULT_FIXTURE)
+  const fixtureValue = values.get("--fixture-out")
+  const fixtureOut = fixtureValue === undefined ? null : resolve(fixtureValue)
   const timeoutMs = Number(values.get("--timeout-ms") ?? "120000")
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000) {
     throw new Error("--timeout-ms must be an integer >= 1000")
@@ -1765,31 +1769,16 @@ function writeFixtureDefault(path: string, contents: string): void {
   writeFileSync(path, contents)
 }
 
-function fallbackFixtureCandidates(primary: string, approvedParent: string): string[] {
-  const resolvedPrimary = resolve(primary)
-  const tempEvidence = join(
-    approvedParent,
-    `ocmm-codemode-execute-compatibility-fallback-${process.pid}.json`,
-  )
-  return [...new Set([
-    resolve(DEFAULT_FIXTURE),
-    resolve(tempEvidence),
-  ])].filter((candidate) => candidate !== resolvedPrimary)
-}
-
 export async function runProbe(
   options: CliOptions,
   dependencies: ProbeDependencies = {},
 ): Promise<ProbeOutcome> {
-  const effectiveOptions = { ...options, fixtureOut: resolve(options.fixtureOut) }
+  const effectiveOptions = { ...options, fixtureOut: options.fixtureOut === null ? null : resolve(options.fixtureOut) }
   let facts = initialFacts(effectiveOptions)
   const writeStdout = dependencies.writeStdout ?? ((text: string) => process.stdout.write(text))
   const writeStderr = dependencies.writeStderr ?? ((text: string) => process.stderr.write(text))
-  const approvedParent = process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Temp", "opencode") : ""
-  if (!approvedParent || !existsSync(approvedParent) || !statSync(approvedParent).isDirectory()) {
-    throw new Error("approved OpenCode temp parent is unavailable")
-  }
-  const runRoot = mkdtempSync(join(approvedParent, "ocmm-codemode-execute-"))
+  const tempParent = dependencies.tempParent ?? tmpdir()
+  const runRoot = mkdtempSync(join(tempParent, "ocmm-codemode-execute-"))
   const preflightRaw = join(runRoot, "preflight", "raw")
   let attemptRecords: AttemptRecord[] = []
   const parentPids: number[] = []
@@ -1840,8 +1829,8 @@ export async function runProbe(
         facts.host.worktreeDirty = dirtyClean && dirty.stdout.trim().length > 0
         if ((!revisionClean || !dirtyClean) && !facts.execute.timedOut) facts.execute.outputClassifiable = false
 
-        const nativeLsp = findNativeLsp()
-        facts.prerequisites.buildArtifactsAvailable = artifactsAvailable(nativeLsp)
+        const nativeLsp = (dependencies.findNativeLsp ?? findNativeLsp)()
+        facts.prerequisites.buildArtifactsAvailable = (dependencies.artifactsAvailable ?? artifactsAvailable)(nativeLsp)
         const basePreflightClean = executableClean && revisionClean && dirtyClean &&
           facts.prerequisites.buildArtifactsAvailable && nativeLsp !== null && !facts.execute.timedOut
         if (basePreflightClean && nativeLsp !== null) {
@@ -1921,23 +1910,33 @@ export async function runProbe(
     fixture = sanitizeFixture(facts, probeResult)
   }
   const writeFixture = dependencies.writeFixture ?? writeFixtureDefault
-  let actualFixtureOut = effectiveOptions.fixtureOut
   const serialize = (value: Record<string, unknown>): string => `${JSON.stringify(value, null, 2)}\n`
+  const writeTemporaryFixture = (): string => {
+    const outputRoot = mkdtempSync(join(tempParent, "ocmm-codemode-evidence-"))
+    const outputPath = join(outputRoot, "result.json")
+    try {
+      writeFixture(outputPath, serialize(fixture))
+      return outputPath
+    } catch (error) {
+      rmSync(outputRoot, { recursive: true, force: true })
+      throw error
+    }
+  }
+  let actualFixtureOut: string
   try {
-    writeFixture(actualFixtureOut, serialize(fixture))
+    if (effectiveOptions.fixtureOut === null) actualFixtureOut = writeTemporaryFixture()
+    else {
+      writeFixture(effectiveOptions.fixtureOut, serialize(fixture))
+      actualFixtureOut = effectiveOptions.fixtureOut
+    }
   } catch {
     if (probeResult.status !== "FAIL") probeResult = result("DEFER", "fixture-write-failed")
     fixture = sanitizeFixture(facts, probeResult)
-    let fallbackWritten = false
-    for (const candidate of fallbackFixtureCandidates(actualFixtureOut, approvedParent)) {
-      try {
-        writeFixture(candidate, serialize(fixture))
-        actualFixtureOut = candidate
-        fallbackWritten = true
-        break
-      } catch { /* try the next safe fallback */ }
+    try {
+      actualFixtureOut = writeTemporaryFixture()
+    } catch {
+      throw new FixtureFinalizationError(probeResult)
     }
-    if (!fallbackWritten) throw new FixtureFinalizationError(probeResult)
   }
   writeStdout(`OCMM_CODEMODE_RESULT=${probeResult.status}:${probeResult.reasonCode}:${actualFixtureOut}\n`)
   return { facts, result: probeResult }

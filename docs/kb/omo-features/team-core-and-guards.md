@@ -3,7 +3,7 @@
 > **Source**: `omo/packages/team-core/` (78 TS files), `omo/packages/omo-opencode/src/hooks/` (17 guards), `omo/packages/omo-opencode/src/plugin/hooks/create-tool-guard-hooks.ts`
 > **Status**: Not migrated. Team Mode = HIGHEST complexity; Guards = MEDIUM
 > **Principle**: team-core = omo-own (reimplement); guards = mixed (some import, some reimplement)
-> **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
+> **Note**: `omo/` refers to the gitignored reference implementation at `./omo/` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 > **Guard count**: 17 base guards + 1 conditional (`teamToolGating`, active only when `team_mode.enabled`). Total 18 with team mode.
 
 ## PART A — team-core Architecture

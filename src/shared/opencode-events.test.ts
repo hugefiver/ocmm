@@ -1,36 +1,11 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 
 import {
   resolveSessionLineage,
   resolveSessionLineageProperties,
   resolveTaskPartInterruption,
 } from "./opencode-events.ts"
-
-const liveFixture = JSON.parse(readFileSync(
-  new URL("../runtime-fallback/fixtures/opencode-task-interruption.json", import.meta.url),
-  "utf8",
-)) as {
-  sessionCreated: unknown
-  terminalParentTaskPart: unknown
-  taskIDObserved: string | null
-}
-
-test("decodes the sanitized live fixture without inventing task identity", () => {
-  const lineage = resolveSessionLineage(liveFixture.sessionCreated)
-  assert.ok(lineage?.sessionID, "sessionID must be decoded from the fixture")
-  assert.ok(lineage?.parentSessionID, "parentSessionID must be decoded from the fixture")
-  // The live fixture has terminalParentTaskPart: null and taskIDObserved: null.
-  // The decoder must NOT fabricate task identity when no terminal part exists.
-  const task = resolveTaskPartInterruption(liveFixture.terminalParentTaskPart)
-  assert.equal(task, null, "null terminal parent part must not produce task evidence")
-  assert.equal(liveFixture.taskIDObserved, null, "fixture confirms no task ID was observed")
-  // A null taskIDObserved must not be session-shaped (no ses_/child prefix leakage).
-  if (liveFixture.taskIDObserved !== null) {
-    assert.match(liveFixture.taskIDObserved, /^tsk_|^task-/, "task ID must be task-shaped, not session-shaped")
-  }
-})
 
 test("resolves current nested and legacy flat session lineage", () => {
   assert.deepEqual(resolveSessionLineage({
@@ -83,6 +58,7 @@ test("decodes a terminal parent task part with child session identity", () => {
 
 test("ignores completed non-task malformed and child-less task parts", () => {
   for (const raw of [
+    null,
     {},
     { event: { type: "message.part.updated", properties: { part: { type: "tool", tool: "read", state: { status: "error" } } } } },
     { event: { type: "message.part.updated", properties: { sessionID: "p", part: { type: "tool", tool: "task", state: { status: "completed", metadata: { sessionId: "c" } } } } } },

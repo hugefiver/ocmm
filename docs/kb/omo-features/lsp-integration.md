@@ -1,7 +1,7 @@
 # LSP Integration Technical Reference
 
 > Source: `omo/packages/lsp-core/`, `omo/packages/lsp-tools-mcp/`, `omo/packages/lsp-daemon/`, `omo/packages/omo-opencode/src/mcp/`
-> **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
+> **Note**: `omo/` refers to the gitignored reference implementation at `./omo/` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 
 > **Current ocmm status**: Migrated as a project-owned Rust stdio MCP server,
 > `ocmm-lsp`. ocmm registers the built-in MCP name `lsp` with `ocmm-lsp mcp`

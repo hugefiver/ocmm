@@ -3,7 +3,7 @@
 > **Source**: `omo/packages/shared-skills/skills/` (8 skills), `omo/.agents/skills/` (3 skills)
 > **Status**: Partially migrated. `git-master`, `ast-grep`, `frontend`, `debugging`, and `init-deep` are present under local `skills/` and registered as slash commands by default. `lsp-setup` is intentionally not migrated because OpenCode already provides setup guidance; ocmm owns the default `lsp` MCP via `ocmm-lsp`.
 > **Principle**: Third-party skills (import directly); omo-own skills (reimplement or adapt)
-> **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
+> **Note**: `omo/` refers to the gitignored reference implementation at `./omo/` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 > **Skill loading dependency**: Skills are designed to be loaded via `task(load_skills=["skill-name"], ...)`. Verify OpenCode's built-in `task` tool supports `load_skills` — if not, Phase 7 (task enhancement) becomes a prerequisite. See design spec Open Question #3.
 
 ## Packaging Model

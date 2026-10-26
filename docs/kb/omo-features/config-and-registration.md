@@ -3,7 +3,7 @@
 > **Source**: `omo/packages/omo-opencode/src/config/schema/`, `omo/packages/omo-opencode/src/testing/create-plugin-module.ts`
 > **Status**: Historical upstream reference. The current local-config note below supersedes this document's older comparison claims; ocmm has selectively adopted feature gates, skill sources, profile overlays, MCP config, hashline/rules toggles, and agent override controls without adopting the full 37-field schema.
 > **Principle**: omo-own — reimplement selectively (take patterns, not the full 37-field schema)
-> **Note**: `omo/` refers to the gitignored reference implementation at `C:\Users\hugefiver\source\ocmm\omo\` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
+> **Note**: `omo/` refers to the gitignored reference implementation at `./omo/` (omo monorepo, npm `oh-my-opencode`). Paths in this doc are relative to that location.
 > **Agent list caveat**: omo has 14 named agents (below). ocmm has its own 10 builtin agents — this doc is reference material for omo's schema, NOT a migration target.
 
 ## Current ocmm Configuration Note (2026-09-10)

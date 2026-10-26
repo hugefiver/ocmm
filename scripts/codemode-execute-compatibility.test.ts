@@ -47,6 +47,16 @@ const PROCESS_WRAPPER_FIXTURE = join(FIXTURES_ROOT, "codemode-execute-process-wr
 const BARRIER_XDG_LABELS = ["data", "bin", "log", "repos", "cache", "config", "state"]
 const EVENT_TIMEOUT_MS = 1500
 
+function syntheticPreflightDependencies(root: string) {
+  const executable = join(root, "synthetic-executable")
+  writeFileSync(executable, "synthetic probe executable")
+  return {
+    tempParent: root,
+    findNativeLsp: () => executable,
+    artifactsAvailable: () => true,
+  }
+}
+
 type CompletionEventSubscription = {
   waitFor(event: string): Promise<void>
   close(): void
@@ -1025,122 +1035,9 @@ test("direct LSP smoke parser accepts only the strict canonical JSON-RPC envelop
   })), false)
 })
 
-test("tracked CodeMode compatibility fixture is a complete sanitized PASS receipt", () => {
-  const fixtureText = readFileSync(join(FIXTURES_ROOT, "opencode-codemode-execute-compatibility.json"), "utf8")
-  assert.doesNotMatch(
-    fixtureText,
-    /api[ _-]?key|authorization|bearer\s+|session[ _-]?id|call[ _-]?id|\b(?:sk-|ghp_|AKIA|xox[bpars]-)|[A-Za-z]:[\\/]|\\\\|\/(?:home|Users|tmp)\//i,
-  )
-  const assertRecord = (value: unknown, name: string): Record<string, unknown> => {
-    assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${name} must be an object`)
-    return value as Record<string, unknown>
-  }
-  const assertExactKeys = (value: Record<string, unknown>, expected: string[]): void => {
-    assert.deepEqual(Object.keys(value).sort(), [...expected].sort())
-  }
-  const fixture = assertRecord(JSON.parse(fixtureText), "fixture")
-
-  const assertNoUnsafeFields = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      value.forEach(assertNoUnsafeFields)
-      return
-    }
-    if (value === null || typeof value !== "object") return
-    for (const [key, nested] of Object.entries(value)) {
-      assert.doesNotMatch(
-        key,
-        /^(?:api(?:_|-)?key|authorization|session(?:_|-)?id|call(?:_|-)?id|path|raw(?:_|-)?(?:output|log)|stdout|stderr)$/i,
-      )
-      assertNoUnsafeFields(nested)
-    }
-  }
-
-  assertExactKeys(fixture, [
-    "cleanup", "execute", "goNoGo", "hooks", "host", "isolation", "mcp", "permissions", "reasonCode", "registration", "schemaVersion", "status",
-  ])
-  assertNoUnsafeFields(fixture)
-  const host = assertRecord(fixture.host, "fixture.host")
-  const isolation = assertRecord(fixture.isolation, "fixture.isolation")
-  const registration = assertRecord(fixture.registration, "fixture.registration")
-  const execute = assertRecord(fixture.execute, "fixture.execute")
-  const outputJsonlFacts = assertRecord(execute.outputJsonlFacts, "fixture.execute.outputJsonlFacts")
-  const permissions = assertRecord(fixture.permissions, "fixture.permissions")
-  const hooks = assertRecord(fixture.hooks, "fixture.hooks")
-  const mcp = assertRecord(fixture.mcp, "fixture.mcp")
-  const cleanup = assertRecord(fixture.cleanup, "fixture.cleanup")
-  assertExactKeys(host, ["featureFlag", "ocmmRevision", "openCodeSha256", "openCodeVersion", "platform", "providerModel", "worktreeDirty"])
-  assertExactKeys(isolation, ["projectConfigIsolated", "xdgState"])
-  assertExactKeys(registration, ["directLspSmoke", "lspConnected", "ocmmLoaded", "probeConnected"])
-  assertExactKeys(execute, [
-    "argumentKeys", "emittedTask", "exactCode", "executeProbeMarker", "hookPayloadOk", "identityOk", "lspOk", "outerAfterCount", "outerBeforeCount", "outputClassifiable", "outputJsonlFacts", "permissionBlocked", "timedOut",
-  ])
-  assertExactKeys(outputJsonlFacts, ["errorEventCount", "eventCount", "eventTypes", "nonErrorPartCount"])
-  assertExactKeys(permissions, ["deniedCalled", "deniedHidden", "deniedTool"])
-  assertExactKeys(hooks, ["allNestedToolsIdentified", "completedMetadataTools", "nestedAfter", "nestedBefore"])
-  assertExactKeys(mcp, ["deniedCount", "identityCount", "jsonErrorCount"])
-  assertExactKeys(cleanup, ["attemptCount", "attemptRootsRemoved", "parentRootRemoved", "pidLedgerComplete", "remainingPids", "removalAttempted", "removalFailed", "trackedPids"])
-  assert.equal(fixture.schemaVersion, 1)
-  assert.equal(fixture.status, "PASS")
-  assert.equal(fixture.reasonCode, "all-required-probes-passed")
-  assert.equal(fixture.goNoGo, "GO")
-  assert.equal(host.openCodeVersion, "1.18.4")
-  assert.equal(host.platform, "win32-x64")
-  assert.equal(host.providerModel, "apai/gpt-5.6-terra")
-  assert.match(String(host.openCodeSha256), /^[a-f0-9]{64}$/i)
-  assert.match(String(host.ocmmRevision), /^[a-f0-9]{4,40}$/i)
-  assert.equal(host.worktreeDirty, true)
-  assert.equal(host.featureFlag, "OPENCODE_EXPERIMENTAL_CODE_MODE")
-  assert.equal(isolation.xdgState, "isolated")
-  assert.equal(isolation.projectConfigIsolated, true)
-  assert.equal(registration.ocmmLoaded, true)
-  assert.equal(registration.lspConnected, true)
-  assert.equal(registration.probeConnected, true)
-  assert.equal(registration.directLspSmoke, true)
-  assert.equal(execute.outerBeforeCount, 1)
-  assert.equal(execute.outerAfterCount, 1)
-  assert.ok(Array.isArray(execute.argumentKeys))
-  assert.deepEqual(execute.argumentKeys, ["code"])
-  assert.equal(execute.timedOut, false)
-  assert.equal(execute.permissionBlocked, false)
-  assert.equal(execute.outputClassifiable, true)
-  assert.ok(Array.isArray(outputJsonlFacts.eventTypes))
-  assert.deepEqual(outputJsonlFacts, {
-    eventCount: 6,
-    eventTypes: ["step_start", "tool_use", "step_finish", "step_start", "text", "step_finish"],
-    nonErrorPartCount: 6,
-    errorEventCount: 0,
-  })
-  assert.equal(execute.exactCode, true)
-  assert.equal(execute.executeProbeMarker, true)
-  assert.equal(execute.lspOk, true)
-  assert.equal(execute.identityOk, true)
-  assert.equal(execute.hookPayloadOk, true)
-  assert.equal(execute.emittedTask, false)
-  assert.equal(permissions.deniedTool, "codemode_probe_denied")
-  assert.equal(permissions.deniedHidden, true)
-  assert.equal(permissions.deniedCalled, false)
-  assert.ok(Array.isArray(hooks.nestedBefore))
-  assert.ok(Array.isArray(hooks.nestedAfter))
-  assert.ok(Array.isArray(hooks.completedMetadataTools))
-  assert.deepEqual([...hooks.nestedBefore].sort(), [...REQUIRED].sort())
-  assert.deepEqual([...hooks.nestedAfter].sort(), [...REQUIRED].sort())
-  assert.deepEqual([...hooks.completedMetadataTools].sort(), ["$codemode_search", ...REQUIRED].sort())
-  assert.equal(hooks.allNestedToolsIdentified, true)
-  assert.equal(mcp.identityCount, 1)
-  assert.equal(mcp.jsonErrorCount, 1)
-  assert.equal(mcp.deniedCount, 0)
-  assert.equal(cleanup.attemptCount, 1)
-  assert.equal(cleanup.pidLedgerComplete, true)
-  assert.ok(Number(cleanup.trackedPids) > 0)
-  assert.equal(cleanup.remainingPids, 0)
-  assert.equal(cleanup.attemptRootsRemoved, 1)
-  assert.equal(cleanup.removalAttempted, true)
-  assert.equal(cleanup.removalFailed, false)
-  assert.equal(cleanup.parentRootRemoved, true)
-})
-
 test("runProbe starts model attempts only after every preflight gate passes", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codemode-preflight-gates-"))
+  const preflightDependencies = syntheticPreflightDependencies(root)
   const provider = join(root, "provider.json")
   writeFileSync(provider, JSON.stringify(validProviderConfig()))
   try {
@@ -1148,6 +1045,7 @@ test("runProbe starts model attempts only after every preflight gate passes", as
       { name: "unsupported-version", expectedAttempts: 0 },
       { name: "locator-timeout", expectedAttempts: 0 },
       { name: "git-failure", expectedAttempts: 0 },
+      { name: "missing-artifacts", expectedAttempts: 0 },
       { name: "direct-malformed", expectedAttempts: 0 },
       { name: "direct-failure", expectedAttempts: 0 },
       { name: "clean", expectedAttempts: 1 },
@@ -1164,11 +1062,11 @@ test("runProbe starts model attempts only after every preflight gate passes", as
             pid: null,
           }
         }
-        if (/where\.exe$/i.test(command)) {
+        if (command === "which" || /where\.exe$/i.test(command)) {
           if (scenario.name === "locator-timeout") {
             return { exitCode: null, stdout: "", stderr: "", timedOut: true, pid: null }
           }
-          return { exitCode: 0, stdout: `${process.execPath}\n`, stderr: "", timedOut: false, pid: null }
+          return { exitCode: 0, stdout: `${preflightDependencies.findNativeLsp()}\n`, stderr: "", timedOut: false, pid: null }
         }
         if (command === "git" && args[0] === "rev-parse") {
           if (scenario.name === "git-failure") {
@@ -1194,6 +1092,8 @@ test("runProbe starts model attempts only after every preflight gate passes", as
         opencode: "opencode",
         timeoutMs: 1000,
       }, {
+        ...preflightDependencies,
+        artifactsAvailable: () => scenario.name !== "missing-artifacts",
         runCommand: fakePreflight,
         runAttempt: async (context) => {
           attempts += 1
@@ -1206,6 +1106,7 @@ test("runProbe starts model attempts only after every preflight gate passes", as
       if (scenario.name === "unsupported-version") assert.equal(outcome.result.reasonCode, "unclassifiable-output")
       if (scenario.name === "locator-timeout") assert.equal(outcome.result.reasonCode, "host-command-timeout")
       if (scenario.name === "git-failure") assert.equal(outcome.result.reasonCode, "unclassifiable-output")
+      if (scenario.name === "missing-artifacts") assert.equal(outcome.result.reasonCode, "build-artifacts-unavailable")
       if (scenario.name === "direct-malformed" || scenario.name === "direct-failure") {
         assert.equal(outcome.result.reasonCode, "direct-lsp-smoke-failed")
       }
@@ -1217,6 +1118,7 @@ test("runProbe starts model attempts only after every preflight gate passes", as
 
 test("runProbe parent version barrier stops 1.18.3 before every later preflight surface", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codemode-parent-version-barrier-"))
+  const preflightDependencies = syntheticPreflightDependencies(root)
   const provider = join(root, "provider.json")
   writeFileSync(provider, JSON.stringify(validProviderConfig()))
   try {
@@ -1234,14 +1136,15 @@ test("runProbe parent version barrier stops 1.18.3 before every later preflight 
         opencode: "opencode",
         timeoutMs: 1000,
       }, {
+        ...preflightDependencies,
         runCommand: async (command, args): Promise<CommandResult> => {
           if (args[0] === "--version") {
             calls.push("version")
             return { exitCode: 0, stdout: `${version}\n`, stderr: "", timedOut: false, pid: null }
           }
-          if (/where\.exe$/i.test(command)) {
+          if (command === "which" || /where\.exe$/i.test(command)) {
             calls.push("location")
-            return { exitCode: 0, stdout: `${process.execPath}\n`, stderr: "", timedOut: false, pid: null }
+            return { exitCode: 0, stdout: `${preflightDependencies.findNativeLsp()}\n`, stderr: "", timedOut: false, pid: null }
           }
           if (command === "git" && args[0] === "rev-parse") {
             calls.push("revision")
@@ -2750,11 +2653,45 @@ test("CLI parser preserves missing provider/model as structured SKIP inputs", ()
   const absent = parseCliOptions([])
   assert.equal(absent.providerConfig, null)
   assert.equal(absent.model, null)
-  assert.match(absent.fixtureOut, /scripts[\\/]fixtures[\\/]opencode-codemode-execute-compatibility\.json$/)
 
   const invalidProvider = parseCliOptions(["--provider-config", "relative.json", "--model", "p/m"])
   assert.equal(invalidProvider.providerConfig, null)
   assert.equal(invalidProvider.model, "p/m")
+})
+
+test("CLI default output retains each invocation's evidence after raw cleanup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-codemode-default-output-"))
+  try {
+    const outputs: string[] = []
+    for (let invocation = 0; invocation < 2; invocation += 1) {
+      const stdout: string[] = []
+      const stderr: string[] = []
+      const exitCode = await runCli([], {
+        tempParent: root,
+        writeStdout: (text) => stdout.push(text),
+        writeStderr: (text) => stderr.push(text),
+      })
+      assert.equal(exitCode, 3)
+      assert.deepEqual(stderr, [])
+      assert.equal(stdout.length, 1)
+      const prefix = "OCMM_CODEMODE_RESULT=SKIP:provider-config-unavailable:"
+      assert.equal(stdout[0]!.startsWith(prefix), true)
+      const outputPath = stdout[0]!.trim().slice(prefix.length)
+      assert.equal(dirname(dirname(outputPath)), root)
+      const saved = JSON.parse(readFileSync(outputPath, "utf8")) as {
+        status: string
+        reasonCode: string
+        cleanup: { parentRootRemoved: boolean }
+      }
+      assert.equal(saved.status, "SKIP")
+      assert.equal(saved.reasonCode, "provider-config-unavailable")
+      assert.equal(saved.cleanup.parentRootRemoved, true)
+      outputs.push(outputPath)
+    }
+    assert.notEqual(outputs[0], outputs[1])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("CLI writes fixture and result line when provider config is unavailable", async () => {
@@ -2964,6 +2901,7 @@ test("host signals ignore model prose and trust only error envelopes or host std
 
 test("nonzero trusted activation ambiguity remains classifiable and forbids retry", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codemode-activation-"))
+  const preflightDependencies = syntheticPreflightDependencies(root)
   const provider = join(root, "provider.json")
   const fixtureOut = join(root, "activation.json")
   writeFileSync(provider, JSON.stringify(validProviderConfig()))
@@ -3001,7 +2939,7 @@ test("nonzero trusted activation ambiguity remains classifiable and forbids retr
     let attemptCalls = 0
     const preflightCommand = async (command: string, args: string[]): Promise<CommandResult> => {
       if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }
-      if (/where\.exe$/i.test(command)) return { exitCode: 0, stdout: `${process.execPath}\n`, stderr: "", timedOut: false, pid: null }
+      if (command === "which" || /where\.exe$/i.test(command)) return { exitCode: 0, stdout: `${preflightDependencies.findNativeLsp()}\n`, stderr: "", timedOut: false, pid: null }
       if (command === "git" && args[0] === "rev-parse") return { exitCode: 0, stdout: "abcdef1\n", stderr: "", timedOut: false, pid: null }
       if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "", timedOut: false, pid: null }
       return { exitCode: 0, stdout: directLspResponse(), stderr: "", timedOut: false, pid: null }
@@ -3013,6 +2951,7 @@ test("nonzero trusted activation ambiguity remains classifiable and forbids retr
       opencode: "opencode",
       timeoutMs: 1000,
     }, {
+      ...preflightDependencies,
       runCommand: preflightCommand,
       runAttempt: async ({ id, rootPath }) => {
         attemptCalls += 1
@@ -3042,6 +2981,7 @@ test("nonzero trusted activation ambiguity remains classifiable and forbids retr
 
 test("featureUnsupported matches only execute itself and trusted unsupported forbids retry", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codemode-unsupported-"))
+  const preflightDependencies = syntheticPreflightDependencies(root)
   const provider = join(root, "provider.json")
   const fixtureOut = join(root, "unsupported.json")
   writeFileSync(provider, JSON.stringify(validProviderConfig()))
@@ -3102,7 +3042,7 @@ test("featureUnsupported matches only execute itself and trusted unsupported for
     let attemptCalls = 0
     const preflightCommand = async (command: string, args: string[]): Promise<CommandResult> => {
       if (args[0] === "--version") return { exitCode: 0, stdout: "1.18.4\n", stderr: "", timedOut: false, pid: null }
-      if (/where\.exe$/i.test(command)) return { exitCode: 0, stdout: `${process.execPath}\n`, stderr: "", timedOut: false, pid: null }
+      if (command === "which" || /where\.exe$/i.test(command)) return { exitCode: 0, stdout: `${preflightDependencies.findNativeLsp()}\n`, stderr: "", timedOut: false, pid: null }
       if (command === "git" && args[0] === "rev-parse") return { exitCode: 0, stdout: "abcdef1\n", stderr: "", timedOut: false, pid: null }
       if (command === "git" && args[0] === "status") return { exitCode: 0, stdout: "", stderr: "", timedOut: false, pid: null }
       return { exitCode: 0, stdout: directLspResponse(), stderr: "", timedOut: false, pid: null }
@@ -3114,6 +3054,7 @@ test("featureUnsupported matches only execute itself and trusted unsupported for
       opencode: "opencode",
       timeoutMs: 1000,
     }, {
+      ...preflightDependencies,
       runCommand: preflightCommand,
       runAttempt: async ({ id, rootPath }) => {
         attemptCalls += 1
@@ -3681,34 +3622,34 @@ test("internal preflight failure after run-root creation writes structured DEFER
 })
 
 test("fixture write failure uses structured fallback and preserves cleanup FAIL", async () => {
-  const approvedParent = join(String(process.env.LOCALAPPDATA), "Temp", "opencode")
-  const fallbackFixture = join(approvedParent, `ocmm-codemode-execute-compatibility-fallback-${process.pid}.json`)
-  const primaryFixture = resolve("scripts/fixtures/opencode-codemode-execute-compatibility.json")
-  const directoryPrimary = mkdtempSync(join(tmpdir(), "ocmm-codemode-fixture-directory-"))
-  const cleanupRoots: string[] = []
-  rmSync(fallbackFixture, { force: true })
+  const outputRoot = mkdtempSync(join(tmpdir(), "ocmm-codemode-fixture-fallback-"))
+  const primaryFixture = join(outputRoot, "requested.json")
+  const directoryPrimary = join(outputRoot, "directory")
+  mkdirSync(directoryPrimary)
 
   const runCase = async (cleanupFails: boolean): Promise<void> => {
     const stdout: string[] = []
     const stderr: string[] = []
     let writeCount = 0
+    let fallbackFixture = ""
     const exitCode = await runCli(["--fixture-out", primaryFixture], {
+      tempParent: outputRoot,
       removeRoot: cleanupFails
-        ? (path) => {
-            cleanupRoots.push(path)
+        ? () => {
             throw new Error("forced cleanup failure")
           }
         : undefined,
       writeFixture: (path, contents) => {
         writeCount += 1
         if (writeCount === 1) throw new Error("sk-private finalizer C:\\private\\requested.json")
-        mkdirSync(resolve(path, ".."), { recursive: true })
+        fallbackFixture = path
         writeFileSync(path, contents)
       },
       writeStdout: (text) => stdout.push(text),
       writeStderr: (text) => stderr.push(text),
     })
     assert.equal(writeCount, 2)
+    assert.equal(dirname(dirname(fallbackFixture)), outputRoot)
     assert.equal(existsSync(fallbackFixture), true)
     const savedText = readFileSync(fallbackFixture, "utf8")
     const saved = JSON.parse(savedText) as { status: string; reasonCode: string; goNoGo: string; cleanup: { parentRootRemoved: boolean } }
@@ -3735,49 +3676,40 @@ test("fixture write failure uses structured fallback and preserves cleanup FAIL"
   try {
     await runCase(false)
     await runCase(true)
-    rmSync(fallbackFixture, { force: true })
     const stdout: string[] = []
     const stderr: string[] = []
-    let writeCount = 0
     const directoryExit = await runCli(["--fixture-out", directoryPrimary], {
-      writeFixture: (path, contents) => {
-        writeCount += 1
-        if (path === directoryPrimary) {
-          writeFileSync(path, contents)
-          return
-        }
-        if (path === primaryFixture) throw new Error("default fallback unavailable")
-        writeFileSync(path, contents)
-      },
+      tempParent: outputRoot,
       writeStdout: (text) => stdout.push(text),
       writeStderr: (text) => stderr.push(text),
     })
-    assert.equal(writeCount, 3)
     assert.equal(directoryExit, 4)
     assert.deepEqual(stderr, [])
+    assert.equal(stdout.length, 1)
+    const prefix = "OCMM_CODEMODE_RESULT=DEFER:fixture-write-failed:"
+    assert.equal(stdout[0]!.startsWith(prefix), true)
+    const fallbackFixture = stdout[0]!.trim().slice(prefix.length)
+    assert.equal(dirname(dirname(fallbackFixture)), outputRoot)
     assert.deepEqual(stdout, [`OCMM_CODEMODE_RESULT=DEFER:fixture-write-failed:${fallbackFixture}\n`])
     const directorySaved = JSON.parse(readFileSync(fallbackFixture, "utf8")) as { status: string; reasonCode: string }
     assert.deepEqual(directorySaved, { ...directorySaved, status: "DEFER", reasonCode: "fixture-write-failed" })
   } finally {
-    rmSync(fallbackFixture, { force: true })
-    rmSync(directoryPrimary, { recursive: true, force: true })
-    for (const root of cleanupRoots) rmSync(root, { recursive: true, force: true })
+    rmSync(outputRoot, { recursive: true, force: true })
   }
 })
 
 test("fixture write exhaustion preserves DEFER and cleanup FAIL exit codes", async () => {
   const outputRoot = mkdtempSync(join(tmpdir(), "ocmm-codemode-fixture-exhaustion-"))
   const primaryFixture = join(outputRoot, "requested.json")
-  const cleanupRoots: string[] = []
 
   const runCase = async (cleanupFails: boolean): Promise<void> => {
     const stdout: string[] = []
     const stderr: string[] = []
     let writeCount = 0
     const exitCode = await runCli(["--fixture-out", primaryFixture], {
+      tempParent: outputRoot,
       removeRoot: cleanupFails
-        ? (path) => {
-            cleanupRoots.push(path)
+        ? () => {
             throw new Error("forced cleanup failure")
           }
         : undefined,
@@ -3789,7 +3721,7 @@ test("fixture write exhaustion preserves DEFER and cleanup FAIL exit codes", asy
       writeStderr: (text) => stderr.push(text),
     })
 
-    assert.equal(writeCount, 3)
+    assert.equal(writeCount, 2)
     assert.deepEqual(stdout, [])
     assert.doesNotMatch(stdout.join("") + stderr.join(""), /Bearer|sk-private|private\\requested|forced cleanup failure/i)
     if (cleanupFails) {
@@ -3806,7 +3738,6 @@ test("fixture write exhaustion preserves DEFER and cleanup FAIL exit codes", asy
     await runCase(false)
     await runCase(true)
   } finally {
-    for (const root of cleanupRoots) rmSync(root, { recursive: true, force: true })
     rmSync(outputRoot, { recursive: true, force: true })
   }
 })
