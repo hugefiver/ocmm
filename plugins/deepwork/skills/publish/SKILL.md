@@ -1,6 +1,6 @@
 ---
 name: publish
-description: "Use only for an explicitly authorized ocmm release; incomplete until the fail-closed completion checker proves every required surface; never repair code or move an immutable tag during publishing."
+description: "Use only for an explicitly authorized ocmm release; require complete publication proof, preserve published identities, and handle unpublished failures only with explicit repair and tag-replacement authorization."
 ---
 
 # Publish ocmm
@@ -19,8 +19,10 @@ Never describe `FAILED`, `UNRESOLVED`, a nonterminal run, terminal workflow succ
 
 - Do not start a code review, change code, repair a failed workflow, or open a fix loop while publishing.
 - Do not use a workstation to overwrite registry packages or GitHub Release assets.
-- Never move, delete, or recreate the immutable tag after publication starts.
-- A repair is a separately authorized normal commit and new version/tag, or an explicitly authorized workflow rerun that preserves the same tag identity.
+- Once any package or Release asset has been published, never move, delete, or recreate its tag or overwrite the published artifact.
+- A failed run that terminated before publication may be repaired outside the publish phase. Reusing its version and replacing its tag requires explicit user authorization for both the repair and force push, evidence that every publication job was skipped or never started, and confirmation that no package or Release asset exists for that version. Uncertain publication state does not qualify.
+- For an authorized unpublished-tag replacement, validate the repaired commit and generated bundle first, preserve unrelated branch history, and constrain the force push with an explicit lease on the observed remote tag identity. Bind completion checks to the replacement commit and its new run; never reuse the failed run's receipt as proof.
+- Otherwise use a separately authorized new version/tag, or an explicitly authorized workflow rerun that preserves the same tag identity.
 - Continue observing independent surfaces after one surface fails so the final report describes the full partial state.
 
 ## Required invocation
@@ -45,7 +47,7 @@ Report the tag, peeled SHA, fixed run ID/attempt/URL, lane, exact asset names, a
 
 ### FAILED
 
-Report every surface status and safe error code. State that the immutable tag remains fixed. Do not repair or republish inside the publish session.
+Report every surface status and safe error code. Preserve the tag by default and do not repair inside the publish phase. A terminal, demonstrably unpublished failure may enter the explicitly authorized repair and tag-replacement path above; a partial publication may not.
 
 ### UNRESOLVED
 

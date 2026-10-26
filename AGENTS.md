@@ -67,6 +67,8 @@ Before npmjs.org publishing works without tokens, configure npm Trusted Publishi
 
 After the run terminates, `check:release-completion` is the only completion authority. A successful run conclusion is necessary but insufficient: the receipt must bind the tag and peeled commit, fixed run/attempt, every exact lane job conclusion, assets, checksums, and required non-registry surfaces. npmjs and GitHub Packages are not completion checks or proof surfaces; registry publish jobs remain in CI and their job conclusions remain covered. Do not report completion from a workflow conclusion alone. After any partial publication, do not move, delete, or recreate the immutable tag, overwrite a package or Release asset, or repair the release in place; report the receipt and use a separately authorized new version/tag or an explicitly authorized same-identity rerun.
 
+If a failed run is terminal and every publication job was skipped or never started, explicit user authorization may permit a normal repair commit followed by reuse of the same version and replacement of its unpublished tag. First confirm that no package or Release asset exists for that version; an unresolved publication state is not permission. Validate the repair and generated bundle outside the publish phase, then use an explicit remote-tag lease for the authorized force push without rewriting unrelated branch history. Completion must bind the replacement commit and new workflow run. This exception never permits overwriting an already-published package or asset.
+
 ### npm optional platform packages
 
 The main `ocmm` package declares eight optional `ocmm-lsp-*` platform packages:
@@ -139,7 +141,7 @@ After the authorized main `v0.6.6` tag push and matching workflow run exist, run
 pnpm --silent run check:release-completion -- --mode remote --repository hugefiver/ocmm --tag v0.6.6 --deadline-ms 5400000 --poll-ms 15000
 ```
 
-Use the actual authorized tag for later releases; manually dispatched runs also require their numeric `--run-id`. No local `GITHUB_TOKEN` is needed to bump, tag, push, or trigger CI. The checker does not request npmjs or GitHub Packages; the release workflow continues registry publication with workflow-managed authentication. Exit `0` with receipt outcome `COMPLETED` is the only completion result. Exit `1` (`FAILED`) and exit `2` (`UNRESOLVED`) preserve the immutable tag and require reporting rather than an in-place repair.
+Use the actual authorized tag for later releases; manually dispatched runs also require their numeric `--run-id`. No local `GITHUB_TOKEN` is needed to bump, tag, push, or trigger CI. The checker does not request npmjs or GitHub Packages; the release workflow continues registry publication with workflow-managed authentication. Exit `0` with receipt outcome `COMPLETED` is the only completion result. Exit `1` (`FAILED`) and exit `2` (`UNRESOLVED`) require reporting and preserve the tag by default. Only a terminal failure proven to precede all publication may use the explicitly authorized unpublished-tag replacement procedure above; an unresolved or partially published release may not.
 
 ## Hook defaults
 
