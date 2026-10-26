@@ -1,10 +1,10 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
-import { buildSkillCommand, loadSharedSkills, loadV1SkillCommands, loadV1SkillBriefs, V1_COMMAND_SKILLS, V1_SKILL_DIRS } from "./skill-loader.ts"
+import { buildSkillCommand, loadSharedSkills, loadV1SkillCommands, loadV1SkillBriefs, V1_BRIEF_SKILLS, V1_COMMAND_SKILLS, V1_SKILL_DIRS } from "./skill-loader.ts"
 
 function makeSkillsRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-skills-"))
@@ -84,6 +84,38 @@ test("shared report-fidelity is discoverable, loadable, and respects skill filte
   assert.equal(command?.name, skill.name)
   assert.ok(command.template.length > 0)
   assert.equal(loadSharedSkills({ enable: ["report-fidelity"], disable: ["report-fidelity"] }).length, 0)
+})
+
+test("shared avoid-ai-slop is discoverable and explicitly loadable without default body injection", () => {
+  const [skill] = loadSharedSkills({ enable: ["avoid-ai-slop"] })
+  assert.ok(skill)
+  assert.equal(skill.name, "avoid-ai-slop")
+  assert.ok(skill.description.trim())
+  assert.equal("template" in skill, false)
+  const command = buildSkillCommand(skill)
+  assert.ok(command)
+  const source = readFileSync(join(skill.path, "SKILL.md"), "utf8")
+  const body = source.slice(source.indexOf("\n---", 3) + 4).trim()
+  assert.ok(body)
+  assert.ok(command.template.includes(body))
+  assert.equal((V1_BRIEF_SKILLS as readonly string[]).includes(skill.name), false)
+  assert.equal((V1_COMMAND_SKILLS as readonly string[]).includes(skill.name), false)
+  assert.equal(loadSharedSkills({ enable: [skill.name], disable: [skill.name] }).length, 0)
+})
+
+test("shared discovery returns metadata while explicit loading reads the current body", () => {
+  const root = makeSkillsRoot()
+  try {
+    writeSkill(root, "avoid-ai-slop", "avoid-ai-slop", "Fixture")
+    const [skill] = loadSharedSkills({ rootDir: root })
+    assert.ok(skill)
+    assert.deepEqual(Object.keys(skill).sort(), ["description", "name", "path"])
+    writeFileSync(join(skill.path, "SKILL.md"), "---\nname: avoid-ai-slop\ndescription: Fixture\n---\n[fixture:updated-body]\n")
+    assert.ok(buildSkillCommand(skill)?.template.includes("[fixture:updated-body]"))
+    assert.equal(loadV1SkillBriefs(root).includes("[fixture:updated-body]"), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("shared coding-agent-sessions skill is discovered and remains outside v1 injection", () => {

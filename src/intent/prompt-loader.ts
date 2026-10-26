@@ -63,6 +63,7 @@ const agentPrompts = new Map<string, string>()
 const categoryPrompts = new Map<string, string>()
 const categoryModelCalibrations = new Map<string, Map<string, string>>()
 let shellSafetyPrompt = ""
+let avoidAiSlopPrompt = ""
 
 function loadFile(absPath: string): string | null {
   try {
@@ -81,6 +82,7 @@ export function loadAllPrompts(
   categoryPrompts.clear()
   categoryModelCalibrations.clear()
   shellSafetyPrompt = loadFile(join(rootDir, "shared", "shell-safety.md")) ?? ""
+  avoidAiSlopPrompt = loadFile(join(rootDir, "shared", "avoid-ai-slop.md")) ?? ""
   const base = join(rootDir, workflow)
   for (const v of DEEPWORK_VARIANTS) {
     const text = loadFile(join(base, "deepwork", `${v}.md`))
@@ -178,6 +180,10 @@ export function getCategoryModelCalibration(
 
 export function getShellSafetyPrompt(): string {
   return shellSafetyPrompt
+}
+
+export function getAvoidAiSlopPrompt(): string {
+  return avoidAiSlopPrompt
 }
 
 export const _internals = { classifyModelFamily } as {

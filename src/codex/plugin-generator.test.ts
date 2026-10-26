@@ -9,7 +9,7 @@ import { defaultConfig } from "../config/schema.ts"
 import { loadConfig, stripJsoncCommentsAndTrailingCommas } from "../config/load.ts"
 import { createConfigHandler } from "../hooks/config.ts"
 import { createChatMessageHandler, createSessionIntentStore, createSystemTransformHandler } from "../hooks/chat-message.ts"
-import { loadV1SkillBriefs } from "../intent/skill-loader.ts"
+import { buildSkillCommand, loadSharedSkills, loadV1SkillBriefs } from "../intent/skill-loader.ts"
 import { isRecord } from "../shared/logger.ts"
 import {
   getAgentPrompt,
@@ -1791,6 +1791,55 @@ for (const field of ["skills.disable", "disabledSkills"] as const) {
     })
   }
 }
+
+test("Codex generator packages avoid-ai-slop with its license and gates the shared agent brief with skill selection", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-codex-avoid-ai-slop-"))
+  const promptsRoot = makePromptFixture()
+  const marker = "[fixture:avoid-ai-slop-brief]"
+  try {
+    writeFixtureFile(promptsRoot, "shared/avoid-ai-slop.md", marker)
+    for (const filter of ["enabled", "skills.disable", "disabledSkills", "allow-list"] as const) {
+      const config = { ...defaultConfig(), workflow: "codex" as const, promptsRoot }
+      config.skills.enable = filter === "allow-list" ? ["publish"] : ["avoid-ai-slop", "publish"]
+      if (filter === "skills.disable") config.skills.disable = ["avoid-ai-slop"]
+      if (filter === "disabledSkills") config.disabledSkills = ["avoid-ai-slop"]
+      const outputRoot = join(root, filter)
+      const result = await generateCodexPlugin({
+        projectRoot: process.cwd(),
+        pluginRoot: join(outputRoot, "plugins", "deepwork"),
+        marketplacePath: join(outputRoot, ".agents", "plugins", "marketplace.json"),
+        projectAgentsRoot: false,
+        includeProjectMcp: false,
+        config,
+        packageVersion: "9.9.9",
+      })
+      assert.equal(result.projectAgentsRoot, undefined)
+      assert.equal(existsSync(join(outputRoot, CODEX_PROJECT_AGENTS_DIR)), false)
+      const skillsRoot = join(result.pluginRoot, "skills")
+      const skill = loadSharedSkills({ rootDir: skillsRoot }).find((item) => item.name === "avoid-ai-slop")
+      assert.equal(Boolean(skill), filter === "enabled", `${filter}: discoverable bundled skill`)
+      assert.equal(existsSync(join(skillsRoot, "publish", "SKILL.md")), true, `${filter}: sibling remains enabled`)
+      if (skill) {
+        const command = buildSkillCommand(skill)
+        assert.ok(command?.template.trim())
+        assert.equal(command.name, "avoid-ai-slop")
+        const license = join(skill.path, "LICENSE")
+        assert.equal(lstatSync(license).isFile(), true)
+        assert.ok(readFileSync(license, "utf8").trim().length > 0)
+      }
+      const files = readdirSync(join(result.pluginRoot, "agents")).filter((name) => name.endsWith(".toml"))
+      assert.equal(files.length, result.agentCount)
+      for (const file of files) {
+        const instructions = parseGeneratedDeveloperInstructions(readFileSync(join(result.pluginRoot, "agents", file), "utf8"), file)
+        assert.equal(countOccurrences(instructions, marker), filter === "enabled" ? 1 : 0, `${filter}/${file}`)
+        assert.equal(countOccurrences(instructions, "<ocmm-avoid-ai-slop>"), filter === "enabled" ? 1 : 0, `${filter}/${file}: terminal boundary`)
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(promptsRoot, { recursive: true, force: true })
+  }
+})
 
 test("Codex normalization preserves synthetic payloads, rewrites skill identity, and sanitizes agent metadata", () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codex-normalization-"))

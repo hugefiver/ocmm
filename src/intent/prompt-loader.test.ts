@@ -11,6 +11,7 @@ import {
   getCategoryPrompt,
   getCategoryModelCalibration,
   getShellSafetyPrompt,
+  getAvoidAiSlopPrompt,
   pickDeepworkVariantForAgent,
   pickModelCalibrationVariants,
 } from "./prompt-loader.ts"
@@ -61,6 +62,23 @@ test("loadAllPrompts defaults to v1 workflow", () => {
     assert.equal(getDeepworkPrompt("planner"), "planner-content")
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("shared avoid-ai-slop brief loads in both workflows and resets with the prompt root", () => {
+  const root = makeTempRoot("v1")
+  const emptyRoot = makeTempRoot("codex")
+  try {
+    writeFileSync(join(root, "shared", "avoid-ai-slop.md"), "[fixture:avoid-ai-slop]")
+    for (const workflow of WORKFLOWS) {
+      loadAllPrompts(root, workflow)
+      assert.equal(getAvoidAiSlopPrompt(), "[fixture:avoid-ai-slop]")
+      loadAllPrompts(emptyRoot, workflow)
+      assert.equal(getAvoidAiSlopPrompt(), "")
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(emptyRoot, { recursive: true, force: true })
   }
 })
 

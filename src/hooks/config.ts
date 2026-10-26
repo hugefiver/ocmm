@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
-import { getAgentPrompt, getCategoryModelCalibration, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, pickDeepworkVariantForAgent, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
+import { getAgentPrompt, getAvoidAiSlopPrompt, getCategoryModelCalibration, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, pickDeepworkVariantForAgent, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
 import { isPlannerAgent } from "../intent/detectors.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
@@ -208,12 +208,14 @@ const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_EFFICIENCY_POLICY_TAG = "ocmm-review-session-efficiency-policy"
 const SHELL_SAFETY_TAG = "ocmm-shell-command-safety"
 const WORKFLOW_BOUNDARIES_TAG = "ocmm-workflow-boundaries"
+const AVOID_AI_SLOP_TAG = "ocmm-avoid-ai-slop"
 const TERMINAL_POLICY_TAGS = [
   DELEGATION_CONTRACT_TAG,
   COMPRESSION_POLICY_TAG,
   REVIEW_SESSION_EFFICIENCY_POLICY_TAG,
   SHELL_SAFETY_TAG,
   WORKFLOW_BOUNDARIES_TAG,
+  AVOID_AI_SLOP_TAG,
 ].join("|")
 const TERMINAL_POLICY_BLOCK = new RegExp(
   `(?:\\n\\n---\\n\\n)?(?:<(${TERMINAL_POLICY_TAGS})>(?:(?!<\\/\\1>)[\\s\\S])*<\\/\\1>(?:\\s*---\\s*|\\s*))+\\s*$`,
@@ -327,16 +329,19 @@ function terminalPromptSuffixFor({
   name,
   includeCompressionPolicy,
   includeReviewSessionEfficiency = false,
+  avoidAiSlopBrief,
   compressionIdentity = name,
 }: {
   name: string
   includeCompressionPolicy: boolean
   includeReviewSessionEfficiency?: boolean
+  avoidAiSlopBrief: string
   compressionIdentity?: string
 }): string {
   const policies = [
     shellSafetyPolicy(),
     workflowBoundariesPolicy(),
+    avoidAiSlopBrief ? `<${AVOID_AI_SLOP_TAG}>\n${avoidAiSlopBrief}\n</${AVOID_AI_SLOP_TAG}>` : "",
     includeCompressionPolicy ? compressionPolicyFor(compressionIdentity) : "",
     includeReviewSessionEfficiency ? reviewSessionEfficiencyPolicy() : "",
     delegationContractFor(name),
@@ -691,6 +696,8 @@ export function createConfigHandler(
   const logger = args.logger ?? log
   const reportSubagentDepth = createSubagentDepthDiagnosticReporter(logger)
   const reportCategoryAvailability = createCategoryAvailabilityDiagnosticReporter(logger)
+  const skillRegistrations = new WeakMap<Record<string, unknown>, SkillRegistration>()
+  const agentBriefRegistrations = new WeakMap<Record<string, unknown>, Map<string, string>>()
 
   return async (rawInput, _output) => {
     const registryManaged = hasRouteRegistry(args)
@@ -705,10 +712,20 @@ export function createConfigHandler(
       : undefined
     const cfg = compatibilityConfig ?? args.getConfig()
     reportSubagentDepth(target, cfg)
-    const registered = registerSkillsAndCommands(target, cfg, args.skillsRoot)
+    const registered = registerSkillsAndCommands(target, cfg, args.skillsRoot, skillRegistrations)
+    const avoidAiSlopBrief = registered.avoidAiSlop ? getAvoidAiSlopPrompt().trim() : ""
     const registeredMcps = registerMcps(target, cfg, args.cwd)
 
     if (!cfg.registerBuiltinAgents) {
+      if (!avoidAiSlopBrief && isRecord(target.agent)) {
+        for (const [name, brief] of agentBriefRegistrations.get(target) ?? []) {
+          const entry = target.agent[name]
+          if (!isRecord(entry) || typeof entry.prompt !== "string") continue
+          const block = `<${AVOID_AI_SLOP_TAG}>\n${brief}\n</${AVOID_AI_SLOP_TAG}>`
+          entry.prompt = entry.prompt.replace(TERMINAL_POLICY_BLOCK, (suffix) => suffix.replace(block, ""))
+        }
+        agentBriefRegistrations.delete(target)
+      }
       logger.info(`config: registered ${registered.skills} skills, ${registered.commands} commands, ${registeredMcps} MCPs`)
       if (registryManaged && routeBuild && generation !== undefined) {
         args.routeRegistry.publish(generation, routeBuild.nextRoutes)
@@ -720,6 +737,7 @@ export function createConfigHandler(
     const agentMap = registryManaged
       ? cloneAgentMap(isRecord(target.agent) ? target.agent : {})
       : target.agent as Record<string, unknown>
+    const agentBriefs = new Map<string, string>()
     const existingModels = new Map<string, string>()
     for (const [name, raw] of Object.entries(agentMap)) {
       if (isRecord(raw) && typeof raw.model === "string") existingModels.set(name, raw.model)
@@ -798,11 +816,13 @@ export function createConfigHandler(
       }
       const terminalSuffix = terminalPromptSuffixFor({
         name: a.name,
+        avoidAiSlopBrief,
         includeCompressionPolicy: mode !== "primary",
         includeReviewSessionEfficiency: a.name === "orchestrator",
       })
       if (terminalSuffix) extras.promptSuffix = terminalSuffix
       if (applyAgentEntry(agentMap, a, norm, extras)) {
+        if (avoidAiSlopBrief) agentBriefs.set(a.name, avoidAiSlopBrief)
         registerEffectiveRoute({
           build: routeBuild,
           agentMap,
@@ -849,6 +869,7 @@ export function createConfigHandler(
       if (profile.includeLocalePrefix) extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       const terminalSuffix = terminalPromptSuffixFor({
         name: profile.name,
+        avoidAiSlopBrief,
         includeCompressionPolicy: true,
         compressionIdentity: profile.name,
       })
@@ -858,6 +879,7 @@ export function createConfigHandler(
         requirement: profile.requirement,
         ...(profile.registration.permission ? { permission: profile.registration.permission } : {}),
       }, extras, profile.registration)) {
+        if (avoidAiSlopBrief) agentBriefs.set(profile.name, avoidAiSlopBrief)
         registerEffectiveRoute({
           build: routeBuild,
           agentMap,
@@ -906,11 +928,13 @@ export function createConfigHandler(
       extras.model = primary.model
       const terminalSuffix = terminalPromptSuffixFor({
         name: c.name,
+        avoidAiSlopBrief,
         includeCompressionPolicy: true,
         compressionIdentity: c.name,
       })
       if (terminalSuffix) extras.promptSuffix = terminalSuffix
       if (applyAgentEntry(agentMap, baseAgent, merged, extras)) {
+        if (avoidAiSlopBrief) agentBriefs.set(c.name, avoidAiSlopBrief)
         registerEffectiveRoute({
           build: routeBuild,
           agentMap,
@@ -1024,7 +1048,7 @@ export function createConfigHandler(
       }
     }
 
-    registerCompatAgentAliases(agentMap, disabled, cfg.agents, registryManaged)
+    registerCompatAgentAliases(agentMap, disabled, cfg.agents, registryManaged, avoidAiSlopBrief, agentBriefs)
     registerDefaultPermissions(target, agentMap)
 
     for (const { alias, target: compatTarget } of COMPAT_AGENT_ALIASES) {
@@ -1073,6 +1097,7 @@ export function createConfigHandler(
     if (registryManaged && routeBuild && generation !== undefined && args.routeRegistry.publish(generation, routeBuild.nextRoutes)) {
       target.agent = agentMap
     }
+    if (!registryManaged || target.agent === agentMap) agentBriefRegistrations.set(target, agentBriefs)
   }
 }
 
@@ -1137,6 +1162,8 @@ function registerCompatAgentAliases(
   disabled: Set<string>,
   agents: OcmmConfig["agents"],
   registryManaged: boolean,
+  avoidAiSlopBrief: string,
+  agentBriefs: Map<string, string>,
 ): void {
   for (const { alias, target } of COMPAT_AGENT_ALIASES) {
     if (disabled.has(alias) || disabled.has(target) || isCompatAliasDisabled(alias, target, agents)) {
@@ -1157,22 +1184,43 @@ function registerCompatAgentAliases(
     }
     const terminalSuffix = terminalPromptSuffixFor({
       name: alias,
+      avoidAiSlopBrief,
       includeCompressionPolicy: aliasEntry.mode !== "primary",
       compressionIdentity: isReviewAgentName(alias) ? alias : target,
     })
     if (terminalSuffix) {
       const basePrompt = typeof aliasEntry.prompt === "string" ? aliasEntry.prompt : ""
       aliasEntry.prompt = appendPromptSuffix(basePrompt, terminalSuffix)
+      if (avoidAiSlopBrief) agentBriefs.set(alias, avoidAiSlopBrief)
     }
     agentMap[alias] = aliasEntry
   }
+}
+
+type SkillRegistration = {
+  paths: Set<string>
+  commands: Map<string, unknown>
 }
 
 function registerSkillsAndCommands(
   target: Record<string, unknown>,
   cfg: OcmmConfig,
   skillsRoot: string = DEFAULT_SKILLS_ROOT,
-): { skills: number; commands: number } {
+  registrations: WeakMap<Record<string, unknown>, SkillRegistration>,
+): { skills: number; commands: number; avoidAiSlop: boolean } {
+  const previous = registrations.get(target)
+  if (previous) {
+    if (isRecord(target.skills) && Array.isArray(target.skills.paths)) {
+      target.skills.paths = target.skills.paths.filter((path) => !previous.paths.has(path))
+    }
+    if (isRecord(target.command)) {
+      for (const [name, command] of previous.commands) {
+        if (target.command[name] === command) delete target.command[name]
+      }
+    }
+  }
+  const registration: SkillRegistration = { paths: new Set(), commands: new Map() }
+  registrations.set(target, registration)
   const disabledSkills = [...cfg.skills.disable, ...(cfg.disabledSkills ?? [])]
   const selected = loadSharedSkills({
     rootDir: skillsRoot,
@@ -1181,26 +1229,27 @@ function registerSkillsAndCommands(
     disable: disabledSkills,
   })
 
-  const parentDirs = new Set<string>()
+  const skillDirs = new Set<string>()
   for (const skill of selected) {
-    parentDirs.add(dirname(skill.path))
+    skillDirs.add(skill.path)
   }
   if (cfg.workflow === "v1") {
     const v1SkillRoot = join(skillsRoot, "v1")
-    if (existsSync(v1SkillRoot)) parentDirs.add(v1SkillRoot)
+    if (existsSync(v1SkillRoot)) skillDirs.add(v1SkillRoot)
   }
 
-  if (parentDirs.size > 0) {
+  if (skillDirs.size > 0) {
     if (!isRecord(target.skills)) target.skills = {}
     const skillsConfig = target.skills as Record<string, unknown>
     if (!Array.isArray(skillsConfig.paths)) skillsConfig.paths = []
     const paths = skillsConfig.paths as unknown[]
     const seen = new Set(paths.filter((p): p is string => typeof p === "string"))
 
-    for (const dir of parentDirs) {
+    for (const dir of skillDirs) {
       if (!seen.has(dir)) {
         paths.push(dir)
         seen.add(dir)
+        registration.paths.add(dir)
       }
     }
   }
@@ -1218,15 +1267,16 @@ function registerSkillsAndCommands(
     ...loadBuiltinCommands(cfg.disabledCommands),
     ...skillCommands,
     ...v1Commands,
-  ], new Set(cfg.disabledCommands ?? []))
+  ], new Set(cfg.disabledCommands ?? []), registration.commands)
 
-  return { skills: selected.length, commands }
+  return { skills: selected.length, commands, avoidAiSlop: selected.some((skill) => skill.name === "avoid-ai-slop") }
 }
 
 function registerCommands(
   target: Record<string, unknown>,
   definitions: readonly CommandDefinition[],
   disabled: ReadonlySet<string>,
+  registeredCommands: Map<string, unknown>,
 ): number {
   if (!definitions.length) return 0
   if (!isRecord(target.command)) target.command = {}
@@ -1238,6 +1288,7 @@ function registerCommands(
     if (commandMap[definition.name] !== undefined) continue
     const { name: _name, path: _path, ...entry } = definition as CommandDefinition & { path?: string }
     commandMap[definition.name] = entry
+    if ("path" in definition) registeredCommands.set(definition.name, entry)
     registered++
   }
   return registered

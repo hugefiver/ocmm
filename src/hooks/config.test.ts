@@ -10,6 +10,7 @@ import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { getAgentPrompt, getDeepworkPrompt, loadAllPrompts } from "../intent/prompt-loader.ts"
 import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
+import { loadSharedSkills } from "../intent/skill-loader.ts"
 
 loadAllPrompts(join(process.cwd(), "prompts"), "v1")
 
@@ -1781,6 +1782,152 @@ test("config stays silent when host subagent depth is not observable", async () 
   }
 })
 
+test("avoid-ai-slop uses the selected skill for every builtin suffix, command, and recursive native discovery", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-avoid-ai-slop-config-"))
+  const marker = "[fixture:avoid-ai-slop-brief]"
+  const body = "[fixture:avoid-ai-slop-body]"
+  const skillsRoot = join(root, "skills")
+  try {
+    mkdirSync(join(root, "shared"), { recursive: true })
+    writeFileSync(join(root, "shared", "avoid-ai-slop.md"), marker)
+    writeSkill(skillsRoot, "avoid-ai-slop", "avoid-ai-slop")
+    writeFileSync(join(skillsRoot, "avoid-ai-slop", "SKILL.md"), `---\nname: avoid-ai-slop\ndescription: Fixture\n---\n${body}\n`)
+    writeSkill(skillsRoot, "sibling", "sibling")
+    const hostRoot = join(root, "host")
+    writeSkill(hostRoot, "host-skill", "host-skill")
+    const sourceRoot = join(root, "source")
+    writeSkill(sourceRoot, "extra", "extra")
+    writeSkill(sourceRoot, "hidden", "hidden")
+
+    for (const workflow of ["v1", "codex"] as const) {
+      loadAllPrompts(root, workflow)
+      const configured = {
+        ...defaultConfig(),
+        workflow,
+        agents: {
+          reviewer: { variants: { high: "max" as const } },
+          oracle: { variants: { low: "high" as const } },
+          planner: { variants: { high: "max" as const } },
+          "plan-critic": { variants: { low: "high" as const } },
+        },
+        categories: { "cross-cutting": { model: "openai/gpt-6.1-sol" } },
+        skills: { sources: [sourceRoot], enable: ["avoid-ai-slop", "sibling", "extra"], disable: [] as string[] },
+        disabledSkills: [] as string[],
+      }
+      const permissions = { "*": "deny", "avoid-ai-slop": "ask" }
+      const hostCommand = { template: "[fixture:host-command]" }
+      const target = {
+        agent: { coding: { prompt: "[fixture:host-role]", permission: { skill: "deny" } } } as Record<string, unknown>,
+        permission: { skill: permissions },
+        skills: { paths: [hostRoot, join(skillsRoot, "sibling")], urls: ["https://example.com/skills"] },
+        command: { sibling: hostCommand } as Record<string, unknown>,
+      }
+      const handler = createConfigHandler({ getConfig: () => configured, skillsRoot })
+      for (let pass = 0; pass < 2; pass++) await handler(target, undefined)
+      const names = [
+        ...BUILTIN_AGENTS.map((agent) => agent.name),
+        ...BUILTIN_CATEGORIES.map((category) => category.name),
+        "explore", "reviewer-high", "oracle-low", "planner-high", "plan-critic-low",
+      ]
+      for (const name of names) {
+        const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+        assert.equal(countText(prompt, marker), 1, `${workflow}/${name}`)
+        assert.equal(countText(prompt, "<ocmm-avoid-ai-slop>"), 1, `${workflow}/${name}: boundary`)
+        assert.equal(countText(prompt, body), 0, `${workflow}/${name}: no implicit full skill`)
+      }
+      assert.equal(agentPermission(target.agent, "coding").skill, "deny")
+      assert.deepEqual(target.permission.skill, permissions)
+      assert.ok(String((target.agent.coding as Record<string, unknown>).prompt).includes("[fixture:host-role]"))
+      assert.ok(String((target.command["avoid-ai-slop"] as Record<string, unknown>).template).includes(body))
+      assert.equal(target.command.sibling, hostCommand)
+      assert.deepEqual(target.skills.urls, ["https://example.com/skills"])
+      assert.equal(target.skills.paths.length, new Set(target.skills.paths).size)
+      const discovered = () => loadSharedSkills({ rootDir: join(root, "empty"), sources: target.skills.paths }).map((skill) => skill.name).sort()
+      assert.deepEqual(discovered(), ["avoid-ai-slop", "extra", "host-skill", "sibling"])
+
+      for (const filter of ["skills.disable", "disabledSkills", "allow-list"] as const) {
+        configured.skills.disable = filter === "skills.disable" ? ["avoid-ai-slop"] : []
+        configured.skills.enable = filter === "allow-list" ? ["sibling", "extra"] : ["avoid-ai-slop", "sibling", "extra"]
+        configured.disabledSkills = filter === "disabledSkills" ? ["avoid-ai-slop"] : []
+        await handler(target, undefined)
+        assert.deepEqual(discovered(), ["extra", "host-skill", "sibling"], `${workflow}/${filter}: recursively discovered catalog`)
+        assert.equal(target.command["avoid-ai-slop"], undefined, `${workflow}/${filter}: command`)
+        assert.equal(target.command.sibling, hostCommand)
+        assert.ok(target.skills.paths.includes(hostRoot))
+        assert.ok(target.skills.paths.includes(join(skillsRoot, "sibling")))
+        for (const name of names) {
+          const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+          assert.equal(countText(prompt, marker), 0, `${workflow}/${filter}/${name}: disabled brief`)
+        }
+      }
+    }
+  } finally {
+    loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("disabling builtin registration and avoid-ai-slop removes the prior handler brief without changing host state", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ocmm-disabled-builtin-brief-"))
+  const skillsRoot = join(root, "skills")
+  const marker = "[fixture:avoid-ai-slop-brief]"
+  try {
+    mkdirSync(join(root, "shared"), { recursive: true })
+    writeFileSync(join(root, "shared", "avoid-ai-slop.md"), marker)
+    writeSkill(skillsRoot, "avoid-ai-slop", "avoid-ai-slop")
+    writeSkill(skillsRoot, "sibling", "sibling")
+    const hostRoot = join(root, "host")
+    writeSkill(hostRoot, "host-skill", "host-skill")
+    loadAllPrompts(root, "v1")
+    const configured = defaultConfig()
+    const hostPrompt = "[fixture:host-role]\n<ocmm-avoid-ai-slop>\n[fixture:host-example]\n</ocmm-avoid-ai-slop>\n[fixture:host-after-example]"
+    const hostCommand = { template: "[fixture:host-command]" }
+    const target = {
+      agent: {
+        coding: { prompt: hostPrompt, permission: { skill: "deny" } },
+        custom: { prompt: "[fixture:untouched-host-role]" },
+      } as Record<string, unknown>,
+      skills: { paths: [hostRoot], urls: ["https://example.com/skills"] },
+      command: { sibling: hostCommand } as Record<string, unknown>,
+      permission: { skill: { "*": "deny", "avoid-ai-slop": "ask" } },
+    }
+    const handler = createConfigHandler({ getConfig: () => configured, skillsRoot })
+    await handler(target, undefined)
+    const before = structuredClone(target.agent)
+    const permissions = structuredClone(target.permission)
+    assert.ok(target.command["avoid-ai-slop"])
+    assert.ok(target.skills.paths.includes(join(skillsRoot, "avoid-ai-slop")))
+    for (const [name, entry] of Object.entries(before)) {
+      const prompt = (entry as Record<string, unknown>).prompt
+      if (name !== "custom" && typeof prompt === "string") assert.equal(countText(prompt, marker), 1, name)
+    }
+
+    configured.registerBuiltinAgents = false
+    configured.skills.disable = ["avoid-ai-slop"]
+    await handler(target, undefined)
+    for (const [name, entry] of Object.entries(target.agent)) {
+      const previous = before[name] as Record<string, unknown>
+      const current = entry as Record<string, unknown>
+      const { prompt: _oldPrompt, ...oldState } = previous
+      const { prompt: _newPrompt, ...newState } = current
+      assert.equal(countText(String(current.prompt), marker), 0, name)
+      assert.deepEqual(newState, oldState, `${name}: non-prompt state`)
+      if (name !== "custom") {
+        assert.equal(String(current.prompt).replace(/\s+/g, " ").trim(), String(previous.prompt).replace(`<ocmm-avoid-ai-slop>\n${marker}\n</ocmm-avoid-ai-slop>`, "").replace(/\s+/g, " ").trim(), `${name}: only owned brief removed`)
+      } else assert.deepEqual(current, previous)
+    }
+    assert.ok(String((target.agent.coding as Record<string, unknown>).prompt).includes(hostPrompt))
+    assert.deepEqual(target.permission, permissions)
+    assert.deepEqual(target.skills.paths.sort(), [hostRoot, join(skillsRoot, "sibling")].sort())
+    assert.deepEqual(target.skills.urls, ["https://example.com/skills"])
+    assert.equal(target.command["avoid-ai-slop"], undefined)
+    assert.equal(target.command.sibling, hostCommand)
+  } finally {
+    loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("config registers shared skill paths and preserves existing urls", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-hook-skills-"))
   try {
@@ -1805,7 +1952,7 @@ test("config registers shared skill paths and preserves existing urls", async ()
     await handler(cfg, undefined)
 
     assert.deepEqual(cfg.skills.urls, ["https://example.com/skills"])
-    assert.deepEqual(cfg.skills.paths.sort(), [root, join(root, "existing")].sort())
+    assert.deepEqual(cfg.skills.paths.sort(), [join(root, "git-master"), join(root, "existing")].sort())
     assert.ok(cfg.command?.["git-master"], "enabled shared skill should be registered as slash command")
     assert.equal(cfg.command?.debugging, undefined, "disabled shared skill should not register command")
     assert.match(String(cfg.command?.["git-master"]?.template), /<skill-instruction>/)
