@@ -41,6 +41,8 @@ The Codex adapter is a separate generated surface. It packages Codex-native prom
 
 ## Install
 
+Install and update plugins from npmjs.org by default, including when an older installation used a local tarball or GitHub Release URL. Use release archives only when explicitly requested for offline or self-contained distribution; release asset verification does not prescribe the user's installation source.
+
 ### From npmjs.org
 
 The main `ocmm` package is published to npmjs.org as `ocmm`. Native LSP binaries are per-platform optional dependencies — npm installs the matching platform package for your system automatically. Use `--omit=optional` to skip native binaries if you only need the plugin logic:
@@ -64,7 +66,7 @@ codex plugin marketplace add ./node_modules/ocmm --json
 codex plugin add deepwork@deepwork-local --json
 ```
 
-### From GitHub Release
+### GitHub Release assets (optional distribution)
 
 Main package releases (`vX.Y.Z`) publish self-contained OpenCode/Codex plugin tarballs and their checksums. Standalone native `ocmm-lsp-*` executables and platform package `.tgz` assets belong to the separate `ocmm-lsp-vA.B.C` release lane.
 
@@ -74,38 +76,10 @@ A main `vX.Y.Z` release contains:
 - `deepwork-codex-plugin-<version>.tgz` — direct Codex plugin package root for local marketplace installation.
 - `SHA256SUMS.txt` — checksums for every release asset.
 
-For OpenCode, install the release tarball asset URL with your package manager:
-
-```bash
-VERSION=0.6.5
-pnpm add "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/ocmm-opencode-plugin-${VERSION}.tgz"
-```
-
 The release tarball bundles the OpenCode plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-lsp` CLI wrappers, plus platform-suffixed native `ocmm-lsp` binaries under `dist/bin/`.
 It also includes the Codex marketplace file and a self-contained generated plugin bundle under `.agents/plugins/marketplace.json` and `plugins/deepwork/`; the Codex bundle carries its own plugin-local `dist/cli`, `dist/shared`, and `dist/bin` runtime so Codex's plugin cache can run the default `lsp` MCP.
 
-```jsonc
-// opencode.json
-{ "plugin": ["./node_modules/ocmm/dist/index.js"] }
-```
-
-For Codex, either add the installed package root as a local marketplace:
-
-```bash
-codex plugin marketplace add ./node_modules/ocmm --json
-codex plugin add deepwork@deepwork-local --json
-```
-
-Or install directly from the Codex release package. The tarball is package-root-shaped, so extract it to a directory such as `.codex-plugins/deepwork` and point the marketplace at that directory:
-
-```bash
-VERSION=0.6.5
-curl -L -o "deepwork-codex-plugin-${VERSION}.tgz" "https://github.com/<owner>/ocmm/releases/download/v${VERSION}/deepwork-codex-plugin-${VERSION}.tgz"
-mkdir -p .codex-plugins/deepwork
-tar -xzf "deepwork-codex-plugin-${VERSION}.tgz" -C .codex-plugins/deepwork
-codex plugin marketplace add ".codex-plugins/deepwork" --json
-codex plugin add deepwork@deepwork-local --json
-```
+For normal OpenCode and Codex installation or upgrades, use the npm instructions above. Codex registers the npm-installed package root as a local marketplace; this local marketplace path does not mean installing from a local tarball.
 
 ### From GitHub Packages
 
