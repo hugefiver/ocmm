@@ -41,7 +41,9 @@ The Codex adapter is a separate generated surface. It packages Codex-native prom
 
 ## Install
 
-Install and update plugins from npmjs.org by default, including when an older installation used a local tarball or GitHub Release URL. Use release archives only when explicitly requested for offline or self-contained distribution; release asset verification does not prescribe the user's installation source.
+For Codex, build from source with your own project configuration and install through the local marketplace at `.codex/local-plugin/`. Follow [Codex adapter](#codex-adapter) for configuration, generation, and installation. Rebuild and regenerate that same local source when updating.
+
+For OpenCode, npmjs.org remains the default installation source. npm packages and GitHub Release archives are also supported Codex distribution options when you want the packaged defaults rather than a custom build.
 
 ### From npmjs.org
 
@@ -59,7 +61,7 @@ The npm tarball excludes native LSP binaries to keep it platform-agnostic. When 
 { "plugin": ["./node_modules/ocmm/dist/index.js"] }
 ```
 
-For Codex, add the installed package root as a local marketplace:
+For Codex with packaged defaults, add the installed package root as a local marketplace:
 
 ```bash
 codex plugin marketplace add ./node_modules/ocmm --json
@@ -79,7 +81,7 @@ A main `vX.Y.Z` release contains:
 The release tarball bundles the OpenCode plugin, the `ocmm`, `ocmm-profiles`, and `ocmm-lsp` CLI wrappers, plus platform-suffixed native `ocmm-lsp` binaries under `dist/bin/`.
 It also includes the Codex marketplace file and a self-contained generated plugin bundle under `.agents/plugins/marketplace.json` and `plugins/deepwork/`; the Codex bundle carries its own plugin-local `dist/cli`, `dist/shared`, and `dist/bin` runtime so Codex's plugin cache can run the default `lsp` MCP.
 
-For normal OpenCode and Codex installation or upgrades, use the npm instructions above. Codex registers the npm-installed package root as a local marketplace; this local marketplace path does not mean installing from a local tarball.
+For OpenCode installation or upgrades, use the npm instructions above. For a customized Codex installation, use the source-build instructions below. The release archives remain available for offline or self-contained distribution.
 
 ### From GitHub Packages
 
@@ -335,7 +337,38 @@ The repository's Nix workflow always uses a GitHub Actions Nix store cache. Cach
 
 ## Codex adapter
 
-ocmm also ships a Codex plugin bundle generated from the same local workflow data:
+### Recommended: custom source build and local marketplace
+
+Run the following from the OCMM repository root, with Node.js 22 or newer and pnpm available. Install source dependencies with `pnpm install` if needed. Put your model, agent, and MCP choices in `.codex/ocmm.jsonc` (or `.codex/ocmm.json`). The generator checks that directory first, falling back to `.opencode/ocmm.jsonc` or `.opencode/ocmm.json` only when no Codex project config is found; `.jsonc` takes precedence over `.json` within either directory. Without a project config, it uses defaults.
+
+The generator doesn't read user-global OCMM config or Codex's `config.toml`. Copy the OCMM settings you want into the project config before generating. Normal generation also includes the project's `.mcp.json`, so review generated MCP settings before sharing the bundle.
+
+Build the TypeScript runtime, then call the existing generator API to keep your custom marketplace separate from the committed release bundle:
+
+```powershell
+pnpm run build:ts
+node --experimental-strip-types --input-type=module -e 'import { generateCodexPlugin } from "./src/codex/plugin-generator.ts"; await generateCodexPlugin({ pluginRoot: ".codex/local-plugin/plugins/deepwork", marketplacePath: ".codex/local-plugin/.agents/plugins/marketplace.json", projectAgentsRoot: false });'
+codex plugin marketplace add ./.codex/local-plugin --json
+codex plugin add deepwork@deepwork-local --json
+```
+
+`build:ts` supplies the plugin-local JavaScript wrappers. If you need to build the native LSP binary locally, use `pnpm run build` instead (requires Cargo) before generating; the generator copies available `dist/bin/` binaries into the plugin. Don't assume a TypeScript-only build makes the cached plugin's default `lsp` MCP self-contained: without a bundled binary, provide an available `ocmm-lsp` on PATH or configure `OCMM_LSP_COMMAND` for the MCP.
+
+The API call uses the same project-config loading as `pnpm run gen:codex-plugin` without `--release`. Its output is `.codex/local-plugin/plugins/deepwork/`, with the marketplace manifest under `.codex/local-plugin/.agents/plugins/`. `projectAgentsRoot: false` leaves `.codex/agents/` untouched. It doesn't overwrite `plugins/deepwork/` or the root `.agents/plugins/marketplace.json`. Treat `.codex/local-plugin/` as generated local output, not a release bundle to commit.
+
+If `deepwork-local` is already registered from another directory, inspect `codex plugin marketplace list --json`, then switch its source with the supported CLI commands:
+
+```powershell
+codex plugin marketplace remove deepwork-local --json
+codex plugin marketplace add ./.codex/local-plugin --json
+codex plugin add deepwork@deepwork-local --json
+```
+
+If it already points to this same local source, there's no need to remove it each time. Regenerate in place and run the add commands above. Don't delete user configuration or edit Codex's plugin cache to switch sources.
+
+### Repository and release bundle generation
+
+The repository-default output layout is:
 
 ```
 .agents/plugins/marketplace.json
@@ -348,20 +381,23 @@ plugins/deepwork/
   skills/*
 ```
 
-Generate or refresh it after changing prompts, skills, agents, categories, or MCP config logic:
+`pnpm run gen:codex-plugin` reads project configuration and writes this repository-default layout, including `.codex/agents/`. The CLI has no output-directory option; use the API call above for isolated custom output.
 
-```bash
-pnpm run gen:codex-plugin
+Release generation uses source defaults and the bundled Codex model table, ignoring local OCMM config, profiles, and project `.mcp.json`:
+
+```powershell
+pnpm run build:ts
+pnpm run gen:codex-plugin --release
 ```
 
-The generator is intentionally separate from the OpenCode runtime. It reads project config from `<project>/.codex/ocmm.jsonc` first, then `<project>/.opencode/ocmm.jsonc`; it does **not** read user-global config by default, so local provider names or secrets are not baked into the committed Codex bundle. If no project config exists, it uses ocmm defaults.
+For a release, regenerate after the version bump and include the generated files in the same commit as that bump. Don't use `--release` to build your customized installation.
 
 Install into an isolated Codex home for testing:
 
 ```powershell
 $env:CODEX_HOME = "$env:LOCALAPPDATA\Temp\codex\ocmm-test"
 mkdir.exe -p $env:CODEX_HOME
-codex plugin marketplace add . --json
+codex plugin marketplace add ./.codex/local-plugin --json
 codex plugin add deepwork@deepwork-local --json
 codex plugin list --available --json
 ```
@@ -371,7 +407,7 @@ The Codex plugin exposes:
 - copied ocmm shared skills plus flattened `deepwork-*` skills from `skills/v1/`;
 - a `deepwork` skill that maps ocmm's planning/delegation semantics to Codex tools;
 - plugin-scoped MCP servers generated from ocmm's MCP config, including the default `lsp` MCP served by the plugin-local `ocmm-lsp` wrapper;
-- generated `dw-*` Codex agent TOML files under `plugins/deepwork/agents/` for installers or local agent registration, including functional agents such as `dw-oracle`, `dw-oracle-2nd`, and `dw-creative`; configured review `variants` can also emit logical tier profiles such as `dw-oracle-high` and `dw-oracle-2nd-low`.
+- generated `dw-*` Codex agent TOML files under the generated plugin's `agents/` directory for installers or local agent registration, including functional agents such as `dw-oracle`, `dw-oracle-2nd`, and `dw-creative`; configured review `variants` can also emit logical tier profiles such as `dw-oracle-high` and `dw-oracle-2nd-low`.
 
 OpenCode still uses `dist/index.js` and its OpenCode hook surface. The Codex adapter does not import or mutate the OpenCode plugin module at runtime.
 

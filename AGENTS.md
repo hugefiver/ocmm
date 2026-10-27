@@ -28,6 +28,23 @@ Reuse passing evidence when it still covers the current claim and no change mate
 - Delegation and delivery need clear goals, useful evidence, and material scope/ownership, permission, irreversible-operation, and protocol/integrity identity boundaries, not exhaustive resource/file inventories, per-item revision/hash/receipt locks, or fixed report fields. Workers may discover corresponding resources within the authorized scope; discovery never expands permissions. Reports stay in conversation.
 - Keep short-lived coordination and agent reports in conversation, not workspace plan/report/evidence files unless explicitly requested as deliverables. Synchronize useful results at delivery or major phase boundaries, not every checklist update. Temporary, debug, disposable, or retired artifacts need no repeated stability/hash comparisons or correct status record at every instant; delete a finished disposable checklist/journal without first writing completion status. Don't introduce repository debug journals or extra ledgers. Cleanup still requires exact task ownership, safe resolved paths, PID plus start identity for process termination, and preservation of user changes; lightweight temporary-state handling never weakens authorization, APIs, or data guarantees.
 
+## Recommended Codex installation
+
+Recommend a user-customized source build installed through `.codex/local-plugin/`, not the npm or release-default bundle. Run from the OCMM repository root after installing source dependencies. Configure models, agents, and MCPs in project `.codex/ocmm.jsonc` (or `.codex/ocmm.json`); `.jsonc` wins when both exist. `loadAdapterConfig` loads Codex project config first, otherwise OpenCode project `.opencode/ocmm.jsonc` or `.opencode/ocmm.json`, otherwise defaults. It doesn't read user-global OCMM config or Codex's `config.toml`; put the desired OCMM customization in the project config. Normal generation includes project `.mcp.json`.
+
+Use the existing generator API for isolated local output; the CLI has no output-directory flag:
+
+```powershell
+pnpm run build:ts
+node --experimental-strip-types --input-type=module -e 'import { generateCodexPlugin } from "./src/codex/plugin-generator.ts"; await generateCodexPlugin({ pluginRoot: ".codex/local-plugin/plugins/deepwork", marketplacePath: ".codex/local-plugin/.agents/plugins/marketplace.json", projectAgentsRoot: false });'
+codex plugin marketplace add ./.codex/local-plugin --json
+codex plugin add deepwork@deepwork-local --json
+```
+
+This uses the same config-loading path as `pnpm run gen:codex-plugin` without `--release`, but leaves release outputs and `.codex/agents/` untouched. Don't commit the custom local output. `build:ts` supplies JavaScript wrappers; use `pnpm run build` instead before generation when a locally built native LSP binary is needed (requires Cargo). The generator copies available `dist/bin/` binaries. Without one, the cached plugin needs an available PATH `ocmm-lsp` or an MCP `OCMM_LSP_COMMAND` setting.
+
+When `codex plugin marketplace list --json` shows `deepwork-local` registered from another directory, run `codex plugin marketplace remove deepwork-local --json` before adding the local source and plugin above. Don't repeatedly remove a marketplace already using the same path, delete user config, or hand-edit plugin caches. npm and release tarballs remain supported alternatives for packaged defaults.
+
 ## Release Workflow
 
 The `.github/workflows/release.yml` workflow has two independent lanes:
@@ -129,7 +146,7 @@ git push origin vX.Y.W
 #    On success, "GitHub Release" publishes assets automatically.
 ```
 
-Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's generated-bundle check fails if `.agents/plugins/marketplace.json`, `.codex/agents`, or `plugins/deepwork` do not match what `gen:codex-plugin --release` produces from the current `package.json` version. Release generation uses source defaults with the Codex workflow and bundled model table, ignoring local OCMM config, profiles, and project `.mcp.json`; the command without `--release` retains project-config customization.
+Critical: step 2 (regenerate Codex bundle) must run **after** the version bump and be included in the **same commit** as the version bump. The release workflow's generated-bundle check fails if `.agents/plugins/marketplace.json`, `.codex/agents`, or `plugins/deepwork` do not match what `gen:codex-plugin --release` produces from the current `package.json` version. Release generation uses source defaults with the Codex workflow and bundled model table, ignoring local OCMM config, profiles, and project `.mcp.json`. The command without `--release` retains project-config customization but writes those same repository-default paths; use the isolated API output above for personal installations.
 
 `package.json.ocmm.lspVersion` pins the default LSP version for the main package release. This must match an already-published `ocmm-lsp-vA.B.C` release — the `stage-pinned-lsp` job downloads the pinned release assets by constructing `ocmm-lsp-v${lspVersion}`. The `ocmm` and `ocmm-lsp` versions are independent and do not need to be equal.
 
