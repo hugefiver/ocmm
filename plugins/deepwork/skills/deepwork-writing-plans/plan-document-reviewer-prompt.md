@@ -21,7 +21,12 @@ Task tool (general-purpose):
 
     Evaluate outcome coverage, dependencies and interfaces, task/wave boundaries,
     material risks, executability, and whether the proposed evidence can actually
-    demonstrate success. Distinguish blockers from optional improvements. Do not
+    demonstrate success. Where execution would otherwise require a guess, check for
+    exact paths, cross-task names/signatures, requirement-fixed values, and test
+    assertions; reject full body transcription when those decisions already determine
+    the implementation. Consider supported inputs and failure conditions implied by
+    established interfaces and ordinary valid use, not only cases enumerated by the
+    requirements. Distinguish blockers from optional improvements. Do not
     require fixed headings, tiny scripted steps, a RED transcript, scenario counts,
     per-task reviews, commits, or a particular implementation when an evidence-based
     equivalent preserves the approved goal, constraints, permissions, and acceptance.
@@ -35,7 +40,10 @@ Task tool (general-purpose):
     dedicated to removed components. Uncommitted intermediate behavior needn't be
     preserved; committed contracts and authorization boundaries remain binding.
 
-    Report concrete findings with their impact and supporting evidence. A substantive
+    Report concrete findings with their impact and supporting evidence. If an important
+    condition cannot be judged, state what it is, why judgment is unavailable, and the
+    evidence or decision needed; do not impose a fixed heading, quota, or list, and do
+    not invent requirements from specification silence. A substantive
     blocker must be corrected, rebutted with evidence, or escalated before implementation;
     optional improvements do not block. A conclusion may be included, but no fixed first
     line, field order, verdict token, hash, or receipt is required. An acknowledgement or

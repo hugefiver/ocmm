@@ -26,6 +26,12 @@ Task tool (general-purpose):
     security, performance, data, compatibility, protocol/API, migration, release,
     or irreversible-operation risks.
 
+    Consider supported input classes and failure conditions implied by established
+    interfaces, existing behavior, and ordinary valid use, including important cases
+    the requirements do not enumerate. Specification silence does not make an
+    otherwise supported input disposable, but it also does not authorize new features
+    or expanded scope.
+
     Assess existing evidence by material relevance. Request missing or affected
     coverage; don't duplicate global/heavy checks coordinated by the controller.
     Unrelated code, dependency, or environment changes aren't automatic invalidation.
@@ -50,8 +56,9 @@ Task tool (general-purpose):
 
     No fixed first line, section order, verdict token, receipt, or status
     format is required. An acknowledgement or unsupported conclusion is not review
-    evidence. If the supplied material is insufficient, identify exactly what is
-    missing rather than guessing.
+    evidence. If an important behavior cannot be judged, identify it, why judgment is
+    unavailable, and the evidence or product decision needed. Do not require a fixed
+    heading, quota, or list, and do not guess.
 ```
 
 Rerun this review only when substantive code, new files, requirements, criteria, constraints, or relevant evidence changes.

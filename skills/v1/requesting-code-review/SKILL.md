@@ -3,7 +3,7 @@ name: requesting-code-review
 description: Use when an implemented change benefits from independent review before delivery or merge
 ---
 
-<!-- Local fork of obra/superpowers/requesting-code-review v6.3.0.
+<!-- Local fork of obra/superpowers/requesting-code-review v7.0.1.
      Risk/evidence-driven implementation review of current changes and contracts.
      Reviewers don't spawn additional review seats.
      Source and maintenance contract: docs/v1-maintenance.md. -->
@@ -62,6 +62,8 @@ Typical choices:
 Review roles inspect implementation; they do not approve plans or decide unapproved product scope.
 
 Review against final valid requirements and committed contracts, not uncommitted intermediate behavior. Documents, code/comments, tests, and commit messages state only the concise final design and behavior. Tests must protect functionality and external interfaces, not lock descriptive documentation, commit messages, package information, or non-contractual error/log wording through strings, regex, snapshots, or parsed content. Don't require decision-counterexample or removed-component absence tests. Changed requirements update tests; removed components lose their dedicated tests. API, security, data, permission, and irreversible-operation authorization still applies.
+
+Review supported input classes and failure conditions implied by established interfaces, existing behavior, and ordinary valid use, including important cases the requirements do not enumerate. Specification silence is not permission to break an otherwise supported input, but it also does not authorize a new feature or expanded scope. When an important behavior cannot be judged, report the behavior, why judgment is unavailable, and the evidence or product decision needed. Do not silently drop it or require a fixed heading, quota, or list of declined items.
 
 ## Interpret the Result
 

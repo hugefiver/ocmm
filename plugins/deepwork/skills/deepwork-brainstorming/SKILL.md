@@ -3,7 +3,7 @@ name: deepwork-brainstorming
 description: "Use before creative or materially ambiguous work to clarify outcomes, constraints, risks, and an appropriate implementation direction."
 ---
 
-<!-- Local fork of obra/superpowers/brainstorming v6.3.0.
+<!-- Local fork of obra/superpowers/brainstorming v7.0.1.
      On-demand final-state policy and proportional discovery.
      Authorized work follows applicable planning without redundant design approval.
      Source and maintenance contract: docs/v1-maintenance.md. -->
@@ -64,7 +64,9 @@ These paths size discovery and design; they do not replace workflow planning pol
 
 ## Discovery
 
-Inspect only enough project context to resolve material questions:
+Before asking a question, read the context the user supplied and the project material it points to: requirements, plans, handoffs, files, and the relevant code or documentation around them. Read enough to explain the current behavior and likely touch points. Treat answers already present in that context or earlier conversation as settled unless new evidence creates a material conflict; do not ask for the same information again in different words.
+
+Inspect only enough additional project context to resolve material questions:
 
 - current behavior and relevant local patterns;
 - affected boundaries, dependencies, and interfaces;
@@ -72,7 +74,7 @@ Inspect only enough project context to resolve material questions:
 - plausible failure, rollback, compatibility, security, data, and operational risks;
 - independent work that can form separate waves.
 
-Use a clarifier or ask the user only when missing information would change the deliverable, create material rework, or cross an escalation boundary. Ask the smallest useful question in the clearest form; there is no required question count, option count, or multiple-choice format.
+Use a clarifier or ask the user only when missing information would change the deliverable, create material rework, or cross an escalation boundary. Ask the smallest useful question in the clearest form and explain what its answer would change. If project evidence or a prior answer resolves it, do not ask it. There is no required question count, option count, or multiple-choice format.
 
 ## Explore Approaches When They Matter
 

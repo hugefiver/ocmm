@@ -3,7 +3,7 @@ name: writing-plans
 description: Use before complex product behavior implementation, or when an explicit planning request or concrete major risk requires a plan; not for routine non-product multi-step work
 ---
 
-<!-- Local fork of obra/superpowers/writing-plans v6.3.0.
+<!-- Local fork of obra/superpowers/writing-plans v7.0.1.
      Outcome-oriented final product plans; temporary coordination for other work.
      Complex implementation receives orchestrator-owned blocker-focused criticism.
      Source and maintenance contract: docs/v1-maintenance.md. -->
@@ -50,7 +50,11 @@ Use the structure that best explains the work. A useful plan normally makes thes
 - Waves or tasks with clear outcome boundaries
 - Useful acceptance evidence for each wave and for the integrated result
 
-Describe the concise final requirements, design, and behavior. Update intermediate text directly; don't retain development history, rejected alternatives, or decision counterexamples. Include commands, code sketches, file paths, or signatures when they prevent ambiguity; omit them when repository patterns and acceptance criteria already make the implementation obvious.
+Describe the concise final requirements, design, and behavior. Update intermediate text directly; don't retain development history, rejected alternatives, or decision counterexamples.
+
+A plan records decisions an unfamiliar executor cannot safely infer. When needed to prevent a materially different implementation, pin the exact file path, public or cross-task name and signature, value fixed by the requirements, and test assertion that demonstrates the behavior. Leave ordinary body implementation to the executor when those decisions and local patterns determine it. Include a body or algorithm only when the requirements fix exact copy or the non-obvious algorithm itself; a plan that transcribes otherwise determined implementation obscures the decisions it is meant to preserve.
+
+Consider valid input classes and failure conditions implied by the approved interfaces, established behavior, and ordinary supported use even when the requirements do not enumerate each one. Assign meaningful regression evidence to the task that owns the behavior. If an important condition cannot yet be exercised or judged, identify the condition, why it matters, and the missing evidence or decision as review focus. Do not invent new features from specification silence, require a fixed section or count, or turn every hypothetical edge case into scope.
 
 ## Waves and Tasks
 
@@ -65,7 +69,7 @@ For each wave, state:
 - material risks or decisions;
 - useful acceptance evidence showing the wave achieved its goal.
 
-A task should be cohesive enough to produce meaningful progress and small enough to reason about and verify. Combine setup, types, implementation, docs, and validation when they only have value together. Split tasks when they can be implemented or rejected independently, have different ownership, or unlock parallel work.
+A task should be cohesive enough to produce meaningful progress and small enough to reason about and verify. Combine setup, types, implementation, docs, and validation when they only have value together. Split tasks when they can be implemented or rejected independently, have different ownership, or unlock parallel work. State exact paths, signatures, fixed values, and test assertions only where the task or a dependent task would otherwise have to guess.
 
 Plans need not prescribe one executor action every 2-5 minutes. They also need not mandate a failing-test transcript, scenario count, per-task full review, or commit. Use deterministic tests at real regression-prone seams; use typechecks, builds, focused inspection, runtime probes, or other evidence when those better demonstrate the outcome. Keep real security, data-loss, protocol, compatibility, and irreversible-operation safeguards explicit.
 

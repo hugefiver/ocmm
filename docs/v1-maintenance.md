@@ -36,7 +36,7 @@ OpenCode deepwork sources use one `<deepwork-mode>` envelope. Model-facing files
 
 ### Skill Injection and Discovery
 
-The default brainstorming orientation is one short paragraph: understand the outcome and relevant facts, load the full skill for material uncertainty, proceed with clear authorized work through the applicable workflow, and ask for decisions at material boundaries or explicit checkpoints. `loadV1SkillBriefs` in `src/intent/skill-loader.ts` reads `skills/v1/brainstorming/brief.md`; `getV1SkillBriefs` supplies it to the OpenCode system message. All six v1 skills, including full brainstorming, remain available on demand as native skills and slash commands. Standing role and calibration rules retain final-state discipline, valid tests, evidence reuse, authorization, and workflow ownership without requiring the full skill to be loaded.
+The default brainstorming orientation is one short paragraph: understand the outcome and relevant facts, begin with user-supplied and related project context, do not repeat answered questions, load the full skill for material uncertainty, proceed with clear authorized work through the applicable workflow, and ask only for decisions at material boundaries or explicit checkpoints while explaining what the answer changes. `loadV1SkillBriefs` in `src/intent/skill-loader.ts` reads `skills/v1/brainstorming/brief.md`; `getV1SkillBriefs` supplies it to the OpenCode system message. All six v1 skills, including full brainstorming, remain available on demand as native skills and slash commands. Standing role and calibration rules retain final-state discipline, valid tests, evidence reuse, authorization, and workflow ownership without requiring the full skill to be loaded.
 
 Shared top-level skills are discovered by `loadSharedSkills`, not added to v1 system injection. Codex embeds the short brainstorming orientation in each generated agent's `developer_instructions` and copies full packaged skills with adapter-specific tool/name conversion. On-demand references use names such as `deepwork-brainstorming` and `deepwork-writing-plans` rather than OpenCode slash commands.
 
@@ -64,14 +64,14 @@ All six are local forks of `obra/superpowers`. Current source headers identify t
 
 | Skill | Upstream baseline | Current local contract |
 | --- | --- | --- |
-| `brainstorming` | v6.3.0 | On-demand proportional discovery, authorized outcome, no redundant approval, and detailed final-state policy; default orientation is a short paragraph |
-| `writing-plans` | v6.3.0 | Complex product outcome/wave planning or explicitly/risk-required plans; product-only spec/plan storage; session coordination for routine non-product work; applicable blocker-focused handoff |
-| `subagent-driven-development` | v6.3.0 | Optional useful delegation after applicable planning; exclusive ownership; current constraints/evidence handoffs; no worker orchestration or autonomous Git writes |
-| `requesting-code-review` | v6.3.0 | Risk/evidence-driven implementation review of current diff; Reviewer/Oracle role separation; no nested review seats |
+| `brainstorming` | v7.0.1 | On-demand proportional discovery grounded in supplied and related project context; material questions explain their impact and never repeat resolved input; authorized outcome, no redundant approval, and detailed final-state policy |
+| `writing-plans` | v7.0.1 | Complex product outcome/wave planning that records only necessary paths, signatures, fixed values, assertions, and uncovered material review focus; product-only spec/plan storage; applicable blocker-focused handoff |
+| `subagent-driven-development` | v7.0.1 | Optional useful delegation after applicable planning; exclusive ownership; current constraints/evidence handoffs; no worker orchestration or autonomous Git writes; conditional review guidance loaded by relative reference |
+| `requesting-code-review` | v7.0.1 | Risk/evidence-driven implementation review of current diff, including implied supported inputs and explicit important unjudged items/evidence gaps; Reviewer/Oracle role separation; no nested review seats |
 | `receiving-code-review` | v6.2.0 | Technical evaluation of findings against valid requirements and committed contracts; affected evidence/review only |
 | `dispatching-parallel-agents` | v6.2.0 | Independent outcome domains; no shared mutable ownership; inspect and reconcile every result before integration |
 
-`writing-plans/plan-document-reviewer-prompt.md` checks outcome coverage, interfaces, global constraints, final-deliverable shape, and valid evidence. The subagent-driven-development implementer, spec-reviewer, and code-quality templates carry the same current-outcome and permission boundaries. `requesting-code-review/code-reviewer.md` is the implementation-review template. None requires a development or ruling history.
+`writing-plans/plan-document-reviewer-prompt.md` checks outcome coverage, necessary path/signature/value/assertion decisions, interfaces, implied supported inputs, global constraints, final-deliverable shape, and valid evidence. The subagent-driven-development entry keeps authority, stop/escalation, Git, verification, and conditional loading rules in `SKILL.md`; review-only guidance lives at `references/review.md`, which normal recursive skill packaging delivers. Its implementer, spec-reviewer, and code-quality templates carry the same current-outcome and permission boundaries. `requesting-code-review/code-reviewer.md` is the implementation-review template and reports important unjudged behavior with its reason and missing evidence or product decision. None requires a development or ruling history, fixed review-focus heading, quota, or list.
 
 ## Shared Sources and Attribution
 
