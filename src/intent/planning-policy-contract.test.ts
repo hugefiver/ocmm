@@ -22,6 +22,8 @@ test("planning role composition orders and deduplicates synthetic model layers",
           writeFileSync(join(root, workflow, area, `${name}.md`), marker(area, name))
         }
       }
+      mkdirSync(join(root, workflow, "category"), { recursive: true })
+      writeFileSync(join(root, workflow, "category", "deep.md"), marker("category", "deep"))
       loadAllPrompts(root, workflow)
 
       for (const [model, selectedVariant, calibration] of [
@@ -36,6 +38,26 @@ test("planning role composition orders and deduplicates synthetic model layers",
         ["moonshot/kimi-k2.8", "default", "kimi"],
         ["moonshot/kimi-k3.1", "default", "kimi"],
         ["devin/swe-2-high", "default", "swe-2"],
+        ["provider-kimi-for-coding/unrelated", "default", ""],
+        ["gemini-4-provider/unrelated", "default", ""],
+        ["swe-2-provider/unrelated", "default", ""],
+        ["gpt-6-sol/gemini-4-pro", "gemini", "gemini-4"],
+        ["gateway/gpt-6-sol/gemini-4-pro", "gpt", "gpt"],
+        ["gateway/auto-gpt/6.1/sol", "gpt", "gpt"],
+        ["gateway/auto-swe/2/high-gpt-6", "default", "swe-2"],
+        ["gateway/auto-k2p8-gpt-6", "default", "kimi"],
+        ["gateway/auto-claude_opus_5_5-20261101", "claude-opus-5", ""],
+        ["codex/gpt-5.6", "gpt", "gpt"],
+        ["google/sol6.1", "gpt", "gpt"],
+        ["anthropic/gpt6.1sol", "gpt", "gpt"],
+        ["gateway/sol6.1-codex", "codex", "gpt"],
+        ["gateway/opus4.7", "default", ""],
+        ["gateway/opus5.5-2m", "claude-opus-5", ""],
+        ["gateway/opus5.5foo-gpt6.1sol", "default", ""],
+        ["gateway/sonnet5.5", "default", ""],
+        ["gateway/haiku5", "default", ""],
+        ["6.1sol/gemini-4-pro", "gemini", "gemini-4"],
+        ["gateway/6.1sol/gemini-4-pro", "gpt", "gpt"],
       ]) {
         const configured = {
           ...defaultConfig(),
@@ -45,9 +67,17 @@ test("planning role composition orders and deduplicates synthetic model layers",
             planner: { model, variants: { high: "high" as const } },
             "plan-critic": { model, variants: { low: "low" as const } },
           },
+          categories: { deep: { model } },
         }
         const target: { agent: Record<string, unknown> } = { agent: {} }
         await createConfigHandler({ getConfig: () => configured, skillsRoot: join(root, "skills") })(target, undefined)
+        assert.equal((target.agent.orchestrator as Record<string, unknown>).model, model)
+        const category = target.agent.deep as Record<string, unknown>
+        assert.equal(category.model, model)
+        const categoryPrompt = String(category.prompt)
+        for (const layer of ["gpt", "kimi", "gemini-4", "swe-2"]) {
+          assert.equal(categoryPrompt.includes(marker("deepwork", layer)), workflow === "codex" || layer === calibration, `${workflow}/${model}/category/${layer}`)
+        }
 
         for (const name of ["orchestrator", "planner", "planner-high", "plan-critic", "plan-critic-low"]) {
           const role = name === "planner-high" ? "planner" : name === "plan-critic-low" ? "plan-critic" : name
@@ -78,6 +108,18 @@ test("planning role composition orders and deduplicates synthetic model layers",
           for (const layer of variants.filter((variant) => !expectedLayers.includes(variant))) {
             assert.equal(assembled.includes(marker("deepwork", layer)), false, `${workflow}/${model}/${name}/${layer}: not selected`)
           }
+        }
+      }
+      for (const catalogModel of ["Group/GPT 6_2_ASTRA-fast", "Group/6.2Astra-128k"]) {
+        const target = {
+          agent: {} as Record<string, unknown>,
+          provider: { openai: { models: { [catalogModel]: {} } } },
+        }
+        await createConfigHandler({ getConfig: () => ({ ...defaultConfig(), workflow }), skillsRoot: join(root, "skills") })(target, undefined)
+        for (const name of ["orchestrator", "deep"]) {
+          const assembled = target.agent[name] as Record<string, unknown>
+          assert.equal(assembled.model, `openai/${catalogModel}`)
+          assert.equal(String(assembled.prompt).split(marker("deepwork", "gpt")).length - 1, 1)
         }
       }
     }

@@ -157,7 +157,7 @@ test("canonical reasoning respects explicit user values while retaining GPT max 
 
 test("GPT-6.1 and later Sol preserve supported low-through-max effort without changing neutral none", () => {
   for (const family of ["gpt", "codex"] as const) {
-    for (const modelID of ["gpt-6.1-sol", "apai/gpt-6.2-sol-fast", "gpt-7-sol"]) {
+    for (const modelID of ["gpt-6.1-sol", "apai/gpt-6.2-sol-fast", "gpt-7-sol", "gpt6.1sol", "sol6.1", "6.1sol", "sol6.1-codex"]) {
       for (const variant of ["low", "medium", "high", "xhigh", "max"] as const) {
         assert.equal(normalizeVariantForModel({ family, modelID, variant }), variant, modelID)
         assert.deepEqual(translateVariant(family, variant, { modelID }), { reasoningEffort: variant }, modelID)
@@ -183,8 +183,11 @@ test("exact GPT-6 models retain canonical off while Codex static minimal keeps i
   for (const family of ["gpt", "codex"] as const) {
     for (const [modelID, off] of [
       ["gpt-6-sol-fast", "off"],
-      ["openai-codex/gpt-6-luna", "off"],
+      ["auto-gpt/6/luna", "off"],
       ["openai/gpt-6-astra-fast", "low"],
+      ["6sol", "off"],
+      ["luna6", "off"],
+      ["6astra", "low"],
     ] as const) {
       assert.equal(normalizeReasoningForModel({ family, modelID, reasoning: "off" }), off, modelID)
       assert.equal(normalizeReasoningForModel({ family, modelID, reasoning: "minimal" }), family === "gpt" ? "low" : "high", modelID)
@@ -207,4 +210,27 @@ test("Codex static profile translation does not inherit the OpenCode runtime min
   assert.deepEqual(translateVariant("codex", "minimal", { modelID: "gpt-6-sol" }), { reasoningEffort: "high" })
   assert.deepEqual(translateVariant("codex", "minimal", { modelID: "gpt-6-luna-fast" }), { reasoningEffort: "high" })
   assert.deepEqual(translateVariant("codex", "minimal", { modelID: "gpt-6-astra" }), { reasoningEffort: "high" })
+})
+
+test("model aliases retain actual effort limits and scope mini to the chosen identifier", () => {
+  for (const modelID of ["auto-gpt/6.1/sol", "custom.GPT_6_1_SOL"]) {
+    assert.deepEqual(translateReasoning("gpt", "low", { modelID }), { reasoningEffort: "low" }, modelID)
+    assert.deepEqual(translateReasoning("gpt", "off", { modelID }), { reasoningEffort: "low" }, modelID)
+    assert.deepEqual(translateVariant("gpt", "max", { modelID }), { reasoningEffort: "max" }, modelID)
+  }
+  for (const modelID of ["gpt-5-20261101", "gpt-5.5-1m", "gpt-5.5-fast-6", "gpt-5.5-gpt-6.1-sol", "gpt-5.5-sol6.1-mini", "gpt-5.5-sol-6.1-mini", "gpt-5.5-fast-6.1sol-mini", "gpt4o-6.1sol", "sol6.1foo", "gpt6.1.2.3sol"]) {
+    assert.deepEqual(translateVariant("gpt", "max", { modelID }), { reasoningEffort: "xhigh" }, modelID)
+  }
+  assert.deepEqual(translateVariant("gpt", "low", { modelID: "mini-gpt-5.5-claude-opus-5-mini" }), { reasoningEffort: "high" })
+  assert.deepEqual(translateReasoning("codex", "max", { modelID: "prefix-gpt-5.6-codex-fast" }), { reasoningEffort: "max" })
+  assert.deepEqual(translateReasoning("gpt", "low", { modelID: "auto-gpt/6.1/sol", respectExplicit: true }), { reasoningEffort: "low" })
+  assert.deepEqual(translateVariant("gpt", "low", { modelID: "gpt-5.5-gpt4o-mini" }), { reasoningEffort: "high" })
+  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt4o-6.1-sol" }), { reasoningEffort: "xhigh" })
+  assert.deepEqual(translateVariant("gpt", "max", { modelID: "gpt-5.6000" }), { reasoningEffort: "max" })
+})
+
+test("foreign adjacent series cannot grant native GPT max", () => {
+  for (const modelID of ["gpt6.1opus", "gpt-6.1sonnet", "gpt6haiku"]) {
+    assert.deepEqual(translateVariant("gpt", "max", { modelID }), { reasoningEffort: "xhigh" }, modelID)
+  }
 })

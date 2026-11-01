@@ -1407,11 +1407,13 @@ test("v1 composes default plus Opus 5 exactly once for orchestrator only", async
   assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/)
 })
 
-test("v1 assembles exact upstream Opus 5.5 aliases from selected models without leaking the layer", async () => {
+test("v1 assembles wrapped Opus 5.5 aliases from selected models without leaking the layer", async () => {
   loadAllPrompts(join(process.cwd(), "prompts"), "v1")
   for (const model of [
     "claude-opus-5-5@default",
     "amazon-bedrock/global.anthropic.claude-opus-5-5",
+    "claude-opus-5-5@other",
+    "amazon-bedrock/global.openai.claude-opus-5-5",
   ]) {
     const configured = {
       ...defaultConfig(),
@@ -1437,7 +1439,7 @@ test("v1 assembles exact upstream Opus 5.5 aliases from selected models without 
     assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/, model)
   }
 
-  for (const model of ["claude-opus-5-5@other", "amazon-bedrock/global.openai.claude-opus-5-5"]) {
+  for (const model of ["claude-opus-5.0", "claude-opus-5.50", "claude-opus-50"]) {
     const configured = { ...defaultConfig(), workflow: "v1" as const, agents: { orchestrator: { model } } }
     const target: ConfigTarget = { agent: {} }
     await createConfigHandler({ getConfig: () => configured })(target, undefined)

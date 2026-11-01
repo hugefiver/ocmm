@@ -1,8 +1,7 @@
 import {
-  extractModelName,
+  recognizeModelName,
   isClaudeOpus5Model,
   isClaudeOpus47OrLaterModel,
-  isCodexModel,
 } from "../intent/model-family.ts"
 import { splitReasoningSuffix } from "../shared/reasoning.ts"
 
@@ -19,11 +18,10 @@ function normalizeTemperatureLookupModel(modelID: string): string {
 }
 
 function modelDoesNotSupportTemperatureHeuristically(modelID: string): boolean {
-  const name = extractModelName(modelID).toLowerCase()
-  return isCodexModel(modelID)
-    || isCodexModel(name)
-    || /^gpt-5(?:$|[-_.])/.test(name)
-    || /^o\d(?:$|[-_.])/.test(name)
+  const model = recognizeModelName(modelID)
+  return model?.codex === true
+    || (model?.kind === "gpt" && model.generation === 5)
+    || model?.kind === "o-series"
     || isClaudeOpus5Model(modelID)
     || isClaudeOpus47OrLaterModel(modelID)
 }

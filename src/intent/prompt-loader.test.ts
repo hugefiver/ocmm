@@ -204,6 +204,10 @@ test("all recognized GPT generations and aliases select the same calibration wit
     "providers/openai/gpt-6-luna-fast",
     "gpt-6-preview",
     "amazon-bedrock/openai.gpt-7-preview",
+    "gpt6.1sol",
+    "sol6.1",
+    "6.1sol/gemini-4-pro",
+    "terra6.2",
   ]) {
     for (const agentName of ["builder", "orchestrator", "reviewer"]) {
       assert.equal(pickDeepworkVariantForAgent({ agentName, preferenceModel: modelID }), "gpt", `${agentName}/${modelID}`)
@@ -216,6 +220,8 @@ test("all recognized GPT generations and aliases select the same calibration wit
 test("pickDeepworkVariantForAgent reserves the Opus 5/5.5 calibration for orchestrator", () => {
   for (const modelID of [
     "claude-opus-5",
+    "opus5",
+    "opus5.5-2m",
     "anthropic/claude-opus-5",
     "claude-opus-5-20260728",
     "claude-opus-5.latest",
@@ -227,6 +233,14 @@ test("pickDeepworkVariantForAgent reserves the Opus 5/5.5 calibration for orches
     "amazon-bedrock/global.anthropic.claude-opus-5-5",
     "claude-opus-5@default",
     "claude-opus-5.5@default",
+    "auto-claude_opus_5_5-20261101",
+    "claude-opus-5-5@other",
+    "claude-opus-5-5@default-extra",
+    "claude-opus-5-5@default@default",
+    "prefix-claude-opus-5-5@default",
+    "amazon-bedrock/global.unknown.claude-opus-5-5",
+    "amazon-bedrock/global.anthropic.anthropic.claude-opus-5-5",
+    "amazon-bedrock/global.openai.claude-opus-5-5",
   ]) {
     assert.equal(
       pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: modelID }),
@@ -244,14 +258,18 @@ test("pickDeepworkVariantForAgent reserves the Opus 5/5.5 calibration for orches
     }
   }
   for (const modelID of [
-    "claude-opus-5-5@other",
-    "claude-opus-5-5@default-extra",
-    "claude-opus-5-5@default@default",
     "claude-opus-5-50@default",
-    "prefix-claude-opus-5-5@default",
-    "amazon-bedrock/global.unknown.claude-opus-5-5",
-    "amazon-bedrock/global.anthropic.anthropic.claude-opus-5-5",
-    "amazon-bedrock/global.openai.claude-opus-5-5",
+    "claude-opus-5.0",
+    "claude-opus-5.5000",
+    "claude-opus-50",
+    "gpt-5.5-claude-opus-5",
+    "opus4.7",
+    "opus5.0",
+    "opus5.50",
+    "opus50",
+    "opus5.5foo",
+    "sonnet5.5",
+    "haiku5",
   ]) {
     assert.notEqual(
       pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: modelID }),
@@ -284,7 +302,8 @@ test("pickDeepworkVariantForAgent picks codex variant for Codex models", () => {
     pickDeepworkVariantForAgent({ agentName: "builder", preferenceModel: "codex-mini-latest" }),
     "codex",
   )
-  for (const modelID of ["codex-mini-latest", "openai/gpt-5.3-codex", "provider/codex-latest"]) {
+  for (const modelID of ["codex-mini-latest", "openai/gpt-5.3-codex", "provider/codex-latest", "gpt6.1sol-codex", "sol6.1-codex"]) {
+    assert.equal(pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: modelID }), "codex", modelID)
     assert.deepEqual(pickModelCalibrationVariants(modelID), ["gpt"], modelID)
   }
 })
@@ -309,7 +328,18 @@ test("additive model calibration selector distinguishes Kimi, Gemini 4, SWE-2, a
     ["devin/swe-2-high", ["swe-2"]],
     ["DEVIN/SWE-2.MAX", ["swe-2"]],
     ["devin/swe-20", []],
-    ["provider-kimi-for-coding/unrelated", []],
+    ["provider-kimi-for-coding/unrelated", ["kimi"]],
+    ["gemini-4-provider/unrelated", ["gemini-4"]],
+    ["swe-2-provider/unrelated", ["swe-2"]],
+    ["gpt-6-sol/gemini-4-pro", ["gpt"]],
+    ["gpt4o-gemini-4-pro", ["gpt"]],
+    ["auto-chatgpt4o", ["gpt"]],
+    ["custom.glm4-gpt-6.1-sol", []],
+    ["auto-swe/2/high-gpt-6", ["swe-2"]],
+    ["auto-k2p8-gpt-6", ["kimi"]],
+    ["claude-opus-5-gpt-6.1-sol", []],
+    ["gemini-4-pro-gpt-6-codex", ["gemini-4"]],
+    ["prefix-gpt-5.6-codex-fast", ["gpt"]],
     ["moonshot/kimi-k2.6", ["kimi"]],
     ["moonshot/kimi-k3", ["kimi"]],
     ["moonshot/kimi-k3.1", ["kimi"]],
@@ -349,18 +379,22 @@ test("category extension seam selects model families, ignores unsupported keys, 
       '<model-calibration model="gpt">\ngeneric-gpt-extension\n</model-calibration>',
       '<model-calibration model="gemini">\ngemini-extension\n</model-calibration>',
       '<model-calibration model="kimi-k27">\nkimi-family-extension\n</model-calibration>',
+      '<model-calibration model="kimi">\nkimi-extension\n</model-calibration>',
       '<model-calibration model="swe-2">\nswe-extension\n</model-calibration>',
       '<model-calibration model="unsupported-family">\nunsupported-extension\n</model-calibration>',
     ].join("\n"))
     loadAllPrompts(root, "v1")
     assert.equal(getCategoryPrompt("deep").trim(), "category-role")
-    for (const model of ["gpt-5.6-sol", "openai/gpt-6-astra-fast", "gpt-6-luna", "codex-mini-latest"]) {
+    for (const model of ["gpt-5.6-sol", "openai/gpt-6-astra-fast", "gpt-6-luna", "codex-mini-latest", "gpt6.1sol", "sol6.1-codex", "6.1sol/gemini-4-pro"]) {
       assert.equal(getCategoryModelCalibration("deep", model), "generic-gpt-extension", model)
     }
     assert.equal(getCategoryModelCalibration("deep", "google/gemini-3-pro"), "gemini-extension")
     assert.equal(getCategoryModelCalibration("deep", "anthropic/claude-opus-5"), "")
     assert.equal(getCategoryModelCalibration("deep", "moonshot/kimi-k2.7"), "kimi-family-extension")
-    assert.equal(getCategoryModelCalibration("deep", "unknown/model", true), "generic-gpt-extension\n\n---\n\nkimi-family-extension\n\n---\n\nswe-extension")
+    assert.equal(getCategoryModelCalibration("deep", "auto-k2p8-gpt-6"), "kimi-extension")
+    assert.equal(getCategoryModelCalibration("deep", "auto-swe/2/high-gpt-6"), "swe-extension")
+    assert.equal(getCategoryModelCalibration("deep", "gemini-4-pro-gpt-6-codex"), "gemini-extension")
+    assert.equal(getCategoryModelCalibration("deep", "unknown/model", true), "generic-gpt-extension\n\n---\n\nkimi-family-extension\n\n---\n\nswe-extension\n\n---\n\nkimi-extension")
     writeFileSync(join(root, "v1", "category", "deep.md"), "replacement-role")
     loadAllPrompts(root, "v1")
     assert.equal(getCategoryPrompt("deep"), "replacement-role")
@@ -368,4 +402,11 @@ test("category extension seam selects model families, ignores unsupported keys, 
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test("foreign adjacent series preserve coarse prompts without version-specific calibration", () => {
+  assert.deepEqual(pickModelCalibrationVariants("gemini-4.1sol"), [])
+  assert.equal(pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "gemini-4.1sol" }), "gemini")
+  assert.equal(pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "claude-opus-5.5sol" }), "default")
+  assert.deepEqual(pickModelCalibrationVariants("gpt6.1opus"), ["gpt"])
 })

@@ -438,3 +438,131 @@ test("legacy roles retain catalog promotions over available non-GPT heads", () =
     }
   }
 })
+
+test("catalog aliases preserve original keys, baseline index, controls, and model-internal slashes", () => {
+  const baseline = { ...reviewerRequirement.fallbackChain[0]!, model: "auto-gpt/6.1/sol" }
+  const requirement: ModelRequirement = { fallbackChain: [
+    { providers: ["anthropic"], model: "claude-sonnet-4-6" },
+    baseline,
+    { providers: ["openai"], model: "gpt-5.5" },
+  ] }
+  const model = "Group/GPT 6_2_SOL-1m"
+  const target = { provider: {
+    openai: { models: {
+      [model]: {},
+      "gpt-6.1-sol-20261101": {},
+      "gpt-6.1-sol-fast-9": {},
+      "gpt-9-solar": {},
+      "claude-opus-5-gpt-9-sol": {},
+      "gpt-5.5-gpt-9-sol": {},
+    } },
+    "github-copilot": { models: { [model]: {} } },
+    unrelated: { models: { "gpt-9-sol": {} } },
+  } }
+  const selected = selectCatalogModel(target, "builder", requirement)
+  assert.equal(selected, `openai/${model}`)
+  const entry = { ...baseline, providers: ["openai"], model }
+  assert.deepEqual(matchRequirementSuccessorWithIndex(requirement, "openai", model), { baselineIndex: 1, entry })
+  assert.deepEqual(materializeSelectedPrimary(requirement, selected!).fallbackChain, [
+    entry, requirement.fallbackChain[0], requirement.fallbackChain[2],
+  ])
+  const resolved = resolveModelRouting({
+    agentName: "builder", providerID: "openai", modelID: model,
+    effectiveRequirement: { requirement, source: "agent-default" },
+  })
+  assert.deepEqual(resolved?.entry, entry)
+  assert.equal(resolved?.variant, baseline.variant)
+  assert.equal(matchRequirementSuccessor(requirement, "unrelated", model), null)
+  assert.equal(matchRequirementSuccessor(requirement, "openai", "auto-gpt/6.0/sol"), null)
+})
+
+test("GLM successor interpretation is shared for wrapped baselines and complete catalog model fields", () => {
+  const requirement: ModelRequirement = { fallbackChain: [
+    { providers: ["zhipu"], model: "auto.GLM_5_1-20261101", variant: "max", temperature: 0.1 },
+  ] }
+  const model = "group/glm-5.3-1m"
+  assert.equal(selectCatalogModel({ provider: { zhipu: { models: {
+    [model]: {}, "glm-5.2.9": {}, "glm-6.0": {}, "gpt-5.5-glm-5.9": {},
+  } } } }, "coding", requirement), `zhipu/${model}`)
+  assert.deepEqual(matchRequirementSuccessor(requirement, "zhipu", model), {
+    ...requirement.fallbackChain[0], model,
+  })
+  assert.equal(matchRequirementSuccessor(requirement, "zhipu", "auto-glm-6.1"), null)
+  assert.equal(matchRequirementSuccessor({ fallbackChain: [
+    { providers: ["zhipu"], model: "glm-5.1.1" },
+  ] }, "zhipu", model), null)
+  for (const baseline of ["glm-5.1.1000", "auto.GLM_5_1_1000-20261101", "glm-5.1.20000000"]) {
+    const exactRequirement: ModelRequirement = { fallbackChain: [{ providers: ["zhipu"], model: baseline }] }
+    assert.equal(matchRequirementSuccessor(exactRequirement, "zhipu", model), null, baseline)
+    assert.equal(selectCatalogModel({ provider: { zhipu: { models: { [model]: {} } } } }, "coding", exactRequirement), undefined, baseline)
+  }
+})
+
+test("catalog alias ties retain deterministic original-key order", () => {
+  const target = { provider: { openai: { models: {
+    "z-gpt_6_2_astra": {}, "a-gpt/6.2/astra": {},
+  } } } }
+  assert.equal(selectCatalogModel(target, "deep", BUILTIN_CATEGORY_INDEX.get("deep")!.requirement), "openai/a-gpt/6.2/astra")
+})
+
+test("explicit user aliases remain authoritative when a higher catalog successor exists", async () => {
+  for (const modelID of ["custom.gpt/6.1/sol", "Group/6.1Sol-128k"]) {
+    const model = `openai/${modelID}`
+    const config = { ...defaultConfig(), agents: { orchestrator: { model, variant: "low" as const } } }
+    const target = { agent: {} as Record<string, unknown>, provider: { openai: { models: {
+      "gpt-9-sol": {}, "gpt-9-astra": {},
+    } } } }
+    await createConfigHandler({ getConfig: () => config, cwd: process.cwd() })(target, undefined)
+    assert.equal((target.agent.orchestrator as Record<string, unknown>).model, model)
+    const resolved = resolveModelRouting({
+      agentName: "orchestrator", providerID: "openai", modelID, agentsConfig: config.agents,
+    })
+    assert.equal(resolved?.source, "user-config")
+    assert.equal(resolved?.entry.model, modelID)
+    assert.equal(resolved?.variant, "low")
+  }
+})
+
+test("compact catalog baselines and candidates preserve original keys, controls, and fallbacks", () => {
+  for (const [baselineModel, model, older] of [
+    ["sol6.1", "Group/6.2Sol-128k", "gpt6.0sol"],
+    ["6.1sol", "gpt6.2sol", "sol6.0"],
+    ["gpt6.1sol", "SOL_6_2", "6sol"],
+    ["6astra", "Group/astra6.2", "astra5.9"],
+    ["luna6.1", "6.2luna", "6luna"],
+    ["terra6.1", "gpt-terra6.2", "terra6"],
+  ] as const) {
+    const baseline = { ...reviewerRequirement.fallbackChain[0]!, model: baselineModel }
+    const requirement: ModelRequirement = { fallbackChain: [
+      { providers: ["anthropic"], model: "sonnet4.6" },
+      baseline,
+      { providers: ["openai"], model: "gpt-5.5" },
+    ] }
+    const target = { provider: {
+      openai: { models: { [model]: {}, [older]: {}, "sol9.1foo": {}, "gpt9.1.2.3sol": {}, "gpt-5.5-sol9.1": {}, "gpt4o-9.1sol": {} } },
+      unrelated: { models: { "sol99": {} } },
+    } }
+    const selected = selectCatalogModel(target, "builder", requirement)
+    assert.equal(selected, `openai/${model}`, baselineModel)
+    const entry = { ...baseline, providers: ["openai"], model }
+    assert.deepEqual(matchRequirementSuccessorWithIndex(requirement, "openai", model), { baselineIndex: 1, entry })
+    assert.deepEqual(materializeSelectedPrimary(requirement, selected!).fallbackChain, [
+      entry, requirement.fallbackChain[0], requirement.fallbackChain[2],
+    ])
+    assert.equal(matchRequirementSuccessor(requirement, "openai", older), null)
+    assert.equal(selectCatalogModel({ provider: { openai: { models: { [older]: {} } } } }, "builder", requirement), undefined)
+    for (const invalid of ["sol9.1foo", "gpt9.1.2.3sol", "gpt-5.5-sol9.1", "gpt4o-9.1sol"]) {
+      assert.equal(matchRequirementSuccessor(requirement, "openai", invalid), null, invalid)
+    }
+    assert.equal(matchRequirementSuccessor(requirement, "unrelated", model), null)
+  }
+})
+
+test("foreign adjacent series cannot become a GLM successor or precise baseline", () => {
+  const requirement: ModelRequirement = { fallbackChain: [{ providers: ["zhipu"], model: "glm-5.1" }] }
+  const target = { provider: { zhipu: { models: { "glm-5.3sol": {} } } } }
+  assert.equal(selectCatalogModel(target, "coding", requirement), undefined)
+  assert.equal(matchRequirementSuccessor(requirement, "zhipu", "glm-5.3sol"), null)
+  const invalidBaseline: ModelRequirement = { fallbackChain: [{ providers: ["zhipu"], model: "glm-5.1sol" }] }
+  assert.equal(matchRequirementSuccessor(invalidBaseline, "zhipu", "glm-5.3"), null)
+})

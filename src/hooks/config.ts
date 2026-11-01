@@ -421,7 +421,10 @@ function deepworkPromptForAgent(
     override?.requirement?.fallbackChain?.length
       ? override.requirement.fallbackChain
       : agent.requirement.fallbackChain
-  const prefModel = selectedModel ?? chain[0]?.model ?? ""
+  // Selected values are full routes; requirement entries already contain model fields.
+  const prefModel = selectedModel !== undefined
+    ? selectedModel.slice(selectedModel.indexOf("/") + 1)
+    : chain[0]?.model ?? ""
   const modelCalibrations = pickModelCalibrationVariants(prefModel, workflow === "codex")
     .map((variant) => getDeepworkPrompt(variant))
   // Codex profiles are generated ahead of runtime model overrides. Carry the
@@ -476,8 +479,9 @@ function promptForBuiltinCategory(
   selectedModel: string,
 ): string {
   const rolePrompt = getCategoryPrompt(categoryName).trim()
-  const categoryCalibration = getCategoryModelCalibration(categoryName, selectedModel, workflow === "codex").trim()
-  const modelCalibrations = pickModelCalibrationVariants(selectedModel, workflow === "codex")
+  const modelID = selectedModel.slice(selectedModel.indexOf("/") + 1)
+  const categoryCalibration = getCategoryModelCalibration(categoryName, modelID, workflow === "codex").trim()
+  const modelCalibrations = pickModelCalibrationVariants(modelID, workflow === "codex")
     .map((variant) => getDeepworkPrompt(variant).trim())
   const calibration = joinPromptLayers([
     workflow === "codex" ? getDeepworkPrompt("codex").trim() : "",

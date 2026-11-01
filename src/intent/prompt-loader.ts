@@ -174,7 +174,8 @@ export function getCategoryModelCalibration(
   const family = classifyModelFamily({ modelID })
   const variants = carryAhead
     ? ["gpt", "kimi-k27", "swe-2", "kimi", "gemini-4"]
-    : [family === "codex" ? "gpt" : family]
+    : [family === "codex" ? "gpt" : isSwe2Model(modelID) ? "swe-2"
+      : family === "unknown" && isKimiPromptModel(modelID) ? "kimi" : family]
   return variants.map((variant) => calibrations?.get(variant) ?? "").filter(Boolean).join("\n\n---\n\n")
 }
 

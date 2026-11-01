@@ -2,6 +2,7 @@ import type { FallbackEntry, ModelRequirement } from "../shared/types.ts"
 import { isRecord } from "../shared/logger.ts"
 import { parsePlanningAgentName } from "../planning-agents/names.ts"
 import { parseReviewAgentName } from "../review-agents/names.ts"
+import { parseGptVersion, recognizeModelName } from "../intent/model-family.ts"
 
 type Version = [number, number, number]
 type GptLane = "sol" | "terra" | "astra" | "luna"
@@ -68,25 +69,19 @@ function compareVersion(a: Version, b: Version): number {
   return 0
 }
 
-function parseGptVersion(model: string): Version | null {
-  const match = model.toLowerCase().match(/^gpt-(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:$|[-_.])/)
-  if (!match) return null
-  return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)]
-}
-
 function parseGptLane(model: string): { version: Version; lane: GptLane } | null {
-  const match = model.toLowerCase().match(/^gpt-(\d+)(?:\.(\d+))?(?:\.(\d+))?-(sol|terra|astra|luna)(?:$|[-_.])/)
-  if (!match) return null
-  return {
-    version: [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)],
-    lane: match[4] as GptLane,
-  }
+  const parsed = recognizeModelName(model)
+  return parsed?.version && parsed.lane ? { version: parsed.version, lane: parsed.lane } : null
 }
 
 function parseGlmSuccessor(model: string): Version | null {
-  const match = model.toLowerCase().match(/^glm-(5)\.(\d+)(?:\.(\d+))?(?:$|[-_.])/)
-  if (!match) return null
-  return [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)]
+  const parsed = recognizeModelName(model)
+  return parsed?.kind === "glm" && parsed.version?.[0] === 5 ? parsed.version : null
+}
+
+function isGlmBaseline(model: string): boolean {
+  const version = parseGlmSuccessor(model)
+  return version !== null && compareVersion(version, [5, 1, 0]) === 0
 }
 
 function compatibleEntryWithIndex(
@@ -217,7 +212,7 @@ export function selectCatalogModel(
   const glmBaseline = compatibleEntry(
     requirement,
     undefined,
-    (entry) => entry.model.toLowerCase() === "glm-5.1",
+    (entry) => isGlmBaseline(entry.model),
   )
   if (!glmBaseline) return undefined
 
@@ -271,7 +266,7 @@ export function matchRequirementSuccessorWithIndex(
     const baseline = compatibleEntryWithIndex(
       requirement,
       providerID,
-      (entry) => entry.model.toLowerCase() === "glm-5.1",
+      (entry) => isGlmBaseline(entry.model),
     )
     if (baseline) {
       return {
