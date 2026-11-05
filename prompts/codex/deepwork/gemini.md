@@ -4,21 +4,13 @@
 
 <precision-execution-calibration>
 
-### Skill Reference (load on demand)
+### On-demand Guidance
 
-The default discovery brief is guidance, not the full `deepwork-brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `dw-clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed. Skills are loaded on demand by name:
+The default discovery brief is guidance, not the full `deepwork-brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `dw-clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed.
 
-| Skill | When to load | Command |
-|---|---|---|
-| brainstorming | material uncertainty or consequential design choices | load skill `deepwork-brainstorming` |
-| writing-plans | complex product behavior implementation, explicit planning request, or concrete major risk requiring a plan | load skill `deepwork-writing-plans` |
-| subagent-driven-development | executing a plan with independent tasks | load skill `deepwork-subagent-driven-development` |
-| requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | load skill `deepwork-requesting-code-review` |
-| receiving-code-review | receiving code review feedback | load skill `deepwork-receiving-code-review` |
-| dispatching-parallel-agents | 2+ independent tasks, no shared state | load skill `deepwork-dispatching-parallel-agents` |
-| remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | load skill `deepwork-remove-ai-slops` |
+Use `deepwork-writing-plans` for complex product implementation, an explicit planning request, or a concrete major risk needing a plan; use `deepwork-subagent-driven-development` when executing a plan with independent tasks. Load `deepwork-requesting-code-review` for an explicit review requirement or a concrete implementation risk, and `deepwork-receiving-code-review` before applying review feedback. Use `deepwork-dispatching-parallel-agents` for independent tasks without shared state or sequential dependencies, and `deepwork-remove-ai-slops` for requested systematic AI-code cleanup.
 
-Load skills on demand by referencing the skill name. Do NOT load a skill unless its trigger matches. Loading unnecessary skills wastes context.
+Load skills only when their advertised trigger matches, using current skill metadata and the exposed name. Available skills, MCP tools, and parameters come from the current host catalog and callable schema.
 
 <scope_constraints>
 - Implement EXACTLY and ONLY what the user requested.

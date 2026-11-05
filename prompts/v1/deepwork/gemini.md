@@ -4,21 +4,13 @@
 
 <precision-execution-calibration>
 
-### Skill Reference (load on demand)
+### On-demand Guidance
 
-The default discovery brief is guidance, not the full `brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed. Skills are on-demand slash commands:
+The default discovery brief is guidance, not the full `brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed.
 
-| Skill | When to load | Command |
-|---|---|---|
-| brainstorming | material uncertainty or consequential design choices | /brainstorming |
-| writing-plans | complex product behavior implementation, explicit planning request, or concrete major risk requiring a plan | /writing-plans |
-| subagent-driven-development | executing a plan with independent tasks | /subagent-driven-development |
-| requesting-code-review | focused implementation review when the user requires it or a concrete risk makes it useful | /requesting-code-review |
-| receiving-code-review | receiving code review feedback | /receiving-code-review |
-| dispatching-parallel-agents | 2+ independent tasks, no shared state | /dispatching-parallel-agents |
-| remove-ai-slops | user asks to "remove slop", "deslop", clean AI code | /remove-ai-slops |
+Use `/writing-plans` for complex product implementation, an explicit planning request, or a concrete major risk needing a plan; use `/subagent-driven-development` when executing a plan with independent tasks. Load `/requesting-code-review` for an explicit review requirement or a concrete implementation risk, and `/receiving-code-review` before applying review feedback. Use `/dispatching-parallel-agents` for independent tasks without shared state or sequential dependencies, and `/remove-ai-slops` for requested systematic AI-code cleanup.
 
-Do NOT load a skill unless its trigger matches. Loading unnecessary skills wastes context.
+Load skills only when their advertised trigger matches, using current skill metadata and the exposed native loader or slash command. Available skills, MCP tools, and parameters come from the current host catalog and callable schema.
 
 <scope_constraints>
 - Implement EXACTLY and ONLY what the user requested.
