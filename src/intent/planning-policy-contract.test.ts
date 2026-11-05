@@ -10,7 +10,7 @@ import { loadAllPrompts } from "./prompt-loader.ts"
 
 test("planning role composition orders and deduplicates synthetic model layers", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-planning-composition-"))
-  const variants = ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi", "gemini-4", "swe-2"]
+  const variants = ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi", "kimi-k3-1", "gemini-4", "swe-2"]
   const roles = ["orchestrator", "planner", "plan-critic"]
   const marker = (area: string, name: string) => `[fixture:${area}:${name}]`
   try {
@@ -36,7 +36,7 @@ test("planning role composition orders and deduplicates synthetic model layers",
         ["google/gemini-4-argon", "gemini", "gemini-4"],
         ["zhipu/glm-5.1", "glm", ""],
         ["moonshot/kimi-k2.8", "default", "kimi"],
-        ["moonshot/kimi-k3.1", "default", "kimi"],
+        ["moonshot/kimi-k3.1", "default", "kimi-k3-1"],
         ["devin/swe-2-high", "default", "swe-2"],
         ["provider-kimi-for-coding/unrelated", "default", ""],
         ["gemini-4-provider/unrelated", "default", ""],
