@@ -476,6 +476,58 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
   assert.doesNotMatch(orchestrator.developerInstructions, /ocmm-delegation-contract/)
 })
 
+test("generated TOML keeps the final model while developer instructions stay model-identity neutral", async (t) => {
+  const forbiddenIdentity = /gpt|claude|opus|gemini|kimi|glm|swe[-_ ]?2|fable|argon|k2[-_.]|k3[-_.]|model[-_ ]family/i
+  const defaultAgents = await buildCodexAgents({
+    config: { ...defaultConfig(), workflow: "codex" },
+    cwd: process.cwd(),
+    skillsRoot: join(process.cwd(), "skills"),
+  })
+  for (const agent of defaultAgents) {
+    assert.doesNotMatch(agent.developerInstructions, forbiddenIdentity, agent.sourceName)
+    assert.equal(countOccurrences(agent.developerInstructions, "<outcome-execution-calibration>"), 1, agent.sourceName)
+  }
+
+  const model = "github-copilot/gemini-4-argon"
+  const config = {
+    ...defaultConfig(),
+    workflow: "codex" as const,
+    agents: {
+      orchestrator: { model },
+      reviewer: { alias: "review-route" },
+      "review-route": { model },
+      explore: { model },
+      planner: { model, variants: { high: "high" as const } },
+    },
+    categories: { coding: { model } },
+  }
+  const root = mkdtempSync(join(tmpdir(), "codex-final-model-prompt-"))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const result = await generateCodexPlugin({
+    projectRoot: process.cwd(),
+    pluginRoot: join(root, "plugins", "deepwork"),
+    marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+    projectAgentsRoot: false,
+    config,
+    packageVersion: "9.9.9",
+  })
+
+  for (const sourceName of ["orchestrator", "reviewer", "planner-high", "coding", "explore"]) {
+    const parsed = parseGeneratedAgentToml(
+      readFileSync(join(result.pluginRoot, "agents", `dw-${sourceName}.toml`), "utf8"),
+      sourceName,
+    )
+    const instructions = String(parsed.developer_instructions)
+    assert.equal(parsed.model, "gemini-4-argon", sourceName)
+    assert.doesNotMatch(instructions, forbiddenIdentity, sourceName)
+    assert.equal(countOccurrences(instructions, "<precision-execution-calibration>"), 1, sourceName)
+    assert.equal(countOccurrences(instructions, "<evidence-reliability-calibration>"), 1, sourceName)
+    assert.equal(countOccurrences(instructions, "<outcome-execution-calibration>"), 0, sourceName)
+    assert.equal(countOccurrences(instructions, "<deepwork-mode>"), 1, sourceName)
+    assert.equal(countOccurrences(instructions, "DEEPWORK MODE ENABLED!"), 1, sourceName)
+  }
+})
+
 test("Codex source registration preserves task permissions and explicit override precedence", async () => {
   const config = { ...defaultConfig(), workflow: "codex" as const }
   const cwd = process.cwd()
@@ -548,7 +600,7 @@ test("Codex source registration preserves task permissions and explicit override
   assert.deepEqual(Object.entries(deep.permission.task), Object.entries(hostTaskRules), "host deny rule follows wildcard allow")
 })
 
-test("Codex agent composition shares one synthetic GPT layer across generations, planning tiers, and categories", async (t) => {
+test("Codex agent composition selects one final-model calibration across roles, tiers, and categories", async (t) => {
   const promptsRoot = makePromptFixture()
   t.after(() => rmSync(promptsRoot, { recursive: true, force: true }))
   for (const workflow of ["v1", "codex"] as const) {
@@ -590,9 +642,9 @@ test("Codex agent composition shares one synthetic GPT layer across generations,
           assert.ok(assembled.indexOf(plannerBase) < assembled.indexOf(gpt))
         }
         if (workflow === "codex") {
-          assert.equal(countOccurrences(assembled, adapter), 1, `${sourceName}: unguarded adapter base`)
+          assert.equal(countOccurrences(assembled, adapter), 1, `${sourceName}: adapter base`)
           for (const variant of ["kimi", "gemini-4", "swe-2"] as const) {
-            assert.equal(countOccurrences(assembled, getDeepworkPrompt(variant).trim()), 1, `${sourceName}: ${variant} carry-ahead`)
+            assert.equal(countOccurrences(assembled, getDeepworkPrompt(variant).trim()), 0, `${sourceName}: unrelated ${variant} calibration`)
           }
         }
       }
@@ -600,10 +652,17 @@ test("Codex agent composition shares one synthetic GPT layer across generations,
   }
 })
 
-test("Codex non-GPT model selections retain synthetic role, planner, adapter, and one GPT carry-ahead", async (t) => {
+test("Codex non-default final models select only their matching calibration", async (t) => {
   const promptsRoot = makePromptFixture()
   t.after(() => rmSync(promptsRoot, { recursive: true, force: true }))
-  for (const model of ["github-copilot/claude-sonnet-4-6", "github-copilot/gemini-3.1-pro", "github-copilot/gemini-4-argon", "github-copilot/glm-5.2", "github-copilot/kimi-k3.1", "github-copilot/swe-2-high"]) {
+  for (const [model, expectedLayers] of [
+    ["github-copilot/claude-sonnet-4-6", ["default"]],
+    ["github-copilot/gemini-3.1-pro", ["gemini"]],
+    ["github-copilot/gemini-4-argon", ["gemini", "gemini-4"]],
+    ["github-copilot/glm-5.2", ["glm"]],
+    ["github-copilot/kimi-k3.1", ["default", "kimi"]],
+    ["github-copilot/swe-2-high", ["default", "swe-2"]],
+  ] as const) {
     const agents = await buildCodexAgents({
       config: {
         ...defaultConfig(),
@@ -615,16 +674,17 @@ test("Codex non-GPT model selections retain synthetic role, planner, adapter, an
       cwd: process.cwd(),
       skillsRoot: join(promptsRoot, "skills"),
     })
-    const gpt = getDeepworkPrompt("gpt").trim()
     const adapter = getDeepworkPrompt("codex").trim()
     for (const name of ["orchestrator", "planner", "coding", "cross-cutting"]) {
       const agent = agents.find(({ sourceName }) => sourceName === name)
       assert.ok(agent, `${model}/${name}`)
-      assert.equal(agent.model, model.slice(model.indexOf("/") + 1), `${model}/${name}: explicit non-GPT model`)
+      assert.equal(agent.model, model.slice(model.indexOf("/") + 1), `${model}/${name}: final model`)
       const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
-      assert.equal(countOccurrences(prompt, gpt), 1, `${model}/${name}`)
-      assert.equal(countOccurrences(prompt, adapter), 1, `${model}/${name}: adapter not gated`)
-      assert.ok(prompt.indexOf(adapter) < prompt.indexOf(gpt), `${name}: guard is confined to GPT calibration`)
+      assert.equal(countOccurrences(prompt, getDeepworkPrompt("gpt").trim()), 0, `${model}/${name}: unrelated calibration`)
+      assert.equal(countOccurrences(prompt, adapter), 1, `${model}/${name}: adapter`)
+      for (const layer of expectedLayers) {
+        assert.equal(countOccurrences(prompt, getDeepworkPrompt(layer).trim()), 1, `${model}/${name}/${layer}`)
+      }
       if (name === "planner") {
         assert.equal(countOccurrences(prompt, getDeepworkPrompt("planner").trim()), 1)
       }
@@ -666,7 +726,7 @@ test("runtime and Codex consume the same default brief while explicit commands r
   assert.equal(countOccurrences(explicit.system.join("\n"), "[fixture:brainstorming]"), 1)
 })
 
-test("Codex agents carry synthetic Kimi, Gemini 4, and SWE-2 calibrations once without replacing planner role", async (t) => {
+test("Codex subscription defaults select one matching calibration without replacing planner role", async (t) => {
   const promptsRoot = makePromptFixture()
   t.after(() => rmSync(promptsRoot, { recursive: true, force: true }))
   const agents = await buildCodexAgents({
@@ -674,16 +734,13 @@ test("Codex agents carry synthetic Kimi, Gemini 4, and SWE-2 calibrations once w
     cwd: process.cwd(),
     skillsRoot: join(promptsRoot, "skills"),
   })
-  const kimi = getDeepworkPrompt("kimi").trim()
-  const gemini4 = getDeepworkPrompt("gemini-4").trim()
-  const swe2 = getDeepworkPrompt("swe-2").trim()
 
   for (const agent of agents) {
     const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
-    assert.equal(countOccurrences(prompt, getDeepworkPrompt("gpt").trim()), 1, `${agent.sourceName}: generic GPT carry-ahead`)
-    assert.equal(countOccurrences(prompt, kimi), 1, `${agent.sourceName}: Kimi calibration`)
-    assert.equal(countOccurrences(prompt, gemini4), 1, `${agent.sourceName}: Gemini 4 calibration`)
-    assert.equal(countOccurrences(prompt, swe2), 1, `${agent.sourceName}: SWE-2 calibration`)
+    assert.equal(countOccurrences(prompt, getDeepworkPrompt("gpt").trim()), 1, `${agent.sourceName}: final-model calibration`)
+    for (const variant of ["kimi", "gemini-4", "swe-2"] as const) {
+      assert.equal(countOccurrences(prompt, getDeepworkPrompt(variant).trim()), 0, `${agent.sourceName}: unrelated ${variant}`)
+    }
   }
 
   const planner = agents.find((agent) => agent.sourceName === "planner")
@@ -896,7 +953,7 @@ test("Codex project configuration loads without user profiles and generates conf
   }
 })
 
-test("Codex generated synthetic Opus 5 layer is orchestrator-only", async (t) => {
+test("Codex generation calibrates from the final model instead of the source fallback head", async (t) => {
   const promptsRoot = makePromptFixture()
   t.after(() => rmSync(promptsRoot, { recursive: true, force: true }))
   const config = { ...defaultConfig(), workflow: "codex" as const, promptsRoot }
@@ -919,26 +976,27 @@ test("Codex generated synthetic Opus 5 layer is orchestrator-only", async (t) =>
   assert.equal(planner.preferredChain[0], "anthropic/claude-opus-5")
 
   for (const agent of agents) {
-    const expectedOpusCount = agent.sourceName === "orchestrator" ? 1 : 0
     const instructions = normalizeLf(agent.developerInstructions)
-    assert.equal(countOccurrences(instructions, opusPrompt), expectedOpusCount, agent.sourceName)
-    assert.equal(countOccurrences(instructions, gptPrompt), 1, `${agent.sourceName}: generic GPT carriage`)
+    assert.equal(countOccurrences(instructions, opusPrompt), 0, `${agent.sourceName}: source-chain calibration`)
+    assert.equal(countOccurrences(instructions, gptPrompt), 1, `${agent.sourceName}: final-model calibration`)
   }
 
   const explicitlyConfigured = await buildCodexAgents({
     config: {
       ...config,
       agents: {
-        orchestrator: { model: "openai/gpt-5.5" },
-        planner: { model: "openai/gpt-5.5" },
+        orchestrator: { model: "github-copilot/claude-opus-5" },
+        planner: { model: "github-copilot/claude-opus-5" },
       },
     },
     cwd: process.cwd(),
     skillsRoot: join(promptsRoot, "skills"),
   })
   const explicitBySource = new Map(explicitlyConfigured.map((agent) => [agent.sourceName, agent]))
-  assert.equal(explicitBySource.get("orchestrator")?.model, "gpt-5.5")
-  assert.equal(explicitBySource.get("planner")?.model, "gpt-5.5")
+  assert.equal(explicitBySource.get("orchestrator")?.model, "claude-opus-5")
+  assert.equal(explicitBySource.get("planner")?.model, "claude-opus-5")
+  assert.equal(countOccurrences(explicitBySource.get("orchestrator")!.developerInstructions, opusPrompt), 1)
+  assert.equal(countOccurrences(explicitBySource.get("planner")!.developerInstructions, opusPrompt), 0)
 
   const root = mkdtempSync(join(tmpdir(), "ocmm-codex-opus5-carriage-"))
   const previousCodexHome = process.env.CODEX_HOME
@@ -960,12 +1018,12 @@ test("Codex generated synthetic Opus 5 layer is orchestrator-only", async (t) =>
     const temporaryOrchestrator = readFileSync(join(generatedAgentsRoot, "dw-orchestrator.toml"), "utf8")
     const temporaryInstructions = parseGeneratedDeveloperInstructions(temporaryOrchestrator, "temporary dw-orchestrator")
 
-    assert.equal(countOccurrences(temporaryInstructions, opusPrompt), 1)
+    assert.equal(countOccurrences(temporaryInstructions, opusPrompt), 0)
+    assert.equal(countOccurrences(temporaryInstructions, gptPrompt), 1)
     for (const file of readdirSync(generatedAgentsRoot).filter((name) => name.endsWith(".toml"))) {
-      if (file === "dw-orchestrator.toml") continue
       const instructions = parseGeneratedDeveloperInstructions(readFileSync(join(generatedAgentsRoot, file), "utf8"), file)
       assert.equal(countOccurrences(instructions, opusPrompt), 0, file)
-      assert.equal(countOccurrences(instructions, gptPrompt), 1, `${file}: generic GPT carriage`)
+      assert.equal(countOccurrences(instructions, gptPrompt), 1, `${file}: final-model calibration`)
     }
 
   } finally {
@@ -1215,8 +1273,9 @@ test("Codex floors non-GPT plan critics without flooring planners", async (t) =>
     assert.match(reviewerLow, /^model_reasoning_effort = "high"$/m)
     for (const [name, toml] of [["planner-low", plannerLow], ["plan-critic-low", criticLow], ["oracle-low", oracleLow], ["reviewer-low", reviewerLow]] as const) {
       const instructions = parseGeneratedDeveloperInstructions(toml, name)
-      assert.equal(countOccurrences(instructions, getDeepworkPrompt("gpt").trim()), 1, `${name}: guarded GPT source survives TOML rendering`)
-      assert.equal(countOccurrences(instructions, getDeepworkPrompt("codex").trim()), 1, `${name}: adapter survives non-GPT selection`)
+      assert.equal(countOccurrences(instructions, getDeepworkPrompt("gpt").trim()), 0, `${name}: unrelated calibration`)
+      assert.equal(countOccurrences(instructions, getDeepworkPrompt("default").trim()), 1, `${name}: final-model base`)
+      assert.equal(countOccurrences(instructions, getDeepworkPrompt("codex").trim()), 1, `${name}: adapter`)
     }
   } finally {
     rmSync(root, { recursive: true, force: true })

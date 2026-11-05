@@ -17,7 +17,6 @@ export type PlanningAgentPolicy = {
   promptSource: PlanningAgentRole
   mode: "all" | "subagent"
   permissionClass: "planner" | "read-only"
-  includeLocalePrefix: boolean
   reviewEffortFloor: boolean
 }
 
@@ -26,14 +25,12 @@ export const PLANNING_AGENT_POLICIES: Record<PlanningAgentRole, PlanningAgentPol
     promptSource: "planner",
     mode: "all",
     permissionClass: "planner",
-    includeLocalePrefix: true,
     reviewEffortFloor: false,
   },
   "plan-critic": {
     promptSource: "plan-critic",
     mode: "subagent",
     permissionClass: "read-only",
-    includeLocalePrefix: false,
     reviewEffortFloor: true,
   },
 }

@@ -10,5 +10,7 @@ Generated from the Deepwork source tree. Do not edit generated files by hand; ru
 - Workflow skill: `deepwork`.
 - Generated Codex agent profiles use the `dw-*` prefix, including functional agents such as `dw-oracle`, `dw-oracle-2nd`, and `dw-creative`.
 - Logical Oracle/Reviewer tiers (for example `dw-oracle-high`) are emitted only when explicitly configured.
+- Each profile's model and calibration come from the same generation-time configuration snapshot.
+- Runtime model overrides do not rewrite generated instructions; change project OCMM configuration and regenerate to select another calibration.
 
 The OpenCode plugin remains `dist/index.js`; this directory is the Codex adapter bundle.

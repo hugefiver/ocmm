@@ -26,14 +26,12 @@ test("planning expansion emits default normals and only explicit suffixes", () =
     promptSource: "planner",
     mode: "all",
     permissionClass: "planner",
-    includeLocalePrefix: true,
     reviewEffortFloor: false,
   })
   assert.deepEqual(profiles.find((profile) => profile.name === "plan-critic-low")?.policy, {
     promptSource: "plan-critic",
     mode: "subagent",
     permissionClass: "read-only",
-    includeLocalePrefix: false,
     reviewEffortFloor: true,
   })
 })

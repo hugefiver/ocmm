@@ -130,23 +130,23 @@ export function pickDeepworkVariantForAgent(opts: {
   if (opts.agentName === "orchestrator" && isClaudeOpus5Model(opts.preferenceModel)) {
     return "claude-opus-5"
   }
-  const family = classifyModelFamily({
-    providerID: "",
-    modelID: opts.preferenceModel,
-  })
-  if (family === "codex") return "codex"
-  if (family === "gpt") return "gpt"
-  if (family === "gemini") return "gemini"
-  if (family === "glm") return "glm"
-  return "default"
+  return pickModelBaseCalibrationVariant(opts.preferenceModel) ?? "default"
+}
+
+export function pickModelBaseCalibrationVariant(
+  modelID: string,
+): "codex" | "gpt" | "gemini" | "glm" | null {
+  const family = classifyModelFamily({ providerID: "", modelID })
+  if (family === "codex" || family === "gpt" || family === "gemini" || family === "glm") {
+    return family
+  }
+  return null
 }
 
 /** Additive model calibrations, kept independent from reasoning-family classification. */
 export function pickModelCalibrationVariants(
   modelID: string,
-  carryAhead = false,
 ): ModelCalibrationVariant[] {
-  if (carryAhead) return ["gpt", "kimi", "gemini-4", "swe-2"]
   const family = classifyModelFamily({ modelID })
   if (family === "gpt" || family === "codex") return ["gpt"]
   if (isKimiPromptModel(modelID)) return ["kimi"]
@@ -168,15 +168,12 @@ export function getCategoryPrompt(name: string): string {
 export function getCategoryModelCalibration(
   name: string,
   modelID: string,
-  carryAhead = false,
 ): string {
   const calibrations = categoryModelCalibrations.get(name)
   const family = classifyModelFamily({ modelID })
-  const variants = carryAhead
-    ? ["gpt", "kimi-k27", "swe-2", "kimi", "gemini-4"]
-    : [family === "codex" ? "gpt" : isSwe2Model(modelID) ? "swe-2"
-      : family === "unknown" && isKimiPromptModel(modelID) ? "kimi" : family]
-  return variants.map((variant) => calibrations?.get(variant) ?? "").filter(Boolean).join("\n\n---\n\n")
+  const variant = family === "codex" ? "gpt" : isSwe2Model(modelID) ? "swe-2"
+    : family === "unknown" && isKimiPromptModel(modelID) ? "kimi" : family
+  return calibrations?.get(variant) ?? ""
 }
 
 export function getShellSafetyPrompt(): string {

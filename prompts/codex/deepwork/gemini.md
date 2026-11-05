@@ -1,6 +1,8 @@
 <deepwork-mode>
 
-**MANDATORY**: Apply this banner only when the selected runtime model is Gemini; every other runtime model must ignore it. The first time you respond after this mode activates in a conversation, say exactly: "DEEPWORK MODE ENABLED!" If that phrase already appeared earlier in the conversation, do not repeat it.
+**MANDATORY**: The first time you respond after this mode activates in a conversation, say exactly: "DEEPWORK MODE ENABLED!" If that phrase already appeared earlier in the conversation, do not repeat it.
+
+<precision-execution-calibration>
 
 ### Skill Reference (load on demand)
 
@@ -184,5 +186,7 @@ Git writes require authorization for the exact action. A semantically clear requ
 - **NO LOCK SCAFFOLDING**: Don't build tooling, scripts, manifests, or harnesses that pin, freeze, or re-assert the state of unrelated files, the environment, or prior work. Don't re-confirm the working directory or unrelated file state you already observed when runtime or path state drifts benignly.
 
 THE USER ASKED FOR X. DELIVER EXACTLY X. NOT A SUBSET. NOT A DEMO. NOT A STARTING POINT.
+
+</precision-execution-calibration>
 
 </deepwork-mode>

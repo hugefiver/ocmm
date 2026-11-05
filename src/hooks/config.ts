@@ -4,8 +4,7 @@ import { join } from "node:path"
 import { BUILTIN_AGENTS } from "../data/agents.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
 import { loadBuiltinCommands, type CommandDefinition } from "../commands/builtin.ts"
-import { getAgentPrompt, getAvoidAiSlopPrompt, getCategoryModelCalibration, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, pickDeepworkVariantForAgent, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
-import { isPlannerAgent } from "../intent/detectors.ts"
+import { getAgentPrompt, getAvoidAiSlopPrompt, getCategoryModelCalibration, getCategoryPrompt, getDeepworkPrompt, getShellSafetyPrompt, pickDeepworkVariantForAgent, pickModelBaseCalibrationVariant, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
 import { buildSkillCommand, DEFAULT_SKILLS_ROOT, loadSharedSkills, loadV1SkillCommands } from "../intent/skill-loader.ts"
 import { resolveMcpServers } from "../mcp/index.ts"
 import type {
@@ -99,6 +98,7 @@ type AgentExtras = {
   mode?: string
   prompt?: string
   promptPrefix?: string
+  promptPrefixWithoutBody?: boolean
   promptSuffix?: string
   /** Catalog-confirmed runtime upgrade; never overrides an explicit user model. */
   model?: string
@@ -135,8 +135,9 @@ function applyAgentEntry(
   }
   if (extras?.mode && typeof existing.mode !== "string") existing.mode = extras.mode
   if (extras?.prompt && typeof existing.prompt !== "string") existing.prompt = extras.prompt
-  if (extras?.promptPrefix && typeof existing.prompt === "string") {
-    existing.prompt = prependPromptPrefix(existing.prompt, extras.promptPrefix)
+  if (extras?.promptPrefix && (typeof existing.prompt === "string" || extras.promptPrefixWithoutBody)) {
+    const basePrompt = typeof existing.prompt === "string" ? existing.prompt : ""
+    existing.prompt = prependPromptPrefix(basePrompt, extras.promptPrefix)
   }
   if (extras?.promptSuffix) {
     const basePrompt = typeof existing.prompt === "string" ? existing.prompt : ""
@@ -179,11 +180,11 @@ function buildLocaleGuidance(locale?: string): string {
   const guidance = configuredLocale
     ? [
         `Configured locale: ${configuredLocale}.`,
-        "Prefer this language/locale for your thinking process, visible planning, and conversation with the user.",
+        "Use it as the default for visible replies, plans, and role or category output.",
       ]
     : [
         "No locale is configured.",
-        "Infer the user's preferred language from their latest message and conversation context, then prefer that language for your thinking process, visible planning, and conversation.",
+        "Infer the user's preferred visible-output language from their latest message and conversation context.",
         "If the user mixes languages, use the language that best matches the current request.",
       ]
 
@@ -191,8 +192,9 @@ function buildLocaleGuidance(locale?: string): string {
     `<${LOCALE_GUIDANCE_TAG}>`,
     "Language and locale:",
     ...guidance.map((line) => `- ${line}`),
+    "- Follow the user's explicit visible-output language request before the configured or inferred default.",
     "- Preserve code, identifiers, file paths, commands, protocol names, quotes, and user-requested wording in their original language when accuracy requires it.",
-    "- If the user explicitly asks for a different output language for a specific answer, follow that local request unless it conflicts with higher-priority instructions.",
+    "- This guidance applies to visible output only; it does not require or claim a reasoning language.",
     `</${LOCALE_GUIDANCE_TAG}>`,
   ].join("\n")
 }
@@ -425,35 +427,41 @@ function deepworkPromptForAgent(
   const prefModel = selectedModel !== undefined
     ? selectedModel.slice(selectedModel.indexOf("/") + 1)
     : chain[0]?.model ?? ""
-  const modelCalibrations = pickModelCalibrationVariants(prefModel, workflow === "codex")
+  const modelCalibrations = pickModelCalibrationVariants(prefModel)
     .map((variant) => getDeepworkPrompt(variant))
-  // Codex profiles are generated ahead of runtime model overrides. Carry the
-  // guarded family calibrations without guarding the role/planner or adapter base.
-  // Opus 5 remains restricted to the orchestrator prompt identity.
-  if (workflow === "codex") {
-    const base = isPlannerAgent(promptName)
-      ? getDeepworkPrompt("planner")
-      : ""
-    return joinPromptLayers([
-      base,
-      getDeepworkPrompt("codex"),
-      promptName === "orchestrator" ? getDeepworkPrompt("claude-opus-5") : "",
-      ...modelCalibrations,
-    ])
-  }
   const variant = pickDeepworkVariantForAgent({
     agentName: promptName,
     preferenceModel: prefModel,
   })
-  if (variant === "claude-opus-5") {
-    return `${getDeepworkPrompt("default")}\n\n---\n\n${getDeepworkPrompt("claude-opus-5")}`
-  }
-  const base = getDeepworkPrompt(variant)
-  return joinPromptLayers([base, ...modelCalibrations])
+  const base = variant === "claude-opus-5"
+    ? joinPromptLayers([getDeepworkPrompt("default"), getDeepworkPrompt(variant)])
+    : getDeepworkPrompt(variant)
+  const plannerCalibration = variant === "planner"
+    ? getDeepworkPrompt(pickModelBaseCalibrationVariant(prefModel) ?? "default")
+    : ""
+  return joinPromptLayers([
+    base,
+    plannerCalibration,
+    workflow === "codex" ? getDeepworkPrompt("codex") : "",
+    ...modelCalibrations,
+  ])
 }
 
+const DEEPWORK_MODE_BLOCK = /^<deepwork-mode>\s*([\s\S]*?)\s*<\/deepwork-mode>$/
+
 function joinPromptLayers(prompts: readonly string[]): string {
-  return [...new Set(prompts.filter(Boolean))].join("\n\n---\n\n")
+  let wrapped = false
+  const layers: string[] = []
+  for (const prompt of prompts) {
+    const trimmed = prompt.trim()
+    if (!trimmed) continue
+    const match = trimmed.match(DEEPWORK_MODE_BLOCK)
+    const body = (match?.[1] ?? trimmed).trim()
+    if (match) wrapped = true
+    if (body && !layers.includes(body)) layers.push(body)
+  }
+  const joined = layers.join("\n\n---\n\n")
+  return wrapped && joined ? `<deepwork-mode>\n\n${joined}\n\n</deepwork-mode>` : joined
 }
 
 function promptForBuiltinAgent(
@@ -469,7 +477,7 @@ function promptForBuiltinAgent(
     ? modelPrompt
     : !modelPrompt
       ? rolePrompt
-      : `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the workflow/model guidance below only for reliability, model-family calibration, and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
+      : `${rolePrompt}\n\n---\n\n<workflow-model-calibration>\nThe role prompt above is authoritative for this agent's scope, permissions, and output contract. Use the selected workflow guidance below only for reliability and general execution discipline when it does not conflict with the role prompt.\n\n${modelPrompt}\n</workflow-model-calibration>`
   return prompt
 }
 
@@ -480,10 +488,12 @@ function promptForBuiltinCategory(
 ): string {
   const rolePrompt = getCategoryPrompt(categoryName).trim()
   const modelID = selectedModel.slice(selectedModel.indexOf("/") + 1)
-  const categoryCalibration = getCategoryModelCalibration(categoryName, modelID, workflow === "codex").trim()
-  const modelCalibrations = pickModelCalibrationVariants(modelID, workflow === "codex")
+  const categoryCalibration = getCategoryModelCalibration(categoryName, modelID).trim()
+  const modelBase = pickModelBaseCalibrationVariant(modelID) ?? "default"
+  const modelCalibrations = pickModelCalibrationVariants(modelID)
     .map((variant) => getDeepworkPrompt(variant).trim())
   const calibration = joinPromptLayers([
+    getDeepworkPrompt(modelBase).trim(),
     workflow === "codex" ? getDeepworkPrompt("codex").trim() : "",
     categoryCalibration,
     ...modelCalibrations,
@@ -512,6 +522,12 @@ export type ConfigHandlerBaseArgs = {
   skillsRoot?: string
   cwd?: string
   logger?: SubagentDepthDiagnosticLogger
+  selectRegistrationModel?: (input: {
+    agentName: string
+    requirement: ModelRequirement
+    requirementSource: RequirementSource
+    selectedModel: string
+  }) => string | undefined
 }
 
 export type ConfigHandlerRouteMode =
@@ -589,6 +605,20 @@ function selectRoutePrimary(args: {
   return { model: fmtModel(args.requirement.fallbackChain[0]!), source: "builtin-requirement" }
 }
 
+function selectRegistrationPrimary(
+  handler: ConfigHandlerBaseArgs,
+  input: Parameters<typeof selectRoutePrimary>[0],
+): PrimarySelection {
+  const primary = selectRoutePrimary(input)
+  const selectedModel = handler.selectRegistrationModel?.({
+    agentName: input.agentName,
+    requirement: input.requirement,
+    requirementSource: input.requirementSource,
+    selectedModel: primary.model,
+  })
+  return selectedModel ? { ...primary, model: selectedModel } : primary
+}
+
 function hasExplicitRouteSelection(cfg: OcmmConfig, name: string): boolean {
   return [cfg.agents?.[name], cfg.categories?.[name]].some((entry) =>
     entry !== undefined && ["model", "models", "fallbackModels", "requirement", "alias"].some((field) =>
@@ -629,7 +659,6 @@ type ManagedAgentProfile = {
   suppressCatalogUpgrade: boolean
   promptSource: string
   mode: "all" | "subagent"
-  includeLocalePrefix: boolean
 }
 
 function expandManagedAgentProfiles(cfg: OcmmConfig): ManagedAgentProfile[] {
@@ -642,7 +671,6 @@ function expandManagedAgentProfiles(cfg: OcmmConfig): ManagedAgentProfile[] {
     suppressCatalogUpgrade: profile.suppressCatalogUpgrade,
     promptSource: profile.promptSource,
     mode: "subagent",
-    includeLocalePrefix: false,
   }))
   const planningProfiles: ManagedAgentProfile[] = expandPlanningAgents(input).map((profile) => ({
     name: profile.name,
@@ -652,7 +680,6 @@ function expandManagedAgentProfiles(cfg: OcmmConfig): ManagedAgentProfile[] {
     suppressCatalogUpgrade: profile.suppressCatalogUpgrade,
     promptSource: profile.policy.promptSource,
     mode: profile.policy.mode,
-    includeLocalePrefix: profile.policy.includeLocalePrefix,
   }))
   return [...reviewProfiles, ...planningProfiles]
 }
@@ -702,6 +729,7 @@ export function createConfigHandler(
   const reportCategoryAvailability = createCategoryAvailabilityDiagnosticReporter(logger)
   const skillRegistrations = new WeakMap<Record<string, unknown>, SkillRegistration>()
   const agentBriefRegistrations = new WeakMap<Record<string, unknown>, Map<string, string>>()
+  const compatPromptRegistrations = new WeakMap<Record<string, unknown>, Map<string, string>>()
 
   return async (rawInput, _output) => {
     const registryManaged = hasRouteRegistry(args)
@@ -743,8 +771,14 @@ export function createConfigHandler(
       : target.agent as Record<string, unknown>
     const agentBriefs = new Map<string, string>()
     const existingModels = new Map<string, string>()
+    const existingPrompts = new Set<string>()
+    const previousCompatPrompts = compatPromptRegistrations.get(target)
     for (const [name, raw] of Object.entries(agentMap)) {
-      if (isRecord(raw) && typeof raw.model === "string") existingModels.set(name, raw.model)
+      if (!isRecord(raw)) continue
+      if (typeof raw.model === "string") existingModels.set(name, raw.model)
+      if (typeof raw.prompt === "string" && previousCompatPrompts?.get(name) !== raw.prompt) {
+        existingPrompts.add(name)
+      }
     }
 
     const disabled = new Set(cfg.disabledAgents ?? [])
@@ -792,7 +826,7 @@ export function createConfigHandler(
       }
       const effective = resolveRouteRequirement(cfg, a.name)
       if (!effective) continue
-      const primary = selectRoutePrimary({
+      const primary = selectRegistrationPrimary(args, {
         target,
         agentName: a.name,
         requirement: effective.requirement,
@@ -815,9 +849,7 @@ export function createConfigHandler(
       if (prompt) extras.prompt = prompt
       extras.mode = mode
       extras.model = primary.model
-      if (mode === "primary" || mode === "all") {
-        extras.promptPrefix = buildLocaleGuidance(cfg.locale)
-      }
+      extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       const terminalSuffix = terminalPromptSuffixFor({
         name: a.name,
         avoidAiSlopBrief,
@@ -851,7 +883,7 @@ export function createConfigHandler(
         requirement: profile.requirement,
         source: profile.resolutionSource,
       }
-      const primary = selectRoutePrimary({
+      const primary = selectRegistrationPrimary(args, {
         target,
         agentName: profile.name,
         requirement: effective.requirement,
@@ -868,9 +900,12 @@ export function createConfigHandler(
       })
       let prompt = promptForBuiltinAgent(synthetic, { requirement: profile.requirement }, cfg.workflow, primary.model)
       if (profile.registration.promptAppend) prompt = `${prompt}\n\n${profile.registration.promptAppend.trim()}`
-      const extras: AgentExtras = { mode: profile.mode, model: primary.model }
+      const extras: AgentExtras = {
+        mode: profile.mode,
+        model: primary.model,
+        promptPrefix: buildLocaleGuidance(cfg.locale),
+      }
       if (prompt) extras.prompt = prompt
-      if (profile.includeLocalePrefix) extras.promptPrefix = buildLocaleGuidance(cfg.locale)
       const terminalSuffix = terminalPromptSuffixFor({
         name: profile.name,
         avoidAiSlopBrief,
@@ -913,7 +948,7 @@ export function createConfigHandler(
       const baseAgent = categoryAsAgent(c, effective.requirement)
       const merged: NormalizedShorthand | undefined =
         agentOverride ?? categoryOverride
-      const primary = selectRoutePrimary({
+      const primary = selectRegistrationPrimary(args, {
         target,
         agentName: c.name,
         requirement: effective.requirement,
@@ -926,7 +961,10 @@ export function createConfigHandler(
           requested: true,
         }),
       })
-      const extras: AgentExtras = { mode: "subagent" }
+      const extras: AgentExtras = {
+        mode: "subagent",
+        promptPrefix: buildLocaleGuidance(cfg.locale),
+      }
       const prompt = promptForBuiltinCategory(c.name, cfg.workflow, primary.model)
       if (prompt) extras.prompt = prompt
       extras.model = primary.model
@@ -971,7 +1009,7 @@ export function createConfigHandler(
         if (!norm?.requirement?.fallbackChain?.length) continue
         const effective = resolveRouteRequirement(cfg, name)
         if (!effective) continue
-        const primary = selectRoutePrimary({
+        const primary = selectRegistrationPrimary(args, {
           target,
           agentName: name,
           requirement: effective.requirement,
@@ -984,7 +1022,11 @@ export function createConfigHandler(
           ...(norm.description ? { description: norm.description } : {}),
           requirement: norm.requirement,
         }
-        const registeredAgent = applyAgentEntry(agentMap, synthetic, norm, { model: primary.model })
+        const registeredAgent = applyAgentEntry(agentMap, synthetic, norm, {
+          model: primary.model,
+          promptPrefix: buildLocaleGuidance(cfg.locale),
+          promptPrefixWithoutBody: true,
+        })
         if (registeredAgent && !COMPAT_AGENT_ALIASES.some((entry) => entry.alias === name)) {
           registerEffectiveRoute({
             build: routeBuild,
@@ -1013,7 +1055,7 @@ export function createConfigHandler(
         }
         const effective = resolveRouteRequirement(cfg, name)
         if (!effective) continue
-        const primary = selectRoutePrimary({
+        const primary = selectRegistrationPrimary(args, {
           target,
           agentName: name,
           requirement: effective.requirement,
@@ -1029,7 +1071,12 @@ export function createConfigHandler(
           requirement: effective.requirement,
         }
         const merged = agentOverride?.requirement ? agentOverride : categoryOverride
-        if (applyAgentEntry(agentMap, synthetic, merged, { mode: "subagent", model: primary.model })) {
+        if (applyAgentEntry(agentMap, synthetic, merged, {
+          mode: "subagent",
+          model: primary.model,
+          promptPrefix: buildLocaleGuidance(cfg.locale),
+          promptPrefixWithoutBody: true,
+        })) {
           registerEffectiveRoute({
             build: routeBuild,
             agentMap,
@@ -1052,7 +1099,17 @@ export function createConfigHandler(
       }
     }
 
-    registerCompatAgentAliases(agentMap, disabled, cfg.agents, registryManaged, avoidAiSlopBrief, agentBriefs)
+    const compatAliasPrompts = new Map<string, string>()
+    registerCompatAgentAliases({
+      agentMap,
+      disabled,
+      cfg,
+      registryManaged,
+      existingPrompts,
+      avoidAiSlopBrief,
+      agentBriefs,
+      generatedPrompts: compatAliasPrompts,
+    })
     registerDefaultPermissions(target, agentMap)
 
     for (const { alias, target: compatTarget } of COMPAT_AGENT_ALIASES) {
@@ -1101,7 +1158,10 @@ export function createConfigHandler(
     if (registryManaged && routeBuild && generation !== undefined && args.routeRegistry.publish(generation, routeBuild.nextRoutes)) {
       target.agent = agentMap
     }
-    if (!registryManaged || target.agent === agentMap) agentBriefRegistrations.set(target, agentBriefs)
+    if (!registryManaged || target.agent === agentMap) {
+      agentBriefRegistrations.set(target, agentBriefs)
+      compatPromptRegistrations.set(target, compatAliasPrompts)
+    }
   }
 }
 
@@ -1161,43 +1221,68 @@ function registerDefaultPermissions(target: Record<string, unknown>, agentMap: R
   if (isRecord(docSearch)) mergePermission(docSearch, { "grep_app_*": "allow" }, false)
 }
 
-function registerCompatAgentAliases(
-  agentMap: Record<string, unknown>,
-  disabled: Set<string>,
-  agents: OcmmConfig["agents"],
-  registryManaged: boolean,
-  avoidAiSlopBrief: string,
-  agentBriefs: Map<string, string>,
-): void {
-  for (const { alias, target } of COMPAT_AGENT_ALIASES) {
-    if (disabled.has(alias) || disabled.has(target) || isCompatAliasDisabled(alias, target, agents)) {
-      if (registryManaged) delete agentMap[alias]
+function registerCompatAgentAliases(args: {
+  agentMap: Record<string, unknown>
+  disabled: Set<string>
+  cfg: OcmmConfig
+  registryManaged: boolean
+  existingPrompts: ReadonlySet<string>
+  avoidAiSlopBrief: string
+  agentBriefs: Map<string, string>
+  generatedPrompts: Map<string, string>
+}): void {
+  for (const { alias, target: targetName } of COMPAT_AGENT_ALIASES) {
+    if (args.disabled.has(alias) || args.disabled.has(targetName) || isCompatAliasDisabled(alias, targetName, args.cfg.agents)) {
+      if (args.registryManaged) delete args.agentMap[alias]
       continue
     }
-    const source = agentMap[target]
+    const source = args.agentMap[targetName]
     if (!isRecord(source) || source.disable === true) {
-      if (registryManaged) delete agentMap[alias]
+      if (args.registryManaged) delete args.agentMap[alias]
       continue
+    }
+    if (!args.existingPrompts.has(targetName) && typeof source.prompt === "string") {
+      args.generatedPrompts.set(targetName, source.prompt)
     }
 
-    const existing = isRecord(agentMap[alias]) ? (agentMap[alias] as Record<string, unknown>) : {}
+    const existing = isRecord(args.agentMap[alias]) ? (args.agentMap[alias] as Record<string, unknown>) : {}
     if (existing.disable === true) continue
     const aliasEntry = { ...source, ...existing }
     if (typeof aliasEntry.description !== "string") {
-      aliasEntry.description = `Compatibility alias for @${target}.`
+      aliasEntry.description = `Compatibility alias for @${targetName}.`
     }
+
+    const preservesHostPrompt = args.existingPrompts.has(alias) && typeof existing.prompt === "string"
+    if (preservesHostPrompt) {
+      aliasEntry.prompt = prependPromptPrefix(existing.prompt as string, buildLocaleGuidance(args.cfg.locale))
+    } else if (args.existingPrompts.has(targetName) && typeof source.prompt === "string") {
+      aliasEntry.prompt = prependPromptPrefix(source.prompt, buildLocaleGuidance(args.cfg.locale))
+    } else {
+      const sourceAgent = BUILTIN_AGENTS.find(({ name }) => name === targetName)
+      const selectedModel = typeof aliasEntry.model === "string" ? aliasEntry.model : undefined
+      const rolePrompt = sourceAgent
+        ? promptForBuiltinAgent(
+            sourceAgent,
+            normalizeAgentShorthand(alias, args.cfg.agents),
+            args.cfg.workflow,
+            selectedModel,
+          )
+        : ""
+      aliasEntry.prompt = prependPromptPrefix(rolePrompt, buildLocaleGuidance(args.cfg.locale))
+    }
+
     const terminalSuffix = terminalPromptSuffixFor({
       name: alias,
-      avoidAiSlopBrief,
+      avoidAiSlopBrief: args.avoidAiSlopBrief,
       includeCompressionPolicy: aliasEntry.mode !== "primary",
-      compressionIdentity: isReviewAgentName(alias) ? alias : target,
+      compressionIdentity: isReviewAgentName(alias) ? alias : targetName,
     })
     if (terminalSuffix) {
-      const basePrompt = typeof aliasEntry.prompt === "string" ? aliasEntry.prompt : ""
-      aliasEntry.prompt = appendPromptSuffix(basePrompt, terminalSuffix)
-      if (avoidAiSlopBrief) agentBriefs.set(alias, avoidAiSlopBrief)
+      aliasEntry.prompt = appendPromptSuffix(String(aliasEntry.prompt), terminalSuffix)
+      if (args.avoidAiSlopBrief) args.agentBriefs.set(alias, args.avoidAiSlopBrief)
     }
-    agentMap[alias] = aliasEntry
+    args.agentMap[alias] = aliasEntry
+    if (!preservesHostPrompt) args.generatedPrompts.set(alias, String(aliasEntry.prompt))
   }
 }
 

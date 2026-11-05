@@ -72,29 +72,42 @@ test("planning role composition orders and deduplicates synthetic model layers",
         const target: { agent: Record<string, unknown> } = { agent: {} }
         await createConfigHandler({ getConfig: () => configured, skillsRoot: join(root, "skills") })(target, undefined)
         assert.equal((target.agent.orchestrator as Record<string, unknown>).model, model)
+        const modelBase = selectedVariant === "claude-opus-5" ? "default" : selectedVariant
         const category = target.agent.deep as Record<string, unknown>
         assert.equal(category.model, model)
         const categoryPrompt = String(category.prompt)
-        for (const layer of ["gpt", "kimi", "gemini-4", "swe-2"]) {
-          assert.equal(categoryPrompt.includes(marker("deepwork", layer)), workflow === "codex" || layer === calibration, `${workflow}/${model}/category/${layer}`)
+        const categoryRoleMarker = marker("category", "deep")
+        const categoryLayers = [...new Set([
+          modelBase,
+          ...(workflow === "codex" ? ["codex"] : []),
+          ...(calibration ? [calibration] : []),
+        ])]
+        assert.equal(categoryPrompt.split(categoryRoleMarker).length - 1, 1, `${workflow}/${model}/category/role once`)
+        let previousCategoryLayer = categoryPrompt.indexOf(categoryRoleMarker)
+        for (const layer of categoryLayers) {
+          const layerMarker = marker("deepwork", layer)
+          assert.equal(categoryPrompt.split(layerMarker).length - 1, 1, `${workflow}/${model}/category/${layer}: once`)
+          const index = categoryPrompt.indexOf(layerMarker)
+          assert.ok(index > previousCategoryLayer, `${workflow}/${model}/category/${layer}: layer order`)
+          previousCategoryLayer = index
+        }
+        for (const layer of variants.filter((variant) => !categoryLayers.includes(variant))) {
+          assert.equal(categoryPrompt.includes(marker("deepwork", layer)), false, `${workflow}/${model}/category/${layer}: not selected`)
         }
 
         for (const name of ["orchestrator", "planner", "planner-high", "plan-critic", "plan-critic-low"]) {
           const role = name === "planner-high" ? "planner" : name === "plan-critic-low" ? "plan-critic" : name
-          const assembled = String((target.agent[name] as Record<string, unknown>).prompt)
-          const expectedLayers = workflow === "codex"
-            ? [
-              ...(role === "planner" ? ["planner"] : []),
-              "codex",
-              ...(role === "orchestrator" ? ["claude-opus-5"] : []),
-              "gpt", "kimi", "gemini-4", "swe-2",
-            ]
-            : [...new Set([
-              ...(role === "planner" ? ["planner"] : selectedVariant === "claude-opus-5" && role === "orchestrator"
+          const entry = target.agent[name] as Record<string, unknown>
+          const assembled = String(entry.prompt)
+          const expectedLayers = [...new Set([
+            ...(role === "planner"
+              ? ["planner", modelBase]
+              : selectedVariant === "claude-opus-5" && role === "orchestrator"
                 ? ["default", "claude-opus-5"]
-                : [selectedVariant === "claude-opus-5" ? "default" : selectedVariant!]),
-              ...(calibration ? [calibration] : []),
-            ])]
+                : [modelBase]),
+            ...(workflow === "codex" ? ["codex"] : []),
+            ...(calibration ? [calibration] : []),
+          ])]
           const roleMarker = marker("agents", role)
           assert.equal(assembled.split(roleMarker).length - 1, 1, `${workflow}/${model}/${name}: role once`)
           let previous = assembled.indexOf(roleMarker)
@@ -107,6 +120,16 @@ test("planning role composition orders and deduplicates synthetic model layers",
           }
           for (const layer of variants.filter((variant) => !expectedLayers.includes(variant))) {
             assert.equal(assembled.includes(marker("deepwork", layer)), false, `${workflow}/${model}/${name}/${layer}: not selected`)
+          }
+          if (role === "plan-critic") {
+            const permission = entry.permission as Record<string, unknown>
+            const task = permission.task as Record<string, unknown>
+            assert.equal(entry.mode, "subagent", `${workflow}/${model}/${name}: subagent mode`)
+            assert.equal(task["*"], "deny", `${workflow}/${model}/${name}: deny unknown delegation`)
+            assert.equal(task["code-search"], "allow", `${workflow}/${model}/${name}: read-only utility allowed`)
+            assert.equal(task.coding, undefined, `${workflow}/${model}/${name}: editing worker excluded`)
+            assert.equal(assembled.split("<ocmm-delegation-contract>").length - 1, 1, `${workflow}/${model}/${name}: delegation boundary once`)
+            assert.equal(assembled.split("<ocmm-workflow-boundaries>").length - 1, 1, `${workflow}/${model}/${name}: workflow boundary once`)
           }
         }
       }

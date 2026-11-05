@@ -13,6 +13,7 @@ import {
   getShellSafetyPrompt,
   getAvoidAiSlopPrompt,
   pickDeepworkVariantForAgent,
+  pickModelBaseCalibrationVariant,
   pickModelCalibrationVariants,
 } from "./prompt-loader.ts"
 
@@ -308,6 +309,19 @@ test("pickDeepworkVariantForAgent picks codex variant for Codex models", () => {
   }
 })
 
+test("base calibration selector follows the final model independently of agent role", () => {
+  for (const [modelID, expected] of [
+    ["openai/gpt-6-sol", "gpt"],
+    ["openai/codex-mini-latest", "codex"],
+    ["google/gemini-3.1-pro", "gemini"],
+    ["zhipu/glm-5.2", "glm"],
+    ["anthropic/claude-opus-5", null],
+    ["unknown/model", null],
+  ] as const) {
+    assert.equal(pickModelBaseCalibrationVariant(modelID), expected, modelID)
+  }
+})
+
 test("pickDeepworkVariantForAgent defaults for unknown families", () => {
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "claude-opus-4-7" }),
@@ -319,7 +333,7 @@ test("pickDeepworkVariantForAgent defaults for unknown families", () => {
   )
 })
 
-test("additive model calibration selector distinguishes Kimi, Gemini 4, SWE-2, and carry-ahead", () => {
+test("additive model calibration selector chooses only the final model calibration", () => {
   const cases: Array<[string, readonly string[]]> = [
     ["moonshot/KIMI-K2.7", ["kimi"]],
     ["moonshot/kimi-k2-8-preview", ["kimi"]],
@@ -355,7 +369,6 @@ test("additive model calibration selector distinguishes Kimi, Gemini 4, SWE-2, a
   for (const [modelID, expected] of cases) {
     assert.deepEqual(pickModelCalibrationVariants(modelID), expected, modelID)
   }
-  assert.deepEqual(pickModelCalibrationVariants("unknown/model", true), ["gpt", "kimi", "gemini-4", "swe-2"])
 })
 
 test("shipped categories have no separate generation-specific calibration", () => {
@@ -365,7 +378,6 @@ test("shipped categories have no separate generation-specific calibration", () =
     for (const name of ["hard-reasoning", "deep", "cross-cutting", "frontend", "creative", "research", "quick", "coding", "normal-task", "complex", "documenting"]) {
       for (const model of ["gpt-5.5", "gpt-5.6-sol", "openai/gpt-6-sol", "gpt-6-astra", "gpt-6-luna", "claude-opus-5"]) {
         assert.equal(getCategoryModelCalibration(name, model), "", `${workflow}/${name}/${model}`)
-        assert.equal(getCategoryModelCalibration(name, model, true), "", `${workflow}/${name}/${model} carry-ahead`)
       }
     }
   }
@@ -394,11 +406,11 @@ test("category extension seam selects model families, ignores unsupported keys, 
     assert.equal(getCategoryModelCalibration("deep", "auto-k2p8-gpt-6"), "kimi-extension")
     assert.equal(getCategoryModelCalibration("deep", "auto-swe/2/high-gpt-6"), "swe-extension")
     assert.equal(getCategoryModelCalibration("deep", "gemini-4-pro-gpt-6-codex"), "gemini-extension")
-    assert.equal(getCategoryModelCalibration("deep", "unknown/model", true), "generic-gpt-extension\n\n---\n\nkimi-family-extension\n\n---\n\nswe-extension\n\n---\n\nkimi-extension")
+    assert.equal(getCategoryModelCalibration("deep", "unknown/model"), "")
     writeFileSync(join(root, "v1", "category", "deep.md"), "replacement-role")
     loadAllPrompts(root, "v1")
     assert.equal(getCategoryPrompt("deep"), "replacement-role")
-    assert.equal(getCategoryModelCalibration("deep", "gpt-6-astra", true), "")
+    assert.equal(getCategoryModelCalibration("deep", "gpt-6-astra"), "")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

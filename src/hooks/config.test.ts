@@ -67,9 +67,9 @@ function delegationContract(agentMap: Record<string, unknown>, name: string): st
 
 const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_POLICY_TAG = "ocmm-review-session-efficiency-policy"
-const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
-const KIMI_MARKER = "<kimi-calibration>"
-const SWE_2_MARKER = "# SWE-2 EXECUTION CALIBRATION"
+const CLAUDE_OPUS_5_MARKER = "<scope-economy-calibration>"
+const KIMI_MARKER = "<reasoning-economy-calibration>"
+const SWE_2_MARKER = "<decisive-execution-calibration>"
 
 type ConfigTarget = {
   agent: Record<string, unknown>
@@ -82,8 +82,8 @@ function countText(text: string, needle: string): number {
 
 function gptCalibration(): string {
   const source = getDeepworkPrompt("gpt").trim()
-  assert.ok(source, "loaded GPT calibration must not be empty")
-  return source
+  assert.ok(source, "loaded calibration must not be empty")
+  return "<outcome-execution-calibration>"
 }
 
 function taggedPolicy(agentMap: Record<string, unknown>, name: string, tag: string): string {
@@ -148,21 +148,26 @@ test("builder is primary-only; planner can be both primary and delegated", async
   assert.equal((cfg.agent.reviewer as Record<string, unknown> | undefined)?.mode, "subagent")
 })
 
-test("config injects configured locale guidance into primary-capable agents only", async () => {
+test("config injects visible-output locale guidance into every managed prompt", async () => {
   const c = { ...defaultConfig(), locale: "zh-CN" }
   const handler = createConfigHandler({ getConfig: () => c })
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
+  await handler(cfg, undefined)
 
-  for (const name of ["orchestrator", "builder", "planner"]) {
+  const managedNames = [
+    ...BUILTIN_AGENTS.map(({ name }) => name),
+    ...BUILTIN_CATEGORIES.filter(({ optIn }) => !optIn).map(({ name }) => name),
+    "explore",
+  ]
+  for (const name of managedNames) {
     const prompt = String((cfg.agent[name] as Record<string, unknown>).prompt)
-    assert.match(prompt, /<ocmm-locale-guidance>/)
-    assert.match(prompt, /Configured locale: zh-CN/)
-    assert.match(prompt, /thinking process, visible planning, and conversation/)
+    assert.match(prompt, /Configured locale: zh-CN/, name)
+    assert.match(prompt, /user's explicit visible-output language request/, name)
+    assert.match(prompt, /visible output only/, name)
+    assert.doesNotMatch(prompt, /thinking process/, name)
+    assert.equal(countText(prompt, "<ocmm-locale-guidance>"), 1, name)
   }
-
-  const reviewerPrompt = String((cfg.agent.reviewer as Record<string, unknown>).prompt)
-  assert.doesNotMatch(reviewerPrompt, /<ocmm-locale-guidance>/)
 })
 
 test("config injects user-language guidance when locale is unset", async () => {
@@ -170,25 +175,82 @@ test("config injects user-language guidance when locale is unset", async () => {
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
 
-  const prompt = String((cfg.agent.orchestrator as Record<string, unknown>).prompt)
-  assert.match(prompt, /No locale is configured/)
-  assert.match(prompt, /Infer the user's preferred language from their latest message/)
+  for (const name of ["orchestrator", "reviewer", "plan-critic", "coding"]) {
+    const prompt = String((cfg.agent[name] as Record<string, unknown>).prompt)
+    assert.match(prompt, /No locale is configured/, name)
+    assert.match(prompt, /Infer the user's preferred visible-output language/, name)
+  }
 })
 
-test("locale guidance preserves existing primary prompts", async () => {
+test("locale guidance preserves custom managed prompts and prefixes them once", async () => {
   const c = { ...defaultConfig(), locale: "en-US" }
   const handler = createConfigHandler({ getConfig: () => c })
   const cfg = {
     agent: {
       orchestrator: { prompt: "Custom primary prompt." },
+      reviewer: { prompt: "Custom review prompt." },
+      coding: { prompt: "Custom category prompt." },
     },
   }
   await handler(cfg, undefined)
+  await handler(cfg, undefined)
 
-  const prompt = String((cfg.agent.orchestrator as Record<string, unknown>).prompt)
-  assert.match(prompt, /Configured locale: en-US/)
-  assert.match(prompt, /Custom primary prompt\./)
-  assert.equal(prompt.match(/<ocmm-locale-guidance>/g)?.length, 1)
+  for (const [name, customPrompt] of [
+    ["orchestrator", "Custom primary prompt."],
+    ["reviewer", "Custom review prompt."],
+    ["coding", "Custom category prompt."],
+  ] as const) {
+    const prompt = String((cfg.agent[name] as Record<string, unknown>).prompt)
+    assert.match(prompt, /Configured locale: en-US/, name)
+    assert.equal(countText(prompt, customPrompt), 1, name)
+    assert.equal(countText(prompt, "<ocmm-locale-guidance>"), 1, name)
+  }
+})
+
+test("locale guidance covers configured custom agents and categories without touching host-only agents", async () => {
+  const config = {
+    ...defaultConfig(),
+    locale: "zh-Hans",
+    agents: {
+      "custom-agent": { model: "openai/gpt-5.6-sol" },
+      "custom-agent-empty": { model: "openai/gpt-5.6-sol" },
+    },
+    categories: {
+      "custom-category": { model: "openai/gpt-5.6-sol" },
+      "custom-category-empty": { model: "openai/gpt-5.6-sol" },
+    },
+  }
+  const target: { agent: Record<string, unknown> } = {
+    agent: {
+      "custom-agent": { prompt: "Custom agent body." },
+      "custom-category": { prompt: "Custom category body." },
+      "host-only": { model: "host/model", prompt: "Host-owned body." },
+    },
+  }
+  const handler = createConfigHandler({
+    getConfig: () => config,
+    routeRegistry: createEffectiveRouteRegistry(),
+    getFastMode: () => false,
+  })
+  await handler(target, undefined)
+  await handler(target, undefined)
+
+  for (const [name, body] of [
+    ["custom-agent", "Custom agent body."],
+    ["custom-category", "Custom category body."],
+  ] as const) {
+    const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+    assert.equal(countText(prompt, "<ocmm-locale-guidance>"), 1, name)
+    assert.equal(countText(prompt, body), 1, name)
+    assert.match(prompt, /Configured locale: zh-Hans/, name)
+  }
+  for (const name of ["custom-agent-empty", "custom-category-empty"]) {
+    const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
+    assert.equal(countText(prompt, "<ocmm-locale-guidance>"), 1, name)
+    assert.match(prompt, /Configured locale: zh-Hans/, name)
+    assert.match(prompt, /<\/ocmm-locale-guidance>$/, name)
+  }
+  assert.equal((target.agent["host-only"] as Record<string, unknown>).prompt, "Host-owned body.")
 })
 
 test("config respects user-set defaultAgent and disableOpenCodeBuiltinAgents=false", async () => {
@@ -254,6 +316,50 @@ test("config registers OMO-compatible direct delegation aliases", async () => {
   assert.deepEqual(cfg.agent.explore, cfg.agent["code-search"])
   assert.ok(cfg.agent.deep, "@deep should be available as category-subagent")
   assert.ok(cfg.agent.quick, "@quick should be available as category-subagent")
+})
+
+test("explore compatibility alias composes its prompt from the final model and preserves real custom prompts", async () => {
+  const configured = {
+    ...defaultConfig(),
+    locale: "zh-Hans",
+    agents: { explore: { model: "github-copilot/gemini-4-argon" } },
+  }
+  const handler = createConfigHandler({ getConfig: () => configured })
+  const target: { agent: Record<string, unknown> } = { agent: {} }
+  await handler(target, undefined)
+  await handler(target, undefined)
+
+  const codeSearch = String((target.agent["code-search"] as Record<string, unknown>).prompt)
+  const explore = String((target.agent.explore as Record<string, unknown>).prompt)
+  assert.equal((target.agent.explore as Record<string, unknown>).model, "github-copilot/gemini-4-argon")
+  assert.equal(countText(codeSearch, "<outcome-execution-calibration>"), 1)
+  assert.equal(countText(explore, "<outcome-execution-calibration>"), 0)
+  assert.equal(countText(explore, "<precision-execution-calibration>"), 1)
+  assert.equal(countText(explore, "<evidence-reliability-calibration>"), 1)
+  assert.equal(countText(explore, "<ocmm-locale-guidance>"), 1)
+  assert.equal(agentPermission(target.agent, "explore").task, "deny")
+
+  const customTarget: { agent: Record<string, unknown> } = {
+    agent: { explore: { prompt: "User explore prompt." } },
+  }
+  await handler(customTarget, undefined)
+  await handler(customTarget, undefined)
+  const customPrompt = String((customTarget.agent.explore as Record<string, unknown>).prompt)
+  assert.equal(countText(customPrompt, "User explore prompt."), 1)
+  assert.equal(countText(customPrompt, "<ocmm-locale-guidance>"), 1)
+  assert.equal(countText(customPrompt, "<precision-execution-calibration>"), 0)
+  assert.equal(agentPermission(customTarget.agent, "explore").task, "deny")
+
+  const sourceCustomTarget: { agent: Record<string, unknown> } = {
+    agent: { "code-search": { prompt: "User code-search prompt." } },
+  }
+  await handler(sourceCustomTarget, undefined)
+  await handler(sourceCustomTarget, undefined)
+  const inheritedPrompt = String((sourceCustomTarget.agent.explore as Record<string, unknown>).prompt)
+  assert.equal(countText(inheritedPrompt, "User code-search prompt."), 1)
+  assert.equal(countText(inheritedPrompt, "<ocmm-locale-guidance>"), 1)
+  assert.equal(countText(inheritedPrompt, "<precision-execution-calibration>"), 0)
+  assert.equal(agentPermission(sourceCustomTarget.agent, "explore").task, "deny")
 })
 
 test("config applies the exact flat-workflow task permission graph", async () => {
@@ -680,7 +786,7 @@ test("configured planning profiles register canonical prompts, policies, permiss
   assert.equal(critic.model, "openai/gpt-6.1-astra")
   assert.match(String(critic.prompt), /# Agent Role: plan-critic/)
   assert.doesNotMatch(String(critic.prompt), /# Agent Role: planner/)
-  assert.doesNotMatch(String(critic.prompt), /<ocmm-locale-guidance>/)
+  assert.match(String(critic.prompt), /Configured locale: zh-CN/)
   assertExactTaskRules(agentPermission(target.agent, "plan-critic-low").task, READ_ONLY_TASK_RULES, "plan-critic-low task allowlist")
   assert.match(delegationContract(target.agent, "plan-critic-low"), /read-only role must not modify work by proxy/i)
 
@@ -1047,10 +1153,10 @@ test("user model override selects specialized deepwork prompt variant", async ()
   const cfg: { agent: Record<string, unknown> } = { agent: {} }
   await handler(cfg, undefined)
 
-  assert.match(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), /GLM 5\.2 CALIBRATION/)
+  assert.equal(countText(String((cfg.agent.orchestrator as Record<string, unknown>).prompt), "<deliberate-execution-calibration>"), 1)
   const builder = String((cfg.agent.builder as Record<string, unknown>).prompt)
-  assert.ok(builder.includes(getDeepworkPrompt("codex").trim()), "Codex-family adapter base")
-  assert.equal(countText(builder, gptCalibration()), 1, "Codex-family shares GPT calibration")
+  assert.equal(countText(builder, "# OpenCode Tool Compatibility"), 1)
+  assert.equal(countText(builder, gptCalibration()), 1)
 })
 
 test("config does not clobber an existing user-set model", async () => {
@@ -1124,7 +1230,7 @@ test("oracle catalog promotion retains legacy GPT compatibility when its declare
 test("v1 selected GPT generations and aliases share one calibration after role and planner base", async () => {
   loadAllPrompts(join(process.cwd(), "prompts"), "v1")
   const gpt = gptCalibration()
-  const plannerBase = getDeepworkPrompt("planner").trim()
+  const plannerBase = "# Deepwork Planner Injection"
   for (const model of [
     "openai/gpt-5.5", "openai/gpt-5.6-sol", "vercel/openai/gpt-5.6-terra",
     "openai/gpt-6-sol", "providers/openai/gpt-6-sol-fast", "openai/gpt-6-astra",
@@ -1158,10 +1264,13 @@ test("v1 selected GPT generations and aliases share one calibration after role a
 
 test("v1 non-GPT agents and planners retain their existing layers without GPT calibration", async () => {
   loadAllPrompts(join(process.cwd(), "prompts"), "v1")
-  for (const [model, layer] of [
-    ["zhipu/glm-5.2", "glm"], ["google/gemini-3.1-pro", "gemini"],
-    ["anthropic/claude-opus-5", "default"], ["kimi-for-coding/kimi-for-coding", "kimi"],
-    ["devin/swe-2-high", "swe-2"], ["unknown/model", "default"],
+  for (const [model, layerMarker] of [
+    ["zhipu/glm-5.2", "<deliberate-execution-calibration>"],
+    ["google/gemini-3.1-pro", "<precision-execution-calibration>"],
+    ["anthropic/claude-opus-5", "# Deepwork Workflow Prompt - default"],
+    ["kimi-for-coding/kimi-for-coding", KIMI_MARKER],
+    ["devin/swe-2-high", SWE_2_MARKER],
+    ["unknown/model", "# Deepwork Workflow Prompt - default"],
   ] as const) {
     const configured = {
       ...defaultConfig(),
@@ -1172,11 +1281,9 @@ test("v1 non-GPT agents and planners retain their existing layers without GPT ca
     for (const name of ["reviewer", "planner"]) {
       const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
       assert.equal(countText(prompt, gptCalibration()), 0, `${model}/${name}`)
-      if (name === "reviewer" || layer === "kimi" || layer === "swe-2") {
-        assert.equal(countText(prompt, getDeepworkPrompt(layer).trim()), 1, `${model}/${name}: existing layer`)
-      }
+      assert.equal(countText(prompt, layerMarker), 1, `${model}/${name}: selected layer`)
     }
-    assert.equal(countText(String((target.agent.planner as Record<string, unknown>).prompt), getDeepworkPrompt("planner").trim()), 1, model)
+    assert.equal(countText(String((target.agent.planner as Record<string, unknown>).prompt), "# Deepwork Planner Injection"), 1, model)
   }
 })
 
@@ -1311,7 +1418,6 @@ test("config keeps SWE-2 calibration independent from Kimi and unknown models", 
   const swe = String((target.agent.builder as Record<string, unknown>).prompt)
   assert.equal(countText(swe, SWE_2_MARKER), 1)
   assert.equal(countText(swe, KIMI_MARKER), 0)
-  assert.match(swe, /SWE-2 is not a Kimi reasoning family/)
 
   const adjacent = String((target.agent.clarifier as Record<string, unknown>).prompt)
   assert.equal(countText(adjacent, SWE_2_MARKER), 0)
@@ -1448,7 +1554,7 @@ test("v1 assembles wrapped Opus 5.5 aliases from selected models without leaking
   }
 })
 
-test("Codex carries guarded Opus 5 only for the orchestrator prompt identity", async () => {
+test("Codex applies the selected scope calibration only to the orchestrator identity", async () => {
   const promptsRoot = join(process.cwd(), "prompts")
   const opus5Agents = Object.fromEntries(
     BUILTIN_AGENTS.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
@@ -1478,13 +1584,12 @@ test("Codex carries guarded Opus 5 only for the orchestrator prompt identity", a
       assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), name === "orchestrator" ? 1 : 0, name)
     }
 
-    const orchestrator = String((target.agent.orchestrator as Record<string, unknown>).prompt)
-    assert.match(orchestrator, /Apply it only when.*`claude-opus-5`.*every other runtime model.*ignore/is)
-    assert.equal(countText(orchestrator, gptCalibration()), 1)
     for (const name of [...BUILTIN_AGENTS.map(({ name: agentName }) => agentName), "reviewer-high", "planner-high"]) {
       const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
-      assert.equal(countText(prompt, gptCalibration()), 1, `${name}: generic GPT carriage`)
-      assert.ok(prompt.includes(getDeepworkPrompt("codex").trim()), `${name}: unguarded adapter base`)
+      assert.equal(countText(prompt, gptCalibration()), 0, `${name}: unrelated calibration`)
+      assert.equal(countText(prompt, "# Codex Tool Compatibility"), 1, `${name}: adapter base`)
+      assert.equal(countText(prompt, "<deepwork-mode>"), 1, `${name}: wrapper`)
+      assert.equal(countText(prompt, "DEEPWORK MODE ENABLED!"), 1, `${name}: activation`)
     }
   } finally {
     loadAllPrompts(promptsRoot, "v1")
@@ -1523,7 +1628,7 @@ test("v1 host-selected models drive unified calibration and configured planning 
     assert.match(planner, /Agent Role: planner/, model)
     assert.match(planner, /Deepwork Planner Injection/, model)
     assert.equal(countText(planner, gptCalibration()), 1, model)
-    assert.ok(planner.indexOf(getDeepworkPrompt("planner").trim()) < planner.indexOf(gptCalibration()), model)
+    assert.ok(planner.indexOf("# Deepwork Planner Injection") < planner.indexOf(gptCalibration()), model)
     const tier = cfg.agent["planner-high"] as Record<string, unknown>
     assert.equal(tier.model, model)
     assert.equal(countText(String(tier.prompt), gptCalibration()), 1, `${model}: planner-high`)

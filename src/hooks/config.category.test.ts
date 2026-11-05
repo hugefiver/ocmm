@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import { createConfigHandler } from "./config.ts"
 import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
-import { getCategoryPrompt, getDeepworkPrompt, loadAllPrompts } from "../intent/prompt-loader.ts"
+import { getCategoryPrompt, loadAllPrompts, pickModelBaseCalibrationVariant, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
 import { join } from "node:path"
 import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 
@@ -31,9 +31,9 @@ const LOCAL_COORDINATOR_TASK_RULES = {
   documenting: "allow",
 } as const
 
-const CLAUDE_OPUS_5_MARKER = "# CLAUDE OPUS 5 EXECUTION CALIBRATION"
-const KIMI_MARKER = "<kimi-calibration>"
-const SWE_2_MARKER = "# SWE-2 EXECUTION CALIBRATION"
+const CLAUDE_OPUS_5_MARKER = "<scope-economy-calibration>"
+const KIMI_MARKER = "<reasoning-economy-calibration>"
+const SWE_2_MARKER = "<decisive-execution-calibration>"
 
 function countText(text: string, needle: string): number {
   return text.split(needle).length - 1
@@ -171,8 +171,7 @@ test("user category override changes the model without disabling subagent mode",
 test("selected GPT and Codex-family categories append one generic calibration after the authoritative role", async () => {
   loadAllPrompts(PROMPTS_ROOT, "v1")
   const rolePrompt = getCategoryPrompt("frontend").trim()
-  const genericGptPrompt = getDeepworkPrompt("gpt").trim()
-  assert.ok(genericGptPrompt)
+  const genericGptPrompt = "<outcome-execution-calibration>"
   const cases = [
     {
       label: "host-selected model",
@@ -213,7 +212,8 @@ test("selected GPT and Codex-family categories append one generic calibration af
     const entry = target.agent.frontend as Record<string, unknown>
     const prompt = entry.prompt as string
 
-    assert.ok(prompt.startsWith(rolePrompt), `${label}: category role must remain first and authoritative`)
+    assert.match(prompt, /^<ocmm-locale-guidance>/, `${label}: locale prefix`)
+    assert.ok(prompt.indexOf(rolePrompt) < prompt.indexOf("<workflow-model-calibration>"), `${label}: category role before calibration`)
     assert.match(prompt, /<workflow-model-calibration>/, `${label}: missing calibration envelope`)
     assert.equal(countText(prompt, genericGptPrompt), 1, `${label}: generic layer occurs once`)
     assert.doesNotMatch(prompt, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION/, `${label}: no generation layer`)
@@ -222,8 +222,7 @@ test("selected GPT and Codex-family categories append one generic calibration af
 
 test("all categories including opted-in cross-cutting use the same GPT layer and exclude it for non-GPT", async () => {
   loadAllPrompts(PROMPTS_ROOT, "v1")
-  const gpt = getDeepworkPrompt("gpt").trim()
-  assert.ok(gpt)
+  const gpt = "<outcome-execution-calibration>"
   for (const model of [
     "openai/gpt-5.5", "openai/gpt-5.6-sol", "openai/gpt-6-sol", "openai/gpt-6-astra", "apai/gpt-6-luna",
     "zhipu/glm-5.2", "google/gemini-3.1-pro", "anthropic/claude-opus-5", "kimi-for-coding/kimi-for-coding", "devin/swe-2-high", "unknown/model",
@@ -240,9 +239,8 @@ test("all categories including opted-in cross-cutting use the same GPT layer and
       const entry = target.agent[name] as Record<string, unknown>
       const prompt = String(entry.prompt)
       assert.equal(entry.model, model, `${model}/${name}`)
-      assert.ok(prompt.startsWith(getCategoryPrompt(name).trim()), `${model}/${name}: role first`)
+      assert.ok(prompt.indexOf(getCategoryPrompt(name).trim()) < prompt.indexOf("<workflow-model-calibration>"), `${model}/${name}: role before calibration`)
       assert.equal(countText(prompt, gpt), model.includes("gpt-") ? 1 : 0, `${model}/${name}`)
-      assert.doesNotMatch(prompt, /GPT-6 ASTRA EXECUTION CALIBRATION|selected runtime model is GPT-6 Astra/, `${model}/${name}`)
     }
   }
 })
@@ -267,7 +265,7 @@ test("Opus 5 category selections never attach the orchestrator calibration", asy
   for (const category of BUILTIN_CATEGORIES) {
     const prompt = String((target.agent[category.name] as Record<string, unknown>).prompt)
     assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
-    assert.ok(prompt.startsWith(getCategoryPrompt(category.name).trim()), category.name)
+    assert.ok(prompt.includes(getCategoryPrompt(category.name).trim()), category.name)
   }
 })
 
@@ -285,12 +283,12 @@ test("Kimi and SWE category selections preserve the category role and isolate ca
   await createConfigHandler({ getConfig: () => configured })(target, undefined)
 
   const coding = String((target.agent.coding as Record<string, unknown>).prompt)
-  assert.ok(coding.startsWith(getCategoryPrompt("coding").trim()))
+  assert.ok(coding.includes(getCategoryPrompt("coding").trim()))
   assert.equal(countText(coding, KIMI_MARKER), 1)
   assert.equal(countText(coding, SWE_2_MARKER), 0)
 
   const research = String((target.agent.research as Record<string, unknown>).prompt)
-  assert.ok(research.startsWith(getCategoryPrompt("research").trim()))
+  assert.ok(research.includes(getCategoryPrompt("research").trim()))
   assert.equal(countText(research, SWE_2_MARKER), 1)
   assert.equal(countText(research, KIMI_MARKER), 0)
 
@@ -299,7 +297,7 @@ test("Kimi and SWE category selections preserve the category role and isolate ca
   assert.equal(countText(adjacent, KIMI_MARKER), 0)
 })
 
-test("Codex generation gives every builtin category one guarded generic GPT calibration", async () => {
+test("Codex config gives every builtin category one final-model calibration", async () => {
   loadAllPrompts(PROMPTS_ROOT, "codex")
   try {
     const handler = createConfigHandler({
@@ -307,39 +305,46 @@ test("Codex generation gives every builtin category one guarded generic GPT cali
     })
     const cfg: { agent: Record<string, unknown> } = { agent: {} }
     await handler(cfg, undefined)
-    const gpt = getDeepworkPrompt("gpt").trim()
-    assert.ok(gpt)
-    assert.match(gpt, /(?:apply|use)[^\n]*only[^\n]*(?:runtime|selected)[^\n]*(?:GPT|Codex)/i, "runtime family guard")
-    assert.match(gpt, /(?:non-GPT|every other runtime model)[^\n]*ignore/i, "non-GPT must ignore calibration")
-    const opus5 = getDeepworkPrompt("claude-opus-5").trim()
-    const kimi = getDeepworkPrompt("kimi").trim()
-    const swe2 = getDeepworkPrompt("swe-2").trim()
 
     for (const category of BUILTIN_CATEGORIES) {
       if (category.optIn) {
-        assert.equal(cfg.agent[category.name], undefined, `${category.name}: opt-in category must stay unregistered in Codex generation by default`)
+        assert.equal(cfg.agent[category.name], undefined, `${category.name}: opt-in category`)
         continue
       }
       const entry = cfg.agent[category.name] as Record<string, unknown>
-      const prompt = entry.prompt as string
-      assert.match(prompt, /<workflow-model-calibration>/, `${category.name}: missing calibration envelope`)
-      assert.equal(countText(prompt, gpt), 1, `${category.name}: one exact generic calibration`)
-      assert.equal(countText(prompt, getDeepworkPrompt("codex").trim()), 1, `${category.name}: adapter base outside GPT guard`)
-      assert.ok(prompt.startsWith(getCategoryPrompt(category.name).trim()), `${category.name}: category role remains first`)
-      assert.ok(!prompt.includes(opus5), `${category.name}: Opus 5 calibration must remain excluded`)
+      const prompt = String(entry.prompt)
+      const modelID = String(entry.model).slice(String(entry.model).indexOf("/") + 1)
+      const base = pickModelBaseCalibrationVariant(modelID) ?? "default"
+      const baseMarker = {
+        codex: "# Codex Tool Compatibility",
+        gpt: "<outcome-execution-calibration>",
+        gemini: "<precision-execution-calibration>",
+        glm: "<deliberate-execution-calibration>",
+        default: "# Deepwork Workflow Prompt - default",
+      }[base]
+      const additiveMarkers = {
+        gpt: "<outcome-execution-calibration>",
+        kimi: KIMI_MARKER,
+        "gemini-4": "<evidence-reliability-calibration>",
+        "swe-2": SWE_2_MARKER,
+      } as const
+      assert.ok(prompt.indexOf(getCategoryPrompt(category.name).trim()) < prompt.indexOf("<workflow-model-calibration>"), `${category.name}: role before calibration`)
+      assert.equal(countText(prompt, "<workflow-model-calibration>"), 1, category.name)
+      assert.equal(countText(prompt, "<deepwork-mode>"), 1, category.name)
+      assert.equal(countText(prompt, baseMarker), 1, category.name)
+      assert.equal(countText(prompt, "# Codex Tool Compatibility"), 1, category.name)
       assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
-      assert.equal(countText(prompt, KIMI_MARKER), 1, `${category.name}: Kimi carry-ahead`)
-      assert.equal(countText(prompt, SWE_2_MARKER), 1, `${category.name}: SWE-2 carry-ahead`)
-      assert.ok(prompt.includes(kimi), `${category.name}: exact Kimi calibration`)
-      assert.ok(prompt.includes(swe2), `${category.name}: exact SWE-2 calibration`)
-      assert.doesNotMatch(prompt, /GPT-5\.6 EXECUTION CALIBRATION|GPT-6 ASTRA EXECUTION CALIBRATION/, category.name)
+      for (const [variant, marker] of Object.entries(additiveMarkers)) {
+        const expected = pickModelCalibrationVariants(modelID).includes(variant as "gpt" | "kimi" | "gemini-4" | "swe-2") ? 1 : 0
+        assert.equal(countText(prompt, marker), expected, `${category.name}/${variant}`)
+      }
     }
   } finally {
     loadAllPrompts(PROMPTS_ROOT, "v1")
   }
 })
 
-test("Codex category non-GPT selections carry the family guard without guarding role or adapter", async () => {
+test("Codex category prompts select the configured final-model layer without family guards", async () => {
   loadAllPrompts(PROMPTS_ROOT, "codex")
   try {
     const config = {
@@ -352,17 +357,19 @@ test("Codex category non-GPT selections carry the family guard without guarding 
     }
     const target: { agent: Record<string, unknown> } = { agent: {} }
     await createConfigHandler({ getConfig: () => config })(target, undefined)
-    const gpt = getDeepworkPrompt("gpt").trim()
-    const adapter = getDeepworkPrompt("codex").trim()
-    for (const [name, model] of [["deep", "anthropic/claude-sonnet-4-6"], ["cross-cutting", "google/gemini-3.1-pro"]] as const) {
+    for (const [name, model, marker] of [
+      ["deep", "anthropic/claude-sonnet-4-6", "# Deepwork Workflow Prompt - default"],
+      ["cross-cutting", "google/gemini-3.1-pro", "<precision-execution-calibration>"],
+    ] as const) {
       const entry = target.agent[name] as Record<string, unknown>
       const prompt = String(entry.prompt)
       assert.equal(entry.model, model)
-      assert.ok(prompt.startsWith(getCategoryPrompt(name).trim()))
-      assert.equal(countText(prompt, gpt), 1, `${name}: guarded generic calibration`)
-      assert.equal(countText(prompt, adapter), 1, `${name}: adapter retained`)
-      assert.ok(prompt.indexOf(adapter) < prompt.indexOf(gpt), `${name}: adapter outside family guard`)
-      assert.doesNotMatch(prompt, /selected runtime model is GPT-6 Astra|GPT-6 ASTRA EXECUTION CALIBRATION/)
+      assert.ok(prompt.indexOf(getCategoryPrompt(name).trim()) < prompt.indexOf("<workflow-model-calibration>"), `${name}: role before calibration`)
+      assert.equal(countText(prompt, "<outcome-execution-calibration>"), 0, name)
+      assert.equal(countText(prompt, marker), 1, name)
+      assert.equal(countText(prompt, "# Codex Tool Compatibility"), 1, name)
+      assert.equal(countText(prompt, "<deepwork-mode>"), 1, name)
+      assert.equal(countText(prompt, "DEEPWORK MODE ENABLED!"), 1, name)
     }
   } finally {
     loadAllPrompts(PROMPTS_ROOT, "v1")
