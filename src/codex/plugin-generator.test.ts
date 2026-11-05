@@ -174,7 +174,7 @@ function writeFixtureFile(root: string, file: string, contents: string | Buffer)
 function makePromptFixture(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codex-prompt-fixture-"))
   const inventory = {
-    deepwork: ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi", "gemini-4", "swe-2"],
+    deepwork: ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi", "kimi-k3-1", "gemini-4", "swe-2"],
     agents: ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"],
     category: ["frontend", "creative", "hard-reasoning", "research", "quick", "coding", "normal-task", "complex", "deep", "documenting", "cross-cutting"],
   }
@@ -488,43 +488,54 @@ test("generated TOML keeps the final model while developer instructions stay mod
     assert.equal(countOccurrences(agent.developerInstructions, "<outcome-execution-calibration>"), 1, agent.sourceName)
   }
 
-  const model = "github-copilot/gemini-4-argon"
-  const config = {
-    ...defaultConfig(),
-    workflow: "codex" as const,
-    agents: {
-      orchestrator: { model },
-      reviewer: { alias: "review-route" },
-      "review-route": { model },
-      explore: { model },
-      planner: { model, variants: { high: "high" as const } },
-    },
-    categories: { coding: { model } },
-  }
-  const root = mkdtempSync(join(tmpdir(), "codex-final-model-prompt-"))
-  t.after(() => rmSync(root, { recursive: true, force: true }))
-  const result = await generateCodexPlugin({
-    projectRoot: process.cwd(),
-    pluginRoot: join(root, "plugins", "deepwork"),
-    marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
-    projectAgentsRoot: false,
-    config,
-    packageVersion: "9.9.9",
-  })
+  for (const [model, expectedTags, variant] of [
+    ["github-copilot/gemini-4-argon", ["precision-execution-calibration", "evidence-reliability-calibration"], "gemini-4"],
+    ["github-copilot/kimi-k3.1", ["scope-and-delivery-calibration"], "kimi-k3-1"],
+    ["github-copilot/kimi-k3", ["reasoning-economy-calibration"], "kimi"],
+  ] as const) {
+    const config = {
+      ...defaultConfig(),
+      workflow: "codex" as const,
+      agents: {
+        orchestrator: { model },
+        reviewer: { alias: "review-route" },
+        "review-route": { model },
+        explore: { model },
+        planner: { model, variants: { high: "high" as const } },
+      },
+      categories: { coding: { model } },
+    }
+    const root = mkdtempSync(join(tmpdir(), "codex-final-model-prompt-"))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const result = await generateCodexPlugin({
+      projectRoot: process.cwd(),
+      pluginRoot: join(root, "plugins", "deepwork"),
+      marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+      projectAgentsRoot: false,
+      config,
+      packageVersion: "9.9.9",
+    })
 
-  for (const sourceName of ["orchestrator", "reviewer", "planner-high", "coding", "explore"]) {
-    const parsed = parseGeneratedAgentToml(
-      readFileSync(join(result.pluginRoot, "agents", `dw-${sourceName}.toml`), "utf8"),
-      sourceName,
-    )
-    const instructions = String(parsed.developer_instructions)
-    assert.equal(parsed.model, "gemini-4-argon", sourceName)
-    assert.doesNotMatch(instructions, forbiddenIdentity, sourceName)
-    assert.equal(countOccurrences(instructions, "<precision-execution-calibration>"), 1, sourceName)
-    assert.equal(countOccurrences(instructions, "<evidence-reliability-calibration>"), 1, sourceName)
-    assert.equal(countOccurrences(instructions, "<outcome-execution-calibration>"), 0, sourceName)
-    assert.equal(countOccurrences(instructions, "<deepwork-mode>"), 1, sourceName)
-    assert.equal(countOccurrences(instructions, "DEEPWORK MODE ENABLED!"), 1, sourceName)
+    for (const sourceName of ["orchestrator", "reviewer", "planner-high", "coding", "explore"]) {
+      const parsed = parseGeneratedAgentToml(
+        readFileSync(join(result.pluginRoot, "agents", `dw-${sourceName}.toml`), "utf8"),
+        sourceName,
+      )
+      const instructions = String(parsed.developer_instructions)
+      assert.equal(parsed.model, model.slice(model.indexOf("/") + 1), sourceName)
+      assert.doesNotMatch(instructions, forbiddenIdentity, sourceName)
+      for (const tag of ["precision-execution-calibration", "evidence-reliability-calibration", "scope-and-delivery-calibration", "reasoning-economy-calibration", "outcome-execution-calibration"]) {
+        const expected = (expectedTags as readonly string[]).includes(tag) ? 1 : 0
+        assert.equal(countOccurrences(instructions, `<${tag}>`), expected, `${model}/${sourceName}/${tag}`)
+      }
+      if (variant === "kimi-k3-1") {
+        const sourceNotice = getDeepworkPrompt(variant).match(/^<!--[\s\S]*?-->/)?.[0]
+        assert.ok(sourceNotice)
+        assert.ok(normalizeLf(instructions).includes(normalizeLf(sourceNotice)), `${sourceName}: source license notice transported`)
+      }
+      assert.equal(countOccurrences(instructions, "<deepwork-mode>"), 1, sourceName)
+      assert.equal(countOccurrences(instructions, "DEEPWORK MODE ENABLED!"), 1, sourceName)
+    }
   }
 })
 
@@ -660,7 +671,31 @@ test("Codex non-default final models select only their matching calibration", as
     ["github-copilot/gemini-3.1-pro", ["gemini"]],
     ["github-copilot/gemini-4-argon", ["gemini", "gemini-4"]],
     ["github-copilot/glm-5.2", ["glm"]],
-    ["github-copilot/kimi-k3.1", ["default", "kimi"]],
+    ["github-copilot/kimi-k3", ["default", "kimi"]],
+    ["github-copilot/kimi-k2.7", ["default", "kimi"]],
+    ["github-copilot/kimi-k3.1", ["default", "kimi-k3-1"]],
+    ["github-copilot/kimi-k3-1", ["default", "kimi-k3-1"]],
+    ["github-copilot/kimi-k3p1", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3p1", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3.1", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3-1", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3", ["default", "kimi"]],
+    ["github-copilot/k3.0", ["default", "kimi"]],
+    ["github-copilot/k3-k3.1", ["default", "kimi"]],
+    ["github-copilot/k3p1-gpt-6", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3p1-codex-mini", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3p1-claude-opus-5", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3p1-gemini-4", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3p1-glm-5", ["default", "kimi-k3-1"]],
+    ["github-copilot/k3-gpt-6", ["default", "kimi"]],
+    ["github-copilot/k3-claude-opus-5", ["default", "kimi"]],
+    ["github-copilot/kimi-k27", ["default", "kimi"]],
+    ["github-copilot/auto-kimi-k27", ["default", "kimi"]],
+    ["github-copilot/kimi-k3.2", ["default", "kimi-k3-1"]],
+    ["github-copilot/kimi-k4", ["default", "kimi-k3-1"]],
+    ["github-copilot/kimi/k3/1/preview", ["default", "kimi-k3-1"]],
+    ["github-copilot/kimi-k3-kimi-k3.1", ["default", "kimi"]],
+    ["github-copilot/gpt-6-kimi-k3.1", ["gpt"]],
     ["github-copilot/swe-2-high", ["default", "swe-2"]],
   ] as const) {
     const agents = await buildCodexAgents({
@@ -668,24 +703,29 @@ test("Codex non-default final models select only their matching calibration", as
         ...defaultConfig(),
         workflow: "codex",
         promptsRoot,
-        agents: { orchestrator: { model }, planner: { model } },
+        agents: {
+          orchestrator: { model },
+          planner: { model, variants: { high: "high" as const } },
+          reviewer: { alias: "calibration-model" },
+          "calibration-model": { model },
+        },
         categories: { coding: { model }, "cross-cutting": { model } },
       },
       cwd: process.cwd(),
       skillsRoot: join(promptsRoot, "skills"),
     })
     const adapter = getDeepworkPrompt("codex").trim()
-    for (const name of ["orchestrator", "planner", "coding", "cross-cutting"]) {
+    for (const name of ["orchestrator", "planner", "planner-high", "reviewer", "coding", "cross-cutting"]) {
       const agent = agents.find(({ sourceName }) => sourceName === name)
       assert.ok(agent, `${model}/${name}`)
       assert.equal(agent.model, model.slice(model.indexOf("/") + 1), `${model}/${name}: final model`)
       const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
-      assert.equal(countOccurrences(prompt, getDeepworkPrompt("gpt").trim()), 0, `${model}/${name}: unrelated calibration`)
       assert.equal(countOccurrences(prompt, adapter), 1, `${model}/${name}: adapter`)
-      for (const layer of expectedLayers) {
-        assert.equal(countOccurrences(prompt, getDeepworkPrompt(layer).trim()), 1, `${model}/${name}/${layer}`)
+      for (const layer of ["default", "gpt", "claude-opus-5", "gemini", "glm", "kimi", "kimi-k3-1", "gemini-4", "swe-2"] as const) {
+        const expected = (expectedLayers as readonly string[]).includes(layer) ? 1 : 0
+        assert.equal(countOccurrences(prompt, getDeepworkPrompt(layer).trim()), expected, `${model}/${name}: exclusive ${layer}`)
       }
-      if (name === "planner") {
+      if (name.startsWith("planner")) {
         assert.equal(countOccurrences(prompt, getDeepworkPrompt("planner").trim()), 1)
       }
     }

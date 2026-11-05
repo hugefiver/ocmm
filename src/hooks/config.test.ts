@@ -1359,16 +1359,28 @@ test("prompt-only calibrations reach roles and categories without changing selec
     for (const area of ["agents", "category", "deepwork"]) {
       mkdirSync(join(root, "v1", area), { recursive: true })
     }
-    for (const role of ["planner", "reviewer"]) {
+    for (const role of ["orchestrator", "planner", "reviewer"]) {
       writeFileSync(join(root, "v1", "agents", `${role}.md`), `[role:${role}]`)
     }
     writeFileSync(join(root, "v1", "category", "coding.md"), "[role:coding]")
-    for (const variant of ["planner", "default", "gemini", "kimi", "gemini-4"]) {
+    for (const variant of ["planner", "default", "gpt", "claude-opus-5", "gemini", "kimi", "kimi-k3-1", "gemini-4"]) {
       writeFileSync(join(root, "v1", "deepwork", `${variant}.md`), `[layer:${variant}]`)
     }
     loadAllPrompts(root, "v1")
     for (const [model, layer] of [
-      ["moonshot/kimi-k2.6", "kimi"], ["moonshot/kimi-k3.1", "kimi"],
+      ["moonshot/kimi-k2.6", "kimi"], ["moonshot/kimi-k3", "kimi"],
+      ["moonshot/kimi-k3.1", "kimi-k3-1"], ["moonshot/kimi-k3p1", "kimi-k3-1"],
+      ["moonshot/kimi-k3-1", "kimi-k3-1"], ["moonshot/kimi-k3.2", "kimi-k3-1"],
+      ["moonshot/kimi-k4", "kimi-k3-1"], ["moonshot/k3p1", "kimi-k3-1"],
+      ["moonshot/k3.1", "kimi-k3-1"], ["moonshot/k3-1", "kimi-k3-1"],
+      ["moonshot/k3", "kimi"], ["moonshot/k3.0", "kimi"], ["moonshot/k3-k3.1", "kimi"],
+      ["moonshot/k3p1-gpt-6", "kimi-k3-1"], ["moonshot/k3p1-claude-opus-5", "kimi-k3-1"],
+      ["moonshot/k3p1-gemini-4", "kimi-k3-1"], ["moonshot/k3p1-glm-5", "kimi-k3-1"],
+      ["moonshot/k3-gpt-6", "kimi"], ["moonshot/k3-claude-opus-5", "kimi"],
+      ["moonshot/kimi-k27", "kimi"], ["moonshot/auto-kimi-k27", "kimi"],
+      ["gateway/kimi/k3/1/preview", "kimi-k3-1"],
+      ["moonshot/kimi-k3-kimi-k3.1", "kimi"], ["moonshot/gpt-6-kimi-k3.1", "gpt"],
+      ["kimi-k3.1/unrelated", ""], ["gpt-6/kimi-k3", "kimi"],
       ["kimi-for-coding/k2-p8", "kimi"], ["google/gemini-4-argon", "gemini-4"],
       ["provider/us.google.gemini-4.1-pro", "gemini-4"],
       ["google/gemini-3.1-pro", ""], ["google/gemini-5-pro", ""], ["google/gemini-40-pro", ""],
@@ -1376,21 +1388,32 @@ test("prompt-only calibrations reach roles and categories without changing selec
     ]) {
       const configured = {
         ...defaultConfig(),
-        agents: { reviewer: { model }, planner: { model } },
+        agents: {
+          orchestrator: { model },
+          reviewer: { alias: "calibration-model" },
+          "calibration-model": { model },
+          planner: { model, fallbackModels: ["moonshot/kimi-k3.1"] },
+        },
         categories: { coding: { model } },
       }
       const target: ConfigTarget = { agent: {} }
       const handler = createConfigHandler({ getConfig: () => configured })
       await handler(target, undefined)
       await handler(target, undefined)
-      for (const name of ["reviewer", "planner", "coding"]) {
+      for (const name of ["orchestrator", "reviewer", "planner", "coding"]) {
         const entry = target.agent[name] as Record<string, unknown>
         assert.equal(entry.model, model, `${model}/${name}: model preserved`)
         const prompt = String(entry.prompt)
         assert.equal(countText(prompt, `[role:${name}]`), 1, `${model}/${name}: role preserved`)
         assert.equal(countText(prompt, "<ocmm-workflow-boundaries>"), 1, `${model}/${name}: shared boundary once`)
-        for (const candidate of ["kimi", "gemini-4"]) {
+        for (const candidate of ["kimi", "kimi-k3-1", "gemini-4"]) {
           assert.equal(countText(prompt, `[layer:${candidate}]`), candidate === layer ? 1 : 0, `${model}/${name}/${candidate}`)
+        }
+        if (layer === "kimi" || layer === "kimi-k3-1") {
+          assert.equal(countText(prompt, "[layer:default]"), 1, `${model}/${name}: default base`)
+          for (const candidate of ["gpt", "gemini", "claude-opus-5"]) {
+            assert.equal(countText(prompt, `[layer:${candidate}]`), 0, `${model}/${name}: no later identity base`)
+          }
         }
         if (layer) assert.ok(prompt.indexOf(`[role:${name}]`) < prompt.indexOf(`[layer:${layer}]`))
       }

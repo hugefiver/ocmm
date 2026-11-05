@@ -16,6 +16,7 @@ import {
   isGptModel,
   isMiniModel,
   isKimiPromptModel,
+  isKimiK31OrLaterPromptModel,
   isKimiK27Model,
   isKimiK2Model,
   isSwe2Model,
@@ -209,12 +210,58 @@ test("Kimi prompt selection scans complete names with generations and coding ali
   ]) {
     assert.equal(isKimiPromptModel(modelID), true, modelID)
   }
-  for (const modelID of ["xkimi-k2.8", "k2p80", "k2p9"]) {
+  for (const modelID of ["xkimi-k2.8", "xkimi-k3", "xkimi-k3.1", "xkimi-k3p1", "k2p80", "k2p9"]) {
     assert.equal(isKimiPromptModel(modelID), false, modelID)
   }
   assert.equal(isKimiK27Model("prefix-kimi-k2.7-snapshot"), true, "legacy K2.7 matcher remains compatible")
   assert.equal(isKimiK27Model("kimi-for-coding/kimi-for-coding-highspeed"), false)
   assert.equal(isKimiK27Model("kimi-for-coding/kimi-for-coding"), false)
+})
+
+test("Kimi K3.1+ prompt matching uses the first identity and its local numeric version", () => {
+  for (const modelID of [
+    "kimi-k3.1", "kimi-k3-1", "kimi-k3p1", "MOONSHOT/KIMI-K3.1-PREVIEW",
+    "k3p1", "k3.1", "k3-1", "gateway/k3/1", "prefix/k3p1-fast",
+    "kimi-k3.2", "kimi-k3.10", "kimi-k4", "kimi-k10.0", "k4", "k3p2", "k10.1",
+    "gateway/kimi/k3/1/preview", "kimi-k3.1-kimi-k3", "k3p1-gpt-6",
+  ]) {
+    assert.equal(isKimiPromptModel(modelID), true, modelID)
+    assert.equal(isKimiK31OrLaterPromptModel(modelID), true, modelID)
+  }
+  for (const modelID of ["k3", "k3.0", "k3-k3.1"]) {
+    assert.equal(isKimiPromptModel(modelID), true, modelID)
+    assert.equal(isKimiK31OrLaterPromptModel(modelID), false, modelID)
+  }
+  for (const modelID of [
+    "kimi", "kimi-for-coding/kimi-for-coding-highspeed", "kimi-k2.7", "k2p5", "k2-p7", "k2p8",
+    "kimi-k3", "kimi-k3.0", "kimi-k3.0.9", "kimi-k3.1foo", "kimi-k3p1foo", "kimi-k3.1.2.3",
+    "gpt-6-kimi-k3.1", "claude-opus-5-k3p1", "kimi-k3-kimi-k3.1", "kimi-k3/kimi-k4",
+    "kimi-k3@1", "kimi-k3:1", "xk3p1", "unknown/model",
+  ]) {
+    assert.equal(isKimiK31OrLaterPromptModel(modelID), false, modelID)
+  }
+})
+
+test("Kimi prompt aliases leave reasoning identity and effort-family matching unchanged", () => {
+  for (const modelID of ["k3", "k3.0", "k3-k3.1", "k3p1", "k3.1", "k3-1", "k4", "gateway/k3/1"]) {
+    assert.equal(recognizeModelName(modelID), null, modelID)
+    assert.equal(classifyModelFamily({ modelID, providerID: "kimi-k3.1" }), "unknown", modelID)
+    assert.equal(isKimiK2Model(modelID), false, modelID)
+    assert.equal(isKimiK27Model(modelID), false, modelID)
+  }
+  for (const modelID of ["kimi-k3.1", "kimi-k3p1", "kimi-k4", "kimi-k3-kimi-k3.1"]) {
+    assert.equal(classifyModelFamily({ modelID }), "kimi", modelID)
+    assert.equal(recognizeModelName(modelID)?.version, null, modelID)
+    assert.equal(isKimiK2Model(modelID), true, modelID)
+    assert.equal(isKimiK27Model(modelID), false, modelID)
+  }
+  assert.equal(classifyModelFamily({ modelID: "k3p1-gpt-6" }), "gpt")
+  for (const modelID of ["kimi-k27", "auto-kimi-k27", "kimi-k27/preview", "kimi-k27.1"]) {
+    assert.equal(classifyModelFamily({ modelID }), "kimi-k27", modelID)
+    assert.equal(isKimiK27Model(modelID), true, modelID)
+    assert.equal(isKimiPromptModel(modelID), true, modelID)
+    assert.equal(isKimiK31OrLaterPromptModel(modelID), false, modelID)
+  }
 })
 
 test("Gemini 4 prompt matching respects numeric boundaries across wrappers", () => {

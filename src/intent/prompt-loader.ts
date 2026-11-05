@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,claude-opus-5,gemini,gemini-4,glm,codex,planner,kimi,swe-2}.md
+ *     deepwork/{default,gpt,claude-opus-5,gemini,gemini-4,glm,codex,planner,kimi,kimi-k3-1,swe-2}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting,cross-cutting}.md
  *
@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, isGemini4PromptModel, isKimiPromptModel, isSwe2Model, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, isClaudeOpus5Model, isGemini4PromptModel, isKimiK31OrLaterPromptModel, isKimiPromptModel, isSwe2Model, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -27,7 +27,7 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 export type Workflow = "v1" | "codex"
 
 type DeepworkVariant = "default" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner" | ModelCalibrationVariant
-export type ModelCalibrationVariant = "gpt" | "kimi" | "gemini-4" | "swe-2"
+export type ModelCalibrationVariant = "gpt" | "kimi" | "kimi-k3-1" | "gemini-4" | "swe-2"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -42,7 +42,7 @@ type CategoryName =
   | "documenting"
   | "cross-cutting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "gemini-4", "swe-2"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "kimi-k3-1", "gemini-4", "swe-2"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -127,6 +127,7 @@ export function pickDeepworkVariantForAgent(opts: {
   preferenceModel: string
 }): DeepworkVariant {
   if (isPlannerAgent(opts.agentName)) return "planner"
+  if (isKimiPromptModel(opts.preferenceModel)) return "default"
   if (opts.agentName === "orchestrator" && isClaudeOpus5Model(opts.preferenceModel)) {
     return "claude-opus-5"
   }
@@ -136,6 +137,7 @@ export function pickDeepworkVariantForAgent(opts: {
 export function pickModelBaseCalibrationVariant(
   modelID: string,
 ): "codex" | "gpt" | "gemini" | "glm" | null {
+  if (isKimiPromptModel(modelID)) return null
   const family = classifyModelFamily({ providerID: "", modelID })
   if (family === "codex" || family === "gpt" || family === "gemini" || family === "glm") {
     return family
@@ -147,9 +149,10 @@ export function pickModelBaseCalibrationVariant(
 export function pickModelCalibrationVariants(
   modelID: string,
 ): ModelCalibrationVariant[] {
+  if (isKimiK31OrLaterPromptModel(modelID)) return ["kimi-k3-1"]
+  if (isKimiPromptModel(modelID)) return ["kimi"]
   const family = classifyModelFamily({ modelID })
   if (family === "gpt" || family === "codex") return ["gpt"]
-  if (isKimiPromptModel(modelID)) return ["kimi"]
   if (isGemini4PromptModel(modelID)) return ["gemini-4"]
   if (isSwe2Model(modelID)) return ["swe-2"]
   return []
@@ -171,8 +174,9 @@ export function getCategoryModelCalibration(
 ): string {
   const calibrations = categoryModelCalibrations.get(name)
   const family = classifyModelFamily({ modelID })
-  const variant = family === "codex" ? "gpt" : isSwe2Model(modelID) ? "swe-2"
-    : family === "unknown" && isKimiPromptModel(modelID) ? "kimi" : family
+  const variant = isKimiK31OrLaterPromptModel(modelID) ? "kimi-k3-1"
+    : isKimiPromptModel(modelID) ? family === "kimi-k27" ? family : "kimi"
+    : family === "codex" ? "gpt" : isSwe2Model(modelID) ? "swe-2" : family
   return calibrations?.get(variant) ?? ""
 }
 

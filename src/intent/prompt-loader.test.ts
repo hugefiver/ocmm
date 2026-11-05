@@ -17,7 +17,7 @@ import {
   pickModelCalibrationVariants,
 } from "./prompt-loader.ts"
 
-const DEEPWORK_VARIANTS = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "gemini-4", "swe-2"] as const
+const DEEPWORK_VARIANTS = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "kimi-k3-1", "gemini-4", "swe-2"] as const
 
 function makeTempRoot(workflow: "v1" | "codex"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
@@ -322,6 +322,20 @@ test("base calibration selector follows the final model independently of agent r
   }
 })
 
+test("prompt-only Kimi identities own base selection before later model identifiers", () => {
+  for (const alias of ["k3", "k3p1"]) {
+    for (const suffix of ["gpt-6", "codex-mini", "claude-opus-5", "gemini-4", "glm-5"]) {
+      const modelID = `${alias}-${suffix}`
+      assert.equal(pickModelBaseCalibrationVariant(modelID), null, modelID)
+      for (const agentName of ["orchestrator", "reviewer", "coding"]) {
+        assert.equal(pickDeepworkVariantForAgent({ agentName, preferenceModel: modelID }), "default", `${modelID}/${agentName}`)
+      }
+      assert.equal(pickDeepworkVariantForAgent({ agentName: "planner", preferenceModel: modelID }), "planner", modelID)
+      assert.deepEqual(pickModelCalibrationVariants(modelID), [alias === "k3" ? "kimi" : "kimi-k3-1"], modelID)
+    }
+  }
+})
+
 test("pickDeepworkVariantForAgent defaults for unknown families", () => {
   assert.equal(
     pickDeepworkVariantForAgent({ agentName: "orchestrator", preferenceModel: "claude-opus-4-7" }),
@@ -356,12 +370,34 @@ test("additive model calibration selector chooses only the final model calibrati
     ["prefix-gpt-5.6-codex-fast", ["gpt"]],
     ["moonshot/kimi-k2.6", ["kimi"]],
     ["moonshot/kimi-k3", ["kimi"]],
-    ["moonshot/kimi-k3.1", ["kimi"]],
+    ["kimi-k27", ["kimi"]],
+    ["auto-kimi-k27", ["kimi"]],
+    ["kimi-k27/preview", ["kimi"]],
+    ["kimi-k27.1", ["kimi"]],
+    ["moonshot/kimi-k3.1", ["kimi-k3-1"]],
+    ["moonshot/kimi-k3-1", ["kimi-k3-1"]],
+    ["moonshot/kimi-k3p1", ["kimi-k3-1"]],
+    ["moonshot/kimi-k3.2", ["kimi-k3-1"]],
+    ["moonshot/kimi-k4", ["kimi-k3-1"]],
+    ["moonshot/kimi-k3.0.9", ["kimi"]],
+    ["kimi-for-coding/k3p1", ["kimi"]],
+    ["moonshot/k3p1", ["kimi-k3-1"]],
+    ["k3", ["kimi"]],
+    ["k3.0", ["kimi"]],
+    ["k3-k3.1", ["kimi"]],
+    ["k3.1", ["kimi-k3-1"]],
+    ["k3-1", ["kimi-k3-1"]],
+    ["gateway/kimi/k3/1/preview", ["kimi-k3-1"]],
+    ["kimi-k3-kimi-k3.1", ["kimi"]],
+    ["gpt-6-kimi-k3.1", ["gpt"]],
+    ["k3p1-gpt-6", ["kimi-k3-1"]],
     ["moonshot/k2-p5", ["kimi"]],
     ["google/gemini-4-argon", ["gemini-4"]],
     ["provider/us.google.gemini-4.1-pro", ["gemini-4"]],
     ["google/gemini-40-pro", []],
     ["unknown/model", []],
+    ["xkimi-k3", []],
+    ["xkimi-k3.1", []],
     ["zhipu/glm-5.2", []],
     ["google/gemini-3.1-pro", []],
     ["anthropic/claude-opus-5", []],
@@ -392,6 +428,7 @@ test("category extension seam selects model families, ignores unsupported keys, 
       '<model-calibration model="gemini">\ngemini-extension\n</model-calibration>',
       '<model-calibration model="kimi-k27">\nkimi-family-extension\n</model-calibration>',
       '<model-calibration model="kimi">\nkimi-extension\n</model-calibration>',
+      '<model-calibration model="kimi-k3-1">\nkimi-k31-extension\n</model-calibration>',
       '<model-calibration model="swe-2">\nswe-extension\n</model-calibration>',
       '<model-calibration model="unsupported-family">\nunsupported-extension\n</model-calibration>',
     ].join("\n"))
@@ -403,7 +440,19 @@ test("category extension seam selects model families, ignores unsupported keys, 
     assert.equal(getCategoryModelCalibration("deep", "google/gemini-3-pro"), "gemini-extension")
     assert.equal(getCategoryModelCalibration("deep", "anthropic/claude-opus-5"), "")
     assert.equal(getCategoryModelCalibration("deep", "moonshot/kimi-k2.7"), "kimi-family-extension")
+    for (const model of ["kimi-k27", "auto-kimi-k27", "kimi-k27/preview", "kimi-k27.1"]) {
+      assert.equal(getCategoryModelCalibration("deep", model), "kimi-family-extension", model)
+    }
     assert.equal(getCategoryModelCalibration("deep", "auto-k2p8-gpt-6"), "kimi-extension")
+    assert.equal(getCategoryModelCalibration("deep", "kimi-k3"), "kimi-extension")
+    assert.equal(getCategoryModelCalibration("deep", "kimi-k3-kimi-k3.1"), "kimi-extension")
+    for (const model of ["k3-gpt-6", "k3-claude-opus-5", "k3-gemini-4", "k3-glm-5"]) {
+      assert.equal(getCategoryModelCalibration("deep", model), "kimi-extension", model)
+    }
+    for (const model of ["kimi-k3.1", "kimi-k3p1", "k3-1", "kimi-k4", "k3p1-gpt-6", "k3p1-claude-opus-5"]) {
+      assert.equal(getCategoryModelCalibration("deep", model), "kimi-k31-extension", model)
+    }
+    assert.equal(getCategoryModelCalibration("deep", "gpt-6-kimi-k3.1"), "generic-gpt-extension")
     assert.equal(getCategoryModelCalibration("deep", "auto-swe/2/high-gpt-6"), "swe-extension")
     assert.equal(getCategoryModelCalibration("deep", "gemini-4-pro-gpt-6-codex"), "gemini-extension")
     assert.equal(getCategoryModelCalibration("deep", "unknown/model"), "")

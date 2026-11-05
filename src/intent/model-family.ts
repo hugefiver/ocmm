@@ -38,6 +38,11 @@ export function extractModelName(fullId: string): string {
 
 type ModelKind = "gpt" | "codex" | "claude" | "gemini" | "kimi" | "minimax" | "glm" | "deepseek" | "swe-2" | "o-series"
 type Version = [number, number, number]
+
+function isKimiK31OrLaterVersion(version: Version | null): boolean {
+  return version !== null && (version[0] > 3 || (version[0] === 3 && version[1] >= 1))
+}
+
 type GptLane = "sol" | "terra" | "astra" | "luna"
 type ClaudeSeries = "opus" | "sonnet" | "haiku"
 
@@ -50,7 +55,7 @@ function seriesKind(series: string | undefined): "gpt" | "claude" | undefined {
 }
 
 /** Semantic facts for the first identifier in a complete model field, never a guessed route. */
-export function recognizeModelName(modelID: string): {
+export function recognizeModelName(modelID: string, promptKimiAliases = false): {
   kind: ModelKind
   generation?: number
   version: Version | null
@@ -70,6 +75,17 @@ export function recognizeModelName(modelID: string): {
   for (const match of modelID.toLowerCase().matchAll(/[^-_.\s/@:]+/g)) {
     let word = match[0]
     let position = match.index
+    const kimiVersion = promptKimiAliases ? word.match(/^k(\d+)(?:p(\d+))?$/) : null
+    const legacyK27 = word === "k27" && tokens.at(-1) === "kimi"
+    if (kimiVersion && Number(kimiVersion[1]) >= 3 && !legacyK27) {
+      tokens.push("k", kimiVersion[1]!)
+      positions.push(position, position + 1)
+      if (kimiVersion[2] !== undefined) {
+        tokens.push(kimiVersion[2])
+        positions.push(position + 2 + kimiVersion[1]!.length)
+      }
+      continue
+    }
     const prefix = word.match(/^(chatgpt|gpt|opus|sonnet|haiku|sol|terra|astra|luna)(?=\d)/)?.[0]
     if (prefix) {
       tokens.push(prefix)
@@ -124,6 +140,9 @@ export function recognizeModelName(modelID: string): {
       case "minimax": case "glm": case "deepseek": return familyToken
       case "fable": return "claude"
       case "swe": return tokens[index + 1] === "2" ? "swe-2" : undefined
+      case "k": return promptKimiAliases && (index === 0 || separator(index).includes("/"))
+        && connected(index + 1) && separator(index + 1) === ""
+        && versionAt(index + 1).version !== null ? "kimi" : undefined
       case "k2": return /^p[5678]$/.test(tokens[index + 1] ?? "") ? "kimi" : undefined
       default:
         if (/^k2p[5678]$/.test(token ?? "")) return "kimi"
@@ -138,6 +157,9 @@ export function recognizeModelName(modelID: string): {
       const kind = explicit ?? series!
       let versionStart = index + 1
       let localSeries = series ? tokens[index] : undefined
+      if (promptKimiAliases && kind === "kimi" && tokens[versionStart] === "k" && connected(versionStart)) {
+        versionStart += 1
+      }
       const fable = kind === "claude" && (tokens[index] === "fable" || tokens[index + 1] === "fable")
       if (explicit && connected(versionStart) && (seriesKind(tokens[versionStart]) === kind || tokens[versionStart] === "fable" && kind === "claude")) {
         localSeries = seriesKind(tokens[versionStart]) ? tokens[versionStart] : undefined
@@ -280,7 +302,12 @@ export function isKimiK27Model(modelID: string): boolean {
 
 /** Kimi prompt selection spans generations without changing effort-family routing. */
 export function isKimiPromptModel(modelID: string): boolean {
-  return recognizeModelName(modelID)?.kind === "kimi"
+  return recognizeModelName(modelID, true)?.kind === "kimi"
+}
+
+export function isKimiK31OrLaterPromptModel(modelID: string): boolean {
+  const model = recognizeModelName(modelID, true)
+  return model?.kind === "kimi" && isKimiK31OrLaterVersion(model.version)
 }
 
 /** Gemini 4.x prompt-only calibration; adjacent numeric generations stay out. */
