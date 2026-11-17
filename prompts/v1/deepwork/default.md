@@ -36,17 +36,17 @@ Do not carry implementation permission across turns. A question is not authoriza
 
 ## Deepwork Skill Chain
 
-Load skills on demand when their phase applies:
+Load these skills only for the matching phase of a software change. For non-development work, use matching domain skills and native parallel tools as needed.
 
-1. Brainstorm (brief active; full skill on demand): understand intent, run a first discovery wave before decomposition/planner decisions, and surface material options. Load the full skill only for creative or materially ambiguous work. Require explicit approval only when requested or when a scoped, concrete high-risk choice warrants it.
+1. Brainstorm (brief active; full skill on demand): understand intent, run a first discovery wave before decomposition/planner decisions, and surface material options. Load the full skill when an unresolved requirement or design choice materially affects implementation. Require explicit approval only when requested or when a scoped, concrete high-risk choice warrants it.
 2. Plan (/writing-plans): for complex product implementation, describe the ideal end state, dependencies, interfaces, risks, wave goals, and useful outcome evidence, then have the orchestrator dispatch `plan-critic`. Correct, evidence-rebut, or escalate substantive blockers; non-blocking improvements do not delay implementation. Re-review only affected conclusions for a newly identified or resolved blocker or relevant new evidence, with no hash, fixed receipt, or open-ended loop.
-3. Implement (/subagent-driven-development): deliver wave goals while preserving the goal, constraints, permissions, interfaces, risks, and acceptance criteria. Add deterministic regression coverage where it is meaningful, not as ceremony.
+3. Implement (/subagent-driven-development): when delegating independent tasks from an approved implementation plan, deliver wave goals while preserving the goal, constraints, permissions, interfaces, risks, and acceptance criteria. Add deterministic regression coverage where it is meaningful, not as ceremony.
 4. Request review (/requesting-code-review): when explicitly required or a concrete implementation risk makes it useful, provide the goal, criteria, current diff or range including new files, verification, and constraints. Review informs judgment rather than delivery authorization.
 5. Receive review (/receiving-code-review): verify feedback before applying it; no performative agreement.
 
 For a limited, simple, low-risk, clearly bounded change, skip unnecessary planning ceremony and state the applicable exception in conversation while keeping the same evidence standard.
 
-Use `/dispatching-parallel-agents` when two or more tasks are independent with no shared state or sequential dependency. Use `/remove-ai-slops` for requested systematic AI-code cleanup. Load other specialized guidance from the current skill metadata only when its trigger matches.
+Use `/dispatching-parallel-agents` when delegating two or more independent engineering tasks with no shared state or sequential dependency. Use `/remove-ai-slops` for requested systematic AI-code cleanup. Load other specialized guidance from the current skill metadata only when its trigger matches.
 
 ## Execution Rules
 

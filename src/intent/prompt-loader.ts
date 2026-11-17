@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, recognizeModelName, isClaudeOpus5Model, isGemini4PromptModel, isKimiK31OrLaterPromptModel, isKimiPromptModel, isSwe2Model, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, recognizeModelName, isGemini4PromptModel, isKimiK31OrLaterPromptModel, isKimiPromptModel, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -127,9 +127,9 @@ export function pickDeepworkVariantForAgent(opts: {
   preferenceModel: string
 }): DeepworkVariant {
   if (isPlannerAgent(opts.agentName)) return "planner"
-  if (isKimiPromptModel(opts.preferenceModel)) return "default"
-  if (opts.agentName === "orchestrator" && isClaudeOpus5Model(opts.preferenceModel)) {
-    return "claude-opus-5"
+  if (opts.agentName === "orchestrator") {
+    const model = recognizeModelName(opts.preferenceModel, true)
+    if (model?.opus && model.version !== null && model.version[0] >= 5) return "claude-opus-5"
   }
   return pickModelBaseCalibrationVariant(opts.preferenceModel) ?? "default"
 }
@@ -137,8 +137,8 @@ export function pickDeepworkVariantForAgent(opts: {
 export function pickModelBaseCalibrationVariant(
   modelID: string,
 ): "codex" | "gpt" | "gemini" | "glm" | null {
-  if (isKimiPromptModel(modelID)) return null
-  const family = classifyModelFamily({ providerID: "", modelID })
+  const model = recognizeModelName(modelID, true)
+  const family = model?.codex ? "codex" : model?.kind
   if (family === "codex" || family === "gpt" || family === "gemini" || family === "glm") {
     return family
   }
@@ -149,13 +149,12 @@ export function pickModelBaseCalibrationVariant(
 export function pickModelCalibrationVariants(
   modelID: string,
 ): ModelCalibrationVariant[] {
-  if (recognizeModelName(modelID, true)?.fable52) return ["claude-fable-5-2"]
-  if (isKimiK31OrLaterPromptModel(modelID)) return ["kimi-k3-1"]
-  if (isKimiPromptModel(modelID)) return ["kimi"]
-  const family = classifyModelFamily({ modelID })
-  if (family === "gpt" || family === "codex") return ["gpt"]
+  const model = recognizeModelName(modelID, true)
+  if (model?.fable52) return ["claude-fable-5-2"]
+  if (model?.kind === "kimi") return [isKimiK31OrLaterPromptModel(modelID) ? "kimi-k3-1" : "kimi"]
+  if (model?.kind === "gpt" || model?.codex) return ["gpt"]
   if (isGemini4PromptModel(modelID)) return ["gemini-4"]
-  if (isSwe2Model(modelID)) return ["swe-2"]
+  if (model?.swe2OrLater) return ["swe-2"]
   return []
 }
 
@@ -175,9 +174,12 @@ export function getCategoryModelCalibration(
 ): string {
   const calibrations = categoryModelCalibrations.get(name)
   const family = classifyModelFamily({ modelID })
-  const variant = isKimiK31OrLaterPromptModel(modelID) ? "kimi-k3-1"
+  const model = recognizeModelName(modelID, true)
+  const variant = model?.series === "mythos" ? "claude" : model?.series === "fable" ? "claude-opus-47-plus"
+    : model?.kind === "swe-2" ? model.swe2OrLater ? "swe-2" : "unknown"
+    : isKimiK31OrLaterPromptModel(modelID) ? "kimi-k3-1"
     : isKimiPromptModel(modelID) ? family === "kimi-k27" ? family : "kimi"
-    : family === "codex" ? "gpt" : isSwe2Model(modelID) ? "swe-2" : family
+    : family === "codex" ? "gpt" : family
   return calibrations?.get(variant) ?? ""
 }
 

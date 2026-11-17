@@ -1,6 +1,6 @@
 ---
 name: deepwork
-description: "MUST USE when the user asks for deepwork-style planning, multi-agent execution, code review, research, or workflow routing inside Codex."
+description: "Use for a software engineering task in Codex that needs the Deepwork development workflow. Standalone research, writing and general planning use their domain skills directly."
 ---
 
 # Deepwork
@@ -21,7 +21,7 @@ Configured workflow: `codex`
 
 1. Classify the request into quick, normal-task, coding, complex, deep, research, frontend, hard-reasoning, creative, or documenting.
 2. Select the matching Deepwork role or generated `dw-*` Codex agent.
-3. Load task-relevant skills explicitly before doing specialized work.
+3. Load development workflow skills only for the matching software engineering phase. For non-development work, use relevant domain skills and native parallel tools without loading the development skills.
 4. Verify using repository commands relevant to the changed surface; workers provide lightweight local evidence, and the orchestrator coordinates integration/global checks before reporting completion.
 
 Define the ideal end state, dependencies, interfaces, risks, and useful acceptance evidence. Plans guide execution rather than prescribe a fixed script: each wave has a goal, and actual results may change the order or equivalent implementation. Deep and workers may make minimal evidence-based decisions that preserve the approved goal, constraints, permissions, and final acceptance. Carry forward only current requirements, design constraints, dependencies, unresolved authorization boundaries, material risks, unverified coverage, and acceptance evidence, not a decision or assumption history. Escalate user-visible scope or acceptance changes, security/data/API/permission/irreversible risks, or decisions supported only by guesses.

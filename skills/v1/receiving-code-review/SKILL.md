@@ -1,6 +1,6 @@
 ---
 name: receiving-code-review
-description: Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation
+description: Use when evaluating code review findings about an implemented software change, before deciding which corrections to make.
 ---
 
 <!-- Local fork of obra/superpowers/receiving-code-review v6.2.0.

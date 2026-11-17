@@ -1,6 +1,6 @@
 ---
 name: deepwork-subagent-driven-development
-description: Use when executing implementation plans with independent tasks in the current session
+description: Use when delegating independent tasks from an approved software implementation plan to workers in the current session.
 ---
 
 <!-- Local fork of obra/superpowers/subagent-driven-development v7.0.1.

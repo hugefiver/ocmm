@@ -292,9 +292,9 @@ test("Kimi and SWE category selections preserve the category role and isolate ca
   assert.equal(countText(research, SWE_2_MARKER), 1)
   assert.equal(countText(research, KIMI_MARKER), 0)
 
-  const adjacent = String((target.agent.quick as Record<string, unknown>).prompt)
-  assert.equal(countText(adjacent, SWE_2_MARKER), 0)
-  assert.equal(countText(adjacent, KIMI_MARKER), 0)
+  const quick = String((target.agent.quick as Record<string, unknown>).prompt)
+  assert.equal(countText(quick, SWE_2_MARKER), 1)
+  assert.equal(countText(quick, KIMI_MARKER), 0)
 })
 
 test("Codex config gives every builtin category one final-model calibration", async () => {

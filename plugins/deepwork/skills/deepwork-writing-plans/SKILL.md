@@ -1,6 +1,6 @@
 ---
 name: deepwork-writing-plans
-description: Use before complex product behavior implementation, or when an explicit planning request or concrete major risk requires a plan; not for routine non-product multi-step work
+description: Use to plan a software change before implementing complex product behavior, or when the user requests an implementation plan or a concrete engineering risk requires one.
 ---
 
 <!-- Local fork of obra/superpowers/writing-plans v7.0.1.

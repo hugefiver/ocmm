@@ -1235,7 +1235,7 @@ test("v1 selected GPT generations and aliases share one calibration after role a
     "openai/gpt-5.5", "openai/gpt-5.6-sol", "vercel/openai/gpt-5.6-terra",
     "openai/gpt-6-sol", "providers/openai/gpt-6-sol-fast", "openai/gpt-6-astra",
     "amazon-bedrock/openai.gpt-6-astra-fast", "apai/gpt-6-luna", "openai/gpt-7-preview",
-    "openai/codex-mini-latest", "openai/gpt-5.3-codex",
+    "openai/codex-mini-latest", "openai/gpt-5.3-codex", "openai/gpt-6.2-astra", "openai/gpt-6.2-sol",
   ]) {
     const configured = {
       ...defaultConfig(),
@@ -1383,9 +1383,11 @@ test("prompt-only calibrations reach roles and categories without changing selec
       ["kimi-k3.1/unrelated", ""], ["gpt-6/kimi-k3", "kimi"],
       ["kimi-for-coding/k2-p8", "kimi"], ["google/gemini-4-argon", "gemini-4"],
       ["provider/us.google.gemini-4.1-pro", "gemini-4"],
-      ["google/gemini-3.1-pro", ""], ["google/gemini-5-pro", ""], ["google/gemini-40-pro", ""],
+      ["google/gemini-3.1-pro", ""], ["google/gemini-5-pro", "gemini-4"], ["google/gemini-40-pro", "gemini-4"],
+      ["google/gemini-5.2foo", ""], ["google/gemini-3-gemini-5", ""],
       ["provider-kimi/unrelated", ""],
-      ["anthropic/claude-fable-5-2", "claude-fable-5-2"],
+      ["anthropic/claude-fable-5-2", "claude-fable-5-2"], ["anthropic/claude-fable-5.12", "claude-fable-5-2"],
+      ["gateway/mythos-6.1", "claude-fable-5-2"], ["anthropic/claude-mythos-5.1-fable-6", ""],
       ["claude-mythos-5-2/unrelated", ""],
     ]) {
       const configured = {
@@ -1444,9 +1446,9 @@ test("config keeps SWE-2 calibration independent from Kimi and unknown models", 
   assert.equal(countText(swe, SWE_2_MARKER), 1)
   assert.equal(countText(swe, KIMI_MARKER), 0)
 
-  const adjacent = String((target.agent.clarifier as Record<string, unknown>).prompt)
-  assert.equal(countText(adjacent, SWE_2_MARKER), 0)
-  assert.equal(countText(adjacent, KIMI_MARKER), 0)
+  const clarifier = String((target.agent.clarifier as Record<string, unknown>).prompt)
+  assert.equal(countText(clarifier, SWE_2_MARKER), 1)
+  assert.equal(countText(clarifier, KIMI_MARKER), 0)
 })
 
 test("supported workflows compose shell safety once into every builtin agent and category", async () => {
@@ -1538,13 +1540,14 @@ test("v1 composes default plus Opus 5 exactly once for orchestrator only", async
   assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/)
 })
 
-test("v1 assembles wrapped Opus 5.5 aliases from selected models without leaking the layer", async () => {
+test("v1 assembles Opus 5+ aliases from selected models without leaking the layer", async () => {
   loadAllPrompts(join(process.cwd(), "prompts"), "v1")
   for (const model of [
     "claude-opus-5-5@default",
     "amazon-bedrock/global.anthropic.claude-opus-5-5",
     "claude-opus-5-5@other",
     "amazon-bedrock/global.openai.claude-opus-5-5",
+    "claude-opus-5.0", "claude-opus-5.50", "claude-opus-50", "anthropic/claude-opus-6.1",
   ]) {
     const configured = {
       ...defaultConfig(),
@@ -1570,7 +1573,7 @@ test("v1 assembles wrapped Opus 5.5 aliases from selected models without leaking
     assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/, model)
   }
 
-  for (const model of ["claude-opus-5.0", "claude-opus-5.50", "claude-opus-50"]) {
+  for (const model of ["claude-opus-4.9-opus-6", "claude-opus-6.1foo", "claude-sonnet-6-opus-6"]) {
     const configured = { ...defaultConfig(), workflow: "v1" as const, agents: { orchestrator: { model } } }
     const target: ConfigTarget = { agent: {} }
     await createConfigHandler({ getConfig: () => configured })(target, undefined)

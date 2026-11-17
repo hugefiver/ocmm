@@ -44,7 +44,7 @@ function isKimiK31OrLaterVersion(version: Version | null): boolean {
 }
 
 type GptLane = "sol" | "terra" | "astra" | "luna"
-type ClaudeSeries = "opus" | "sonnet" | "haiku"
+type ClaudeSeries = "opus" | "sonnet" | "haiku" | "fable" | "mythos"
 
 function seriesKind(series: string | undefined): "gpt" | "claude" | undefined {
   switch (series) {
@@ -67,6 +67,7 @@ export function recognizeModelName(modelID: string, promptAliases = false): {
   opus: boolean
   fable: boolean
   fable52: boolean
+  swe2OrLater: boolean
   kimiAlias?: number
   kimi27: boolean
 } | null {
@@ -88,6 +89,7 @@ export function recognizeModelName(modelID: string, promptAliases = false): {
       continue
     }
     const prefix = word.match(/^(chatgpt|gpt|opus|sonnet|haiku|sol|terra|astra|luna)(?=\d)/)?.[0]
+      ?? (promptAliases ? word.match(/^(gemini|fable|mythos|swe)(?=\d)/)?.[0] : undefined)
     if (prefix) {
       tokens.push(prefix)
       positions.push(position)
@@ -125,10 +127,15 @@ export function recognizeModelName(modelID: string, promptAliases = false): {
       end += 1
     }
     const adjacentSeries = connected(end) && separator(end) === "" ? seriesKind(tokens[end]) : undefined
+    const promptVersion = promptAliases && (kind === "claude" || kind === "gemini" || kind === "swe-2" || kind === undefined)
+    const wildcard = promptVersion && connected(end) && separator(end) === "." && tokens[end]!.startsWith("x")
     const partial = (adjacentSeries !== undefined && kind !== undefined && adjacentSeries !== kind)
       || (connected(end) && separator(end) === "."
         && /^\d+[a-z]/.test(tokens[end]!) && !/^\d+[km]$/.test(tokens[end]!))
+      || (promptVersion && versionStartsAt(end))
+      || (wildcard && (kind !== "gemini" || numbers.length !== 1 || tokens[end] !== "x" || versionStartsAt(end + 1)))
     const version: Version | null = numbers.length > 0 && numbers.length <= 3 && !partial
+      && (!promptVersion || numbers.every(Number.isSafeInteger))
       ? [numbers[0]!, numbers[1] ?? 0, numbers[2] ?? 0] : null
     return { version, generation: numbers[0], versionParts: numbers.length, end: partial ? end + 1 : end }
   }
@@ -141,7 +148,7 @@ export function recognizeModelName(modelID: string, promptAliases = false): {
       case "minimax": case "glm": case "deepseek": return familyToken
       case "fable": return "claude"
       case "mythos": return promptAliases ? "claude" : undefined
-      case "swe": return tokens[index + 1] === "2" ? "swe-2" : undefined
+      case "swe": return promptAliases || tokens[index + 1] === "2" ? "swe-2" : undefined
       case "k": return promptAliases && (index === 0 || separator(index).includes("/"))
         && connected(index + 1) && separator(index + 1) === ""
         && versionAt(index + 1).version !== null ? "kimi" : undefined
@@ -163,7 +170,12 @@ export function recognizeModelName(modelID: string, promptAliases = false): {
         versionStart += 1
       }
       const fable = kind === "claude" && (tokens[index] === "fable" || tokens[index + 1] === "fable")
-      if (explicit && connected(versionStart) && (seriesKind(tokens[versionStart]) === kind || tokens[versionStart] === "fable" && kind === "claude")) {
+      const promptSeries = (token: string | undefined) => promptAliases && (token === "fable" || token === "mythos")
+      if (promptSeries(tokens[index])) {
+        localSeries = tokens[index]
+      } else if (tokens[index] === "claude" && connected(versionStart) && promptSeries(tokens[versionStart])) {
+        localSeries = tokens[versionStart++]
+      } else if (explicit && connected(versionStart) && (seriesKind(tokens[versionStart]) === kind || tokens[versionStart] === "fable" && kind === "claude")) {
         localSeries = seriesKind(tokens[versionStart]) ? tokens[versionStart] : undefined
         versionStart += 1
       }
@@ -224,7 +236,9 @@ export function recognizeModelName(modelID: string, promptAliases = false): {
   return {
     kind, generation, version, versionParts, lane, series: series as GptLane | ClaudeSeries | undefined, codex,
     mini: attributes.includes("mini"), opus, fable, kimiAlias, kimi27,
-    fable52: /^(?:claude-)?(?:fable|mythos)-5[.-]2(?=$|[-@:/\s])/i.test(modelID.slice(positions[start])),
+    swe2OrLater: kind === "swe-2" && version !== null && version[0] >= 2,
+    fable52: (series === "fable" || series === "mythos") && version !== null
+      && (version[0] > 5 || (version[0] === 5 && version[1] >= 2)),
   }
 }
 
@@ -313,10 +327,10 @@ export function isKimiK31OrLaterPromptModel(modelID: string): boolean {
   return model?.kind === "kimi" && isKimiK31OrLaterVersion(model.version)
 }
 
-/** Gemini 4.x prompt-only calibration; adjacent numeric generations stay out. */
+/** Select the Gemini 4 calibration for this and later generations. */
 export function isGemini4PromptModel(modelID: string): boolean {
-  const model = recognizeModelName(modelID)
-  return model?.kind === "gemini" && model.version?.[0] === 4
+  const model = recognizeModelName(modelID, true)
+  return model?.kind === "gemini" && model.version !== null && model.version[0] >= 4
 }
 
 /** Devin SWE-2 effort lanes. This is a prompt match, not a Kimi reasoning family. */

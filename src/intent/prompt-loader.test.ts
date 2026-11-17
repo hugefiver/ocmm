@@ -218,11 +218,13 @@ test("all recognized GPT generations and aliases select the same calibration wit
   }
 })
 
-test("pickDeepworkVariantForAgent reserves the Opus 5/5.5 calibration for orchestrator", () => {
+test("pickDeepworkVariantForAgent reserves Opus 5+ calibration for orchestrator", () => {
   for (const modelID of [
     "claude-opus-5",
     "opus5",
     "opus5.5-2m",
+    "claude-opus-5-50@default", "claude-opus-5.0", "claude-opus-5.5000", "claude-opus-50",
+    "opus5.0", "opus5.50", "opus50", "6.1opus-128k",
     "anthropic/claude-opus-5",
     "claude-opus-5-20260728",
     "claude-opus-5.latest",
@@ -259,15 +261,9 @@ test("pickDeepworkVariantForAgent reserves the Opus 5/5.5 calibration for orches
     }
   }
   for (const modelID of [
-    "claude-opus-5-50@default",
-    "claude-opus-5.0",
-    "claude-opus-5.5000",
-    "claude-opus-50",
-    "gpt-5.5-claude-opus-5",
+    "claude-opus-6.1.0.2", "opus6.1foo", "claude-opus-4-opus-6",
+    "mythos-6-opus6", "claude-sonnet-6-opus6", "gpt-5.5-claude-opus-5",
     "opus4.7",
-    "opus5.0",
-    "opus5.50",
-    "opus50",
     "opus5.5foo",
     "sonnet5.5",
     "haiku5",
@@ -355,7 +351,9 @@ test("additive model calibration selector chooses only the final model calibrati
     ["kimi-for-coding/kimi-for-coding-highspeed", ["kimi"]],
     ["devin/swe-2-high", ["swe-2"]],
     ["DEVIN/SWE-2.MAX", ["swe-2"]],
-    ["devin/swe-20", []],
+    ["devin/swe-20", ["swe-2"]], ["swe-3.1-high", ["swe-2"]],
+    ["swe-1-swe-3", []], ["swe-swe-20", []], ["swe-3.1foo", []], ["swe-2.1.0.1", []],
+    ["swe-3.x", []], ["swe@3", []], ["glm-5-swe-3", []],
     ["provider-kimi-for-coding/unrelated", ["kimi"]],
     ["gemini-4-provider/unrelated", ["gemini-4"]],
     ["swe-2-provider/unrelated", ["swe-2"]],
@@ -394,7 +392,7 @@ test("additive model calibration selector chooses only the final model calibrati
     ["moonshot/k2-p5", ["kimi"]],
     ["google/gemini-4-argon", ["gemini-4"]],
     ["provider/us.google.gemini-4.1-pro", ["gemini-4"]],
-    ["google/gemini-40-pro", []],
+    ["google/gemini-40-pro", ["gemini-4"]],
     ["unknown/model", []],
     ["xkimi-k3", []],
     ["xkimi-k3.1", []],
@@ -404,7 +402,11 @@ test("additive model calibration selector chooses only the final model calibrati
     ["us.anthropic.claude-fable-5-2-20261109", ["claude-fable-5-2"]],
     ["claude-mythos-5.2@default", ["claude-fable-5-2"]],
     ["mythos-5-2", ["claude-fable-5-2"]],
-    ["claude-fable-5-20", []], ["claude-fable-5-1", []],
+    ["claude-fable-5-20", ["claude-fable-5-2"]], ["claude-fable-5-1", []],
+    ["claude-mythos-6.0", ["claude-fable-5-2"]], ["fable-5.2.1", ["claude-fable-5-2"]],
+    ["mythos-5.1-gpt-6", []], ["claude-fable-5.1-mythos-6", []], ["fable-fable-6", []],
+    ["claude@mythos-6", []], ["fable-6.1foo", []], ["mythos-6.0.0.1", []], ["fable-5.2.x", []],
+    ["claude-mythos6", ["claude-fable-5-2"]], ["fable5.1-gpt-6", []],
     ["claude-opus-5-claude-fable-5-2", []],
   ]
   for (const [modelID, expected] of cases) {
@@ -444,6 +446,9 @@ test("category extension seam selects model families, ignores unsupported keys, 
     }
     assert.equal(getCategoryModelCalibration("deep", "google/gemini-3-pro"), "gemini-extension")
     assert.equal(getCategoryModelCalibration("deep", "anthropic/claude-opus-5"), "")
+    for (const model of ["mythos-5.2-gpt-6", "fable6-gpt-6"]) {
+      assert.equal(getCategoryModelCalibration("deep", model), "", model)
+    }
     assert.equal(getCategoryModelCalibration("deep", "moonshot/kimi-k2.7"), "kimi-family-extension")
     for (const model of ["kimi-k27", "auto-kimi-k27", "kimi-k27/preview", "kimi-k27.1"]) {
       assert.equal(getCategoryModelCalibration("deep", model), "kimi-family-extension", model)
@@ -458,7 +463,10 @@ test("category extension seam selects model families, ignores unsupported keys, 
       assert.equal(getCategoryModelCalibration("deep", model), "kimi-k31-extension", model)
     }
     assert.equal(getCategoryModelCalibration("deep", "gpt-6-kimi-k3.1"), "generic-gpt-extension")
-    assert.equal(getCategoryModelCalibration("deep", "auto-swe/2/high-gpt-6"), "swe-extension")
+    for (const model of ["auto-swe/2/high-gpt-6", "swe-20-gpt-6"]) {
+      assert.equal(getCategoryModelCalibration("deep", model), "swe-extension", model)
+    }
+    assert.equal(getCategoryModelCalibration("deep", "swe-1-gpt-6"), "")
     assert.equal(getCategoryModelCalibration("deep", "gemini-4-pro-gpt-6-codex"), "gemini-extension")
     assert.equal(getCategoryModelCalibration("deep", "unknown/model"), "")
     writeFileSync(join(root, "v1", "category", "deep.md"), "replacement-role")

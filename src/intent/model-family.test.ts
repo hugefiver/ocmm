@@ -265,10 +265,10 @@ test("Kimi prompt aliases leave reasoning identity and effort-family matching un
 })
 
 test("Gemini 4 prompt matching respects numeric boundaries across wrappers", () => {
-  for (const modelID of ["gemini-4", "gemini-4-argon", "GEMINI-4.1-PRO", "google/gemini-4.0-flash", "providers/google/gemini-4.2-preview", "bedrock/google.gemini-4-argon", "bedrock/us.google.gemini-4.1-pro", "prefix-gemini-4", "provider/custom.gemini-4", "gemini-4."]) {
+  for (const modelID of ["gemini-4", "gemini-4-argon", "GEMINI-4.1-PRO", "google/gemini-4.0-flash", "providers/google/gemini-4.2-preview", "bedrock/google.gemini-4-argon", "bedrock/us.google.gemini-4.1-pro", "prefix-gemini-4", "provider/custom.gemini-4", "gemini-4.", "gemini4.x-pro", "gemini5.x:latest", "gemini-5-pro", "gemini-40-pro"]) {
     assert.equal(isGemini4PromptModel(modelID), true, modelID)
   }
-  for (const modelID of ["gemini-3.1-pro", "gemini-5-pro", "gemini-40-pro", "gemini-4argon", "gemini-4.1foo", "gemini-provider/model", "google/gpt-6"]) {
+  for (const modelID of ["gemini-3.1-pro", "gemini-3-gemini-5", "gemini-4argon", "gemini-4.1foo", "gemini-5.1.2.3", "gemini-4.x.1", "gemini-5.9007199254740992", "gemini-provider/model", "google/gpt-6"]) {
     assert.equal(isGemini4PromptModel(modelID), false, modelID)
   }
 })

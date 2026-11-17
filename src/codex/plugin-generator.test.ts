@@ -489,7 +489,13 @@ test("generated TOML keeps the final model while developer instructions stay mod
   }
 
   for (const [model, expectedTags, variant] of [
+    ["openai/gpt-6.2-astra", ["outcome-execution-calibration"], "gpt"],
+    ["openai/gpt-6.2-sol", ["outcome-execution-calibration"], "gpt"],
     ["github-copilot/gemini-4-argon", ["precision-execution-calibration", "evidence-reliability-calibration"], "gemini-4"],
+    ["github-copilot/gemini-5.1-pro", ["precision-execution-calibration", "evidence-reliability-calibration"], "gemini-4"],
+    ["github-copilot/claude-opus-6.1", ["scope-economy-calibration"], "claude-opus-5"],
+    ["github-copilot/claude-fable-5.10", ["task-completion-calibration"], "claude-fable-5-2"],
+    ["github-copilot/mythos-6", ["task-completion-calibration"], "claude-fable-5-2"],
     ["github-copilot/claude-fable-5.2", ["task-completion-calibration"], "claude-fable-5-2"],
     ["github-copilot/kimi-k3.1", ["scope-and-delivery-calibration"], "kimi-k3-1"],
     ["github-copilot/kimi-k3", ["reasoning-economy-calibration"], "kimi"],
@@ -525,8 +531,9 @@ test("generated TOML keeps the final model while developer instructions stay mod
       const instructions = String(parsed.developer_instructions)
       assert.equal(parsed.model, model.slice(model.indexOf("/") + 1), sourceName)
       assert.doesNotMatch(instructions, forbiddenIdentity, sourceName)
-      for (const tag of ["precision-execution-calibration", "evidence-reliability-calibration", "scope-and-delivery-calibration", "reasoning-economy-calibration", "outcome-execution-calibration", "task-completion-calibration"]) {
-        const expected = (expectedTags as readonly string[]).includes(tag) ? 1 : 0
+      for (const tag of ["precision-execution-calibration", "evidence-reliability-calibration", "scope-and-delivery-calibration", "reasoning-economy-calibration", "outcome-execution-calibration", "task-completion-calibration", "scope-economy-calibration"]) {
+        const selected = (expectedTags as readonly string[]).includes(tag)
+        const expected = selected && (tag !== "scope-economy-calibration" || sourceName === "orchestrator") ? 1 : 0
         assert.equal(countOccurrences(instructions, `<${tag}>`), expected, `${model}/${sourceName}/${tag}`)
       }
       if (variant === "kimi-k3-1") {
@@ -698,6 +705,8 @@ test("Codex non-default final models select only their matching calibration", as
     ["github-copilot/kimi-k3-kimi-k3.1", ["default", "kimi"]],
     ["github-copilot/gpt-6-kimi-k3.1", ["gpt"]],
     ["github-copilot/swe-2-high", ["default", "swe-2"]],
+    ["github-copilot/swe-3.1-high", ["default", "swe-2"]],
+    ["github-copilot/swe-1-swe-20", ["default"]],
   ] as const) {
     const agents = await buildCodexAgents({
       config: {

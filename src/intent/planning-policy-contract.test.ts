@@ -10,7 +10,7 @@ import { loadAllPrompts } from "./prompt-loader.ts"
 
 test("planning role composition orders and deduplicates synthetic model layers", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-planning-composition-"))
-  const variants = ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi", "kimi-k3-1", "gemini-4", "swe-2"]
+  const variants = ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "claude-fable-5-2", "kimi", "kimi-k3-1", "gemini-4", "swe-2"]
   const roles = ["orchestrator", "planner", "plan-critic"]
   const marker = (area: string, name: string) => `[fixture:${area}:${name}]`
   try {
@@ -34,6 +34,10 @@ test("planning role composition orders and deduplicates synthetic model layers",
         ["anthropic/claude-opus-5", "claude-opus-5", ""],
         ["google/gemini-3-pro", "gemini", ""],
         ["google/gemini-4-argon", "gemini", "gemini-4"],
+        ["openai/gpt-6.2-astra", "gpt", "gpt"], ["openai/gpt-6.2-sol", "gpt", "gpt"],
+        ["google/gemini-5-pro", "gemini", "gemini-4"], ["anthropic/opus6.1", "claude-opus-5", ""],
+        ["anthropic/claude-fable-5.10", "default", "claude-fable-5-2"],
+        ["gateway/mythos-6-gpt-6", "default", "claude-fable-5-2"],
         ["zhipu/glm-5.1", "glm", ""],
         ["moonshot/kimi-k2.8", "default", "kimi"],
         ["moonshot/kimi-k3.1", "default", "kimi-k3-1"],

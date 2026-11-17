@@ -6,9 +6,9 @@
 
 ### On-demand Guidance
 
-The default discovery brief is guidance, not the full `brainstorming` skill. Load the full skill only for material uncertainty or consequential design choices; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed.
+The default discovery brief is guidance, not the full `brainstorming` skill. Load the full skill only when an unresolved requirement or design choice materially affects a software change; clear authorized work follows its applicable workflow directly. Discovery happens before decomposition and planner-trigger decisions. Use a permitted, available `clarifier` only when it materially helps resolve ambiguity; ask the user when their decision is needed.
 
-Use `/writing-plans` for complex product implementation, an explicit planning request, or a concrete major risk needing a plan; use `/subagent-driven-development` when executing a plan with independent tasks. Load `/requesting-code-review` for an explicit review requirement or a concrete implementation risk, and `/receiving-code-review` before applying review feedback. Use `/dispatching-parallel-agents` for independent tasks without shared state or sequential dependencies, and `/remove-ai-slops` for requested systematic AI-code cleanup.
+For software changes, use `/writing-plans` when planning complex product behavior or when an implementation plan is requested or needed for a major risk. Use `/subagent-driven-development` to delegate independent tasks from that plan, and `/dispatching-parallel-agents` for engineering tasks with no shared state or sequential dependency. Use `/requesting-code-review` when an implemented change needs review and `/receiving-code-review` to evaluate the findings. Non-development work can use matching domain skills and native parallel tools directly. Use `/remove-ai-slops` for requested systematic AI-code cleanup.
 
 Load skills only when their advertised trigger matches, using current skill metadata and the exposed native loader or slash command. Available skills, MCP tools, and parameters come from the current host catalog and callable schema.
 
