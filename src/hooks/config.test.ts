@@ -1363,7 +1363,7 @@ test("prompt-only calibrations reach roles and categories without changing selec
       writeFileSync(join(root, "v1", "agents", `${role}.md`), `[role:${role}]`)
     }
     writeFileSync(join(root, "v1", "category", "coding.md"), "[role:coding]")
-    for (const variant of ["planner", "default", "gpt", "claude-opus-5", "gemini", "kimi", "kimi-k3-1", "gemini-4"]) {
+    for (const variant of ["planner", "default", "gpt", "claude-opus-5", "gemini", "kimi", "kimi-k3-1", "gemini-4", "claude-fable-5-2"]) {
       writeFileSync(join(root, "v1", "deepwork", `${variant}.md`), `[layer:${variant}]`)
     }
     loadAllPrompts(root, "v1")
@@ -1385,6 +1385,8 @@ test("prompt-only calibrations reach roles and categories without changing selec
       ["provider/us.google.gemini-4.1-pro", "gemini-4"],
       ["google/gemini-3.1-pro", ""], ["google/gemini-5-pro", ""], ["google/gemini-40-pro", ""],
       ["provider-kimi/unrelated", ""],
+      ["anthropic/claude-fable-5-2", "claude-fable-5-2"],
+      ["claude-mythos-5-2/unrelated", ""],
     ]) {
       const configured = {
         ...defaultConfig(),
@@ -1406,7 +1408,7 @@ test("prompt-only calibrations reach roles and categories without changing selec
         const prompt = String(entry.prompt)
         assert.equal(countText(prompt, `[role:${name}]`), 1, `${model}/${name}: role preserved`)
         assert.equal(countText(prompt, "<ocmm-workflow-boundaries>"), 1, `${model}/${name}: shared boundary once`)
-        for (const candidate of ["kimi", "kimi-k3-1", "gemini-4"]) {
+        for (const candidate of ["kimi", "kimi-k3-1", "gemini-4", "claude-fable-5-2"]) {
           assert.equal(countText(prompt, `[layer:${candidate}]`), candidate === layer ? 1 : 0, `${model}/${name}/${candidate}`)
         }
         if (layer === "kimi" || layer === "kimi-k3-1") {

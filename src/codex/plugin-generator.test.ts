@@ -490,6 +490,7 @@ test("generated TOML keeps the final model while developer instructions stay mod
 
   for (const [model, expectedTags, variant] of [
     ["github-copilot/gemini-4-argon", ["precision-execution-calibration", "evidence-reliability-calibration"], "gemini-4"],
+    ["github-copilot/claude-fable-5.2", ["task-completion-calibration"], "claude-fable-5-2"],
     ["github-copilot/kimi-k3.1", ["scope-and-delivery-calibration"], "kimi-k3-1"],
     ["github-copilot/kimi-k3", ["reasoning-economy-calibration"], "kimi"],
   ] as const) {
@@ -524,7 +525,7 @@ test("generated TOML keeps the final model while developer instructions stay mod
       const instructions = String(parsed.developer_instructions)
       assert.equal(parsed.model, model.slice(model.indexOf("/") + 1), sourceName)
       assert.doesNotMatch(instructions, forbiddenIdentity, sourceName)
-      for (const tag of ["precision-execution-calibration", "evidence-reliability-calibration", "scope-and-delivery-calibration", "reasoning-economy-calibration", "outcome-execution-calibration"]) {
+      for (const tag of ["precision-execution-calibration", "evidence-reliability-calibration", "scope-and-delivery-calibration", "reasoning-economy-calibration", "outcome-execution-calibration", "task-completion-calibration"]) {
         const expected = (expectedTags as readonly string[]).includes(tag) ? 1 : 0
         assert.equal(countOccurrences(instructions, `<${tag}>`), expected, `${model}/${sourceName}/${tag}`)
       }

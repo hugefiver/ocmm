@@ -55,7 +55,7 @@ function seriesKind(series: string | undefined): "gpt" | "claude" | undefined {
 }
 
 /** Semantic facts for the first identifier in a complete model field, never a guessed route. */
-export function recognizeModelName(modelID: string, promptKimiAliases = false): {
+export function recognizeModelName(modelID: string, promptAliases = false): {
   kind: ModelKind
   generation?: number
   version: Version | null
@@ -66,6 +66,7 @@ export function recognizeModelName(modelID: string, promptKimiAliases = false): 
   mini: boolean
   opus: boolean
   fable: boolean
+  fable52: boolean
   kimiAlias?: number
   kimi27: boolean
 } | null {
@@ -75,7 +76,7 @@ export function recognizeModelName(modelID: string, promptKimiAliases = false): 
   for (const match of modelID.toLowerCase().matchAll(/[^-_.\s/@:]+/g)) {
     let word = match[0]
     let position = match.index
-    const kimiVersion = promptKimiAliases ? word.match(/^k(\d+)(?:p(\d+))?$/) : null
+    const kimiVersion = promptAliases ? word.match(/^k(\d+)(?:p(\d+))?$/) : null
     const legacyK27 = word === "k27" && tokens.at(-1) === "kimi"
     if (kimiVersion && Number(kimiVersion[1]) >= 3 && !legacyK27) {
       tokens.push("k", kimiVersion[1]!)
@@ -139,8 +140,9 @@ export function recognizeModelName(modelID: string, promptKimiAliases = false): 
       case "codex": case "claude": case "gemini": case "kimi":
       case "minimax": case "glm": case "deepseek": return familyToken
       case "fable": return "claude"
+      case "mythos": return promptAliases ? "claude" : undefined
       case "swe": return tokens[index + 1] === "2" ? "swe-2" : undefined
-      case "k": return promptKimiAliases && (index === 0 || separator(index).includes("/"))
+      case "k": return promptAliases && (index === 0 || separator(index).includes("/"))
         && connected(index + 1) && separator(index + 1) === ""
         && versionAt(index + 1).version !== null ? "kimi" : undefined
       case "k2": return /^p[5678]$/.test(tokens[index + 1] ?? "") ? "kimi" : undefined
@@ -157,7 +159,7 @@ export function recognizeModelName(modelID: string, promptKimiAliases = false): 
       const kind = explicit ?? series!
       let versionStart = index + 1
       let localSeries = series ? tokens[index] : undefined
-      if (promptKimiAliases && kind === "kimi" && tokens[versionStart] === "k" && connected(versionStart)) {
+      if (promptAliases && kind === "kimi" && tokens[versionStart] === "k" && connected(versionStart)) {
         versionStart += 1
       }
       const fable = kind === "claude" && (tokens[index] === "fable" || tokens[index + 1] === "fable")
@@ -222,6 +224,7 @@ export function recognizeModelName(modelID: string, promptKimiAliases = false): 
   return {
     kind, generation, version, versionParts, lane, series: series as GptLane | ClaudeSeries | undefined, codex,
     mini: attributes.includes("mini"), opus, fable, kimiAlias, kimi27,
+    fable52: /^(?:claude-)?(?:fable|mythos)-5[.-]2(?=$|[-@:/\s])/i.test(modelID.slice(positions[start])),
   }
 }
 

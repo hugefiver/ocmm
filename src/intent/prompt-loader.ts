@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,claude-opus-5,gemini,gemini-4,glm,codex,planner,kimi,kimi-k3-1,swe-2}.md
+ *     deepwork/{default,gpt,claude-opus-5,claude-fable-5-2,gemini,gemini-4,glm,codex,planner,kimi,kimi-k3-1,swe-2}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting,cross-cutting}.md
  *
@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isPlannerAgent } from "./detectors.ts"
-import { classifyModelFamily, isClaudeOpus5Model, isGemini4PromptModel, isKimiK31OrLaterPromptModel, isKimiPromptModel, isSwe2Model, type ModelFamily } from "./model-family.ts"
+import { classifyModelFamily, recognizeModelName, isClaudeOpus5Model, isGemini4PromptModel, isKimiK31OrLaterPromptModel, isKimiPromptModel, isSwe2Model, type ModelFamily } from "./model-family.ts"
 import { log } from "../shared/logger.ts"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -27,7 +27,7 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 export type Workflow = "v1" | "codex"
 
 type DeepworkVariant = "default" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner" | ModelCalibrationVariant
-export type ModelCalibrationVariant = "gpt" | "kimi" | "kimi-k3-1" | "gemini-4" | "swe-2"
+export type ModelCalibrationVariant = "gpt" | "kimi" | "kimi-k3-1" | "gemini-4" | "swe-2" | "claude-fable-5-2"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -42,7 +42,7 @@ type CategoryName =
   | "documenting"
   | "cross-cutting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "kimi-k3-1", "gemini-4", "swe-2"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "kimi-k3-1", "gemini-4", "swe-2", "claude-fable-5-2"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -149,6 +149,7 @@ export function pickModelBaseCalibrationVariant(
 export function pickModelCalibrationVariants(
   modelID: string,
 ): ModelCalibrationVariant[] {
+  if (recognizeModelName(modelID, true)?.fable52) return ["claude-fable-5-2"]
   if (isKimiK31OrLaterPromptModel(modelID)) return ["kimi-k3-1"]
   if (isKimiPromptModel(modelID)) return ["kimi"]
   const family = classifyModelFamily({ modelID })

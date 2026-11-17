@@ -17,7 +17,7 @@ import {
   pickModelCalibrationVariants,
 } from "./prompt-loader.ts"
 
-const DEEPWORK_VARIANTS = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "kimi-k3-1", "gemini-4", "swe-2"] as const
+const DEEPWORK_VARIANTS = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "kimi-k3-1", "gemini-4", "swe-2", "claude-fable-5-2"] as const
 
 function makeTempRoot(workflow: "v1" | "codex"): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-prompts-"))
@@ -401,6 +401,11 @@ test("additive model calibration selector chooses only the final model calibrati
     ["zhipu/glm-5.2", []],
     ["google/gemini-3.1-pro", []],
     ["anthropic/claude-opus-5", []],
+    ["us.anthropic.claude-fable-5-2-20261109", ["claude-fable-5-2"]],
+    ["claude-mythos-5.2@default", ["claude-fable-5-2"]],
+    ["mythos-5-2", ["claude-fable-5-2"]],
+    ["claude-fable-5-20", []], ["claude-fable-5-1", []],
+    ["claude-opus-5-claude-fable-5-2", []],
   ]
   for (const [modelID, expected] of cases) {
     assert.deepEqual(pickModelCalibrationVariants(modelID), expected, modelID)
