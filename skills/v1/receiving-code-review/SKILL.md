@@ -55,6 +55,8 @@ Check whether the suggestion:
 
 Push back with code, requirements, test results, or protocol/platform evidence when it is wrong. If evidence is unavailable and the decision is material, state the gap and escalate rather than guessing.
 
+Reject proposed re-reads or heavy content-integrity scans before writing back confirmed business state, and don't infer a change to internal, external, or database state without evidence. A valid correction keeps transactions short, holds no database, table, or row locks across slow processing or external waits, and uses the narrowest atomic operation for a real external constraint or concurrent-write contract.
+
 ## Product Findings vs Evidence Findings
 
 - **Product defect:** Correct the implementation with the smallest change that preserves approved intent.

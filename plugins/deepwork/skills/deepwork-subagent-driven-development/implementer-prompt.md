@@ -63,6 +63,13 @@ Task tool (general-purpose):
     material-relevance rule and rerun only affected or missing checks. Required safety,
     release, pre-commit, and explicit user checks remain binding.
 
+    Don't assume internal, external, or database state changed without evidence.
+    Keep transactions short and never hold database, table, or row locks during
+    slow processing or external waits. Write back confirmed business state without
+    another database read or a heavy content-integrity scan. Meet real external
+    constraints and concurrent-write contracts with the narrowest atomic operation
+    that satisfies them.
+
     There is no universal RED gate, transcript, scenario count, per-task reviewer,
     or commit requirement. Verification must demonstrate the relevant behavior or
     invariant rather than merely report that a command ran.

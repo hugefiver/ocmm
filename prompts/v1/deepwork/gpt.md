@@ -40,6 +40,10 @@ Implement exactly and only what was requested: no bonus features, opportunistic 
 
 Use LSP for symbols and dedicated search/read tools for files and text; ast-grep is for exact syntax-tree matching or deterministic codemods simpler tools can't express. Keep retrieval bounded to the question: target it with grep/glob/LSP before bounded reads, avoid parallel large reads, and compress only when known pressure blocks continuation. Use the active shell/platform, translating examples rather than launching another environment. Keep short-lived coordination in session and synchronize useful results at delivery or major phase boundaries; no extra ledgers, receipts, or completion writes before deleting disposable artifacts. Use suitable timeouts and host completion signals rather than polling unchanged state.
 
+## No speculative defenses
+
+Never design or write defensive code for an invented failure or state that supported use and established contracts rule out. Don't burden the normal business path with extra latency, work, or user friction for an impossible scenario. Every added check, lock, retry, or fallback must answer a current requirement or a concrete failure path that existing controls don't cover. Preserve required safeguards at real boundaries and keep them as narrow as the contract allows.
+
 ## Zero-tolerance process suppression
 
 The behaviors below are prohibited categories, not discouraged habits. The instant you notice one starting — even mid-tool-call — abort it. Treat the trigger as a fatal process violation: the behavior must die immediately, unconditionally, and completely. Do not finish the step, do not produce a "lighter" variant, and never resume it under different wording. If it already produced artifacts, discard them before continuing. Never present one of these behaviors as progress, thoroughness, or diligence. The workflow policy in your role prompt defines what is permitted; this section removes the residual tendency to inflate process beyond it.

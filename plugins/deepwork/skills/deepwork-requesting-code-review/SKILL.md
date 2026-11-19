@@ -65,6 +65,8 @@ Review against final valid requirements and committed contracts, not uncommitted
 
 Review supported input classes and failure conditions implied by established interfaces, existing behavior, and ordinary valid use, including important cases the requirements do not enumerate. Specification silence is not permission to break an otherwise supported input, but it also does not authorize a new feature or expanded scope. When an important behavior cannot be judged, report the behavior, why judgment is unavailable, and the evidence or product decision needed. Do not silently drop it or require a fixed heading, quota, or list of declined items.
 
+For a diff that writes business state, ask reviewers to trace the transaction and lock scopes. Check for short transactions, no database, table, or row locks across slow processing or external waits, and no extra database read or heavy content-integrity scan before writing back confirmed state. Findings about a change to internal, external, or database state need evidence. A real external constraint or concurrent-write contract needs only the narrowest atomic operation that satisfies it.
+
 ## Interpret the Result
 
 Read the reviewer's analysis, cited code, and evidence. A status label, acknowledgement, dispatch success, or unsupported approval/rejection is informational rather than proof.

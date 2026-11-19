@@ -18,6 +18,8 @@ Future flexibility alone is not a requirement. Do not add configuration switches
 
 For a proposed validation, retry, fallback, exception handler, or recovery layer, identify what it detects and how it changes rejection, recovery, or diagnosis. Validate at genuine trust boundaries; use established internal guarantees instead of repeatedly defending against impossible states.
 
+Don't assume internal, external, or database state changed without evidence. Once business state is confirmed, write it back without another database read or a heavy content-integrity scan. Keep transactions short; never hold database, table, or row locks across slow processing or external waits. Meet real external constraints and concurrent-write contracts with the narrowest atomic operation that satisfies them.
+
 Keep the safeguards the feature relies on, such as authorization at a protected operation or validation at a public input. For ordinary failures, prefer the project's standard error path. Add a fallback only when it gives the user a correct, useful result.
 
 Do not turn a failed read into a successful empty result, swallow an error behind a plausible default, or retry a side effect without the required safety guarantees. Propagate failures or handle them according to the existing contract. Fix incorrect types rather than suppressing them with `as any`, `@ts-ignore`, or `@ts-expect-error`.

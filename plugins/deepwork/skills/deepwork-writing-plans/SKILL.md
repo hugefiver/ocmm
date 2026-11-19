@@ -56,6 +56,8 @@ A plan records decisions an unfamiliar executor cannot safely infer. When needed
 
 Consider valid input classes and failure conditions implied by the approved interfaces, established behavior, and ordinary supported use even when the requirements do not enumerate each one. Assign meaningful regression evidence to the task that owns the behavior. If an important condition cannot yet be exercised or judged, identify the condition, why it matters, and the missing evidence or decision as review focus. Do not invent new features from specification silence, require a fixed section or count, or turn every hypothetical edge case into scope.
 
+When a task writes business state, ground any claimed internal, external, or database state change in evidence. Order slow processing and external waits outside short transactions; never hold database, table, or row locks across that work. Plan write-back from confirmed business state without a second database read or a heavy content-integrity scan. Where an external constraint or concurrent-write contract requires an atomic operation, specify the narrowest one that enforces it.
+
 ## Waves and Tasks
 
 Organize work around outcomes and dependency order.

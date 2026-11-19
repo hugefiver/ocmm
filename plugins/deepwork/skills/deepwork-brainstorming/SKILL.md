@@ -82,6 +82,8 @@ Present alternatives only when there is a real decision with meaningful trade-of
 
 Start with what the user needs to accomplish in normal use. Choose a familiar design that delivers that outcome. Where the business contract tolerates temporary inconsistency, allow independent operations to proceed and reconcile their results instead of serializing the whole workflow. Match safeguards to the system's actual exposure and the consequences of failure; reserve high-assurance designs for an explicit requirement or a credible risk that ordinary controls do not cover.
 
+Base the design on established facts about internal, external, and database state. Don't design around an unsupported state change. For write-back, reuse confirmed business state instead of re-reading the database or running a heavy content-integrity scan. Design short transactions that never hold database, table, or row locks during slow processing or external waits. Use the narrowest atomic operation that satisfies a real external constraint or concurrent-write contract.
+
 ## Outcome-Oriented Design
 
 Scale the design artifact to the work within the product-spec and temporary-plan boundaries above. A useful design makes the following discoverable without requiring fixed sections or order:
