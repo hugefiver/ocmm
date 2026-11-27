@@ -67,7 +67,6 @@ function delegationContract(agentMap: Record<string, unknown>, name: string): st
 
 const COMPRESSION_POLICY_TAG = "ocmm-subagent-compression-policy"
 const REVIEW_SESSION_POLICY_TAG = "ocmm-review-session-efficiency-policy"
-const CLAUDE_OPUS_5_MARKER = "<scope-economy-calibration>"
 const KIMI_MARKER = "<reasoning-economy-calibration>"
 const SWE_2_MARKER = "<decisive-execution-calibration>"
 
@@ -360,6 +359,35 @@ test("explore compatibility alias composes its prompt from the final model and p
   assert.equal(countText(inheritedPrompt, "<ocmm-locale-guidance>"), 1)
   assert.equal(countText(inheritedPrompt, "<precision-execution-calibration>"), 0)
   assert.equal(agentPermission(sourceCustomTarget.agent, "explore").task, "deny")
+})
+
+test("OpenCode prompt selection strips one provider and compatibility aliases keep their model source", async () => {
+  loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+  const model = "github-copilot/grok-4/gpt-6"
+  const grok = getDeepworkPrompt("grok").trim()
+  assert.ok(grok)
+  const configured = {
+    ...defaultConfig(),
+    agents: { reviewer: { model }, "code-search": { model } },
+    categories: { coding: { model } },
+  }
+  const inherited: ConfigTarget = { agent: {} }
+  await createConfigHandler({ getConfig: () => configured })(inherited, undefined)
+  for (const name of ["reviewer", "coding", "code-search", "explore"]) {
+    const entry = inherited.agent[name] as Record<string, unknown>
+    assert.equal(entry.model, model, name)
+    assert.equal(countText(String(entry.prompt), grok), 1, `${name}: Grok layer`)
+    assert.equal(countText(String(entry.prompt), gptCalibration()), 0, `${name}: no trailing GPT layer`)
+  }
+
+  const explicit: ConfigTarget = { agent: {} }
+  await createConfigHandler({
+    getConfig: () => ({ ...defaultConfig(), agents: { explore: { model } } }),
+  })(explicit, undefined)
+  assert.notEqual((explicit.agent["code-search"] as Record<string, unknown>).model, model)
+  assert.equal((explicit.agent.explore as Record<string, unknown>).model, model)
+  assert.equal(countText(String((explicit.agent.explore as Record<string, unknown>).prompt), grok), 1)
+  assert.equal(countText(String((explicit.agent.explore as Record<string, unknown>).prompt), gptCalibration()), 0)
 })
 
 test("config applies the exact flat-workflow task permission graph", async () => {
@@ -1363,7 +1391,7 @@ test("prompt-only calibrations reach roles and categories without changing selec
       writeFileSync(join(root, "v1", "agents", `${role}.md`), `[role:${role}]`)
     }
     writeFileSync(join(root, "v1", "category", "coding.md"), "[role:coding]")
-    for (const variant of ["planner", "default", "gpt", "claude-opus-5", "gemini", "kimi", "kimi-k3-1", "gemini-4", "claude-fable-5-2"]) {
+    for (const variant of ["default", "gpt", "claude", "grok", "deepseek", "gemini", "gemini-4", "glm", "codex", "planner", "kimi", "kimi-k3-1", "swe-2"]) {
       writeFileSync(join(root, "v1", "deepwork", `${variant}.md`), `[layer:${variant}]`)
     }
     loadAllPrompts(root, "v1")
@@ -1386,9 +1414,13 @@ test("prompt-only calibrations reach roles and categories without changing selec
       ["google/gemini-3.1-pro", ""], ["google/gemini-5-pro", "gemini-4"], ["google/gemini-40-pro", "gemini-4"],
       ["google/gemini-5.2foo", ""], ["google/gemini-3-gemini-5", ""],
       ["provider-kimi/unrelated", ""],
-      ["anthropic/claude-fable-5-2", "claude-fable-5-2"], ["anthropic/claude-fable-5.12", "claude-fable-5-2"],
-      ["gateway/mythos-6.1", "claude-fable-5-2"], ["anthropic/claude-mythos-5.1-fable-6", ""],
+      ["anthropic/claude", "claude"], ["anthropic/claude-opus-5", "claude"],
+      ["anthropic/claude-sonnet-4-6", "claude"], ["anthropic/claude-haiku-4-5", "claude"],
+      ["anthropic/claude-fable-5-2", "claude"], ["anthropic/claude-fable-5.12", "claude"],
+      ["gateway/mythos-6.1", "claude"], ["anthropic/claude-mythos-5.1-fable-6", "claude"],
       ["claude-mythos-5-2/unrelated", ""],
+      ["xai/grok-4", "grok"], ["github-copilot/grok-4-gpt-6", "grok"],
+      ["deepseek/deepseek-v4-pro", "deepseek"], ["deepseek/deepseek-flash", "deepseek"],
     ]) {
       const configured = {
         ...defaultConfig(),
@@ -1410,12 +1442,12 @@ test("prompt-only calibrations reach roles and categories without changing selec
         const prompt = String(entry.prompt)
         assert.equal(countText(prompt, `[role:${name}]`), 1, `${model}/${name}: role preserved`)
         assert.equal(countText(prompt, "<ocmm-workflow-boundaries>"), 1, `${model}/${name}: shared boundary once`)
-        for (const candidate of ["kimi", "kimi-k3-1", "gemini-4", "claude-fable-5-2"]) {
+        for (const candidate of ["claude", "grok", "deepseek", "kimi", "kimi-k3-1", "gemini-4"]) {
           assert.equal(countText(prompt, `[layer:${candidate}]`), candidate === layer ? 1 : 0, `${model}/${name}/${candidate}`)
         }
-        if (layer === "kimi" || layer === "kimi-k3-1") {
+        if (["claude", "grok", "deepseek", "kimi", "kimi-k3-1"].includes(layer)) {
           assert.equal(countText(prompt, "[layer:default]"), 1, `${model}/${name}: default base`)
-          for (const candidate of ["gpt", "gemini", "claude-opus-5"]) {
+          for (const candidate of ["gpt", "gemini"]) {
             assert.equal(countText(prompt, `[layer:${candidate}]`), 0, `${model}/${name}: no later identity base`)
           }
         }
@@ -1508,46 +1540,14 @@ test("shell safety preserves existing prompts and remains idempotent across conf
   }
 })
 
-test("v1 composes default plus Opus 5 exactly once for orchestrator only", async () => {
+test("v1 composes default plus Claude exactly once for every agent", async () => {
   const promptsRoot = join(process.cwd(), "prompts")
-  const opus5Agents = Object.fromEntries(
-    BUILTIN_AGENTS.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
-  )
   loadAllPrompts(promptsRoot, "v1")
-  const configured = {
-    ...defaultConfig(),
-    workflow: "v1" as const,
-    agents: opus5Agents,
-  }
-  const target: ConfigTarget = {
-    agent: {},
-    provider: { anthropic: { models: { "claude-opus-5": {} } } },
-  }
-  await createConfigHandler({ getConfig: () => configured })(target, undefined)
-
-  const orchestrator = String((target.agent.orchestrator as Record<string, unknown>).prompt)
-  assert.match(orchestrator, /Agent Role: orchestrator/)
-  assert.match(orchestrator, /DEEPWORK MODE ENABLED!/, "default base doctrine")
-  assert.equal(countText(orchestrator, "DEEPWORK MODE ENABLED!"), 1, "default base")
-  assert.equal(countText(orchestrator, CLAUDE_OPUS_5_MARKER), 1, "orchestrator marker")
-  assert.ok(orchestrator.indexOf("Agent Role: orchestrator") < orchestrator.indexOf(CLAUDE_OPUS_5_MARKER))
-
-  for (const { name } of BUILTIN_AGENTS) {
-    if (name === "orchestrator") continue
-    const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
-    assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, name)
-  }
-  assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/)
-})
-
-test("v1 assembles Opus 5+ aliases from selected models without leaking the layer", async () => {
-  loadAllPrompts(join(process.cwd(), "prompts"), "v1")
+  const claude = getDeepworkPrompt("claude").trim()
+  assert.ok(claude)
   for (const model of [
-    "claude-opus-5-5@default",
-    "amazon-bedrock/global.anthropic.claude-opus-5-5",
-    "claude-opus-5-5@other",
-    "amazon-bedrock/global.openai.claude-opus-5-5",
-    "claude-opus-5.0", "claude-opus-5.50", "claude-opus-50", "anthropic/claude-opus-6.1",
+    "anthropic/claude", "anthropic/claude-opus-5", "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-haiku-4-5", "anthropic/claude-fable-5-2", "gateway/mythos-6",
   ]) {
     const configured = {
       ...defaultConfig(),
@@ -1559,68 +1559,12 @@ test("v1 assembles Opus 5+ aliases from selected models without leaking the laye
 
     for (const { name } of BUILTIN_AGENTS) {
       const entry = target.agent[name] as Record<string, unknown>
-      assert.equal(entry.model, model, `${name}: selected model`)
+      assert.equal(entry.model, model, `${model}/${name}: selected model`)
       const prompt = String(entry.prompt)
-      assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), name === "orchestrator" ? 1 : 0, `${model}/${name}`)
-      if (name === "orchestrator") {
-        assert.equal(countText(prompt, "DEEPWORK MODE ENABLED!"), 1, `${model}: default base`)
-        assert.ok(prompt.indexOf("Agent Role: orchestrator") < prompt.indexOf(CLAUDE_OPUS_5_MARKER), model)
-      }
-    }
-    for (const { name } of BUILTIN_CATEGORIES.filter(({ optIn }) => !optIn)) {
-      assert.equal(countText(String((target.agent[name] as Record<string, unknown>).prompt), CLAUDE_OPUS_5_MARKER), 0, `${model}/${name}`)
+      assert.equal(countText(prompt, "DEEPWORK MODE ENABLED!"), 1, `${model}/${name}: default base`)
+      assert.equal(countText(prompt, claude), 1, `${model}/${name}: common Claude layer`)
     }
     assert.match(String((target.agent.planner as Record<string, unknown>).prompt), /Deepwork Planner Injection/, model)
-  }
-
-  for (const model of ["claude-opus-4.9-opus-6", "claude-opus-6.1foo", "claude-sonnet-6-opus-6"]) {
-    const configured = { ...defaultConfig(), workflow: "v1" as const, agents: { orchestrator: { model } } }
-    const target: ConfigTarget = { agent: {} }
-    await createConfigHandler({ getConfig: () => configured })(target, undefined)
-    assert.equal((target.agent.orchestrator as Record<string, unknown>).model, model)
-    assert.equal(countText(String((target.agent.orchestrator as Record<string, unknown>).prompt), CLAUDE_OPUS_5_MARKER), 0, model)
-  }
-})
-
-test("Codex applies the selected scope calibration only to the orchestrator identity", async () => {
-  const promptsRoot = join(process.cwd(), "prompts")
-  const opus5Agents = Object.fromEntries(
-    BUILTIN_AGENTS.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
-  )
-  loadAllPrompts(promptsRoot, "codex")
-
-  try {
-    const configured = {
-      ...defaultConfig(),
-      workflow: "codex" as const,
-      agents: {
-        ...opus5Agents,
-        reviewer: { model: "anthropic/claude-opus-5", variants: { high: "max" as const } },
-        planner: { model: "anthropic/claude-opus-5", variants: { high: "max" as const } },
-      },
-    }
-    const target: ConfigTarget = {
-      agent: {},
-      provider: { anthropic: { models: { "claude-opus-5": {} } } },
-    }
-    await createConfigHandler({ getConfig: () => configured })(target, undefined)
-
-    for (const [name, raw] of Object.entries(target.agent)) {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue
-      const prompt = String((raw as Record<string, unknown>).prompt ?? "")
-      if (!prompt) continue
-      assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), name === "orchestrator" ? 1 : 0, name)
-    }
-
-    for (const name of [...BUILTIN_AGENTS.map(({ name: agentName }) => agentName), "reviewer-high", "planner-high"]) {
-      const prompt = String((target.agent[name] as Record<string, unknown>).prompt)
-      assert.equal(countText(prompt, gptCalibration()), 0, `${name}: unrelated calibration`)
-      assert.equal(countText(prompt, "# Codex Tool Compatibility"), 1, `${name}: adapter base`)
-      assert.equal(countText(prompt, "<deepwork-mode>"), 1, `${name}: wrapper`)
-      assert.equal(countText(prompt, "DEEPWORK MODE ENABLED!"), 1, `${name}: activation`)
-    }
-  } finally {
-    loadAllPrompts(promptsRoot, "v1")
   }
 })
 

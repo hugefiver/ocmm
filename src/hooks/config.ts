@@ -424,19 +424,14 @@ function deepworkPromptForAgent(
     override?.requirement?.fallbackChain?.length
       ? override.requirement.fallbackChain
       : agent.requirement.fallbackChain
-  // Selected values are full routes; requirement entries already contain model fields.
-  const prefModel = selectedModel !== undefined
-    ? selectedModel.slice(selectedModel.indexOf("/") + 1)
-    : chain[0]?.model ?? ""
+  const prefModel = selectedModel ?? chain[0]?.model ?? ""
   const modelCalibrations = pickModelCalibrationVariants(prefModel)
     .map((variant) => getDeepworkPrompt(variant))
   const variant = pickDeepworkVariantForAgent({
     agentName: promptName,
     preferenceModel: prefModel,
   })
-  const base = variant === "claude-opus-5"
-    ? joinPromptLayers([getDeepworkPrompt("default"), getDeepworkPrompt(variant)])
-    : getDeepworkPrompt(variant)
+  const base = getDeepworkPrompt(variant)
   const plannerCalibration = variant === "planner"
     ? getDeepworkPrompt(pickModelBaseCalibrationVariant(prefModel) ?? "default")
     : ""
@@ -488,7 +483,7 @@ function promptForBuiltinCategory(
   selectedModel: string,
 ): string {
   const rolePrompt = getCategoryPrompt(categoryName).trim()
-  const modelID = selectedModel.slice(selectedModel.indexOf("/") + 1)
+  const modelID = selectedModel
   const categoryCalibration = getCategoryModelCalibration(categoryName, modelID).trim()
   const modelBase = pickModelBaseCalibrationVariant(modelID) ?? "default"
   const modelCalibrations = pickModelCalibrationVariants(modelID)
@@ -552,6 +547,7 @@ type RouteBuild = {
 
 type PrimarySelection = {
   model: string
+  promptModel?: string
   source: PrimarySource
 }
 
@@ -606,10 +602,14 @@ function selectRoutePrimary(args: {
   return { model: fmtModel(args.requirement.fallbackChain[0]!), source: "builtin-requirement" }
 }
 
+function promptModelFromRoute(model: string): string {
+  return model.slice(model.indexOf("/") + 1)
+}
+
 function selectRegistrationPrimary(
   handler: ConfigHandlerBaseArgs,
   input: Parameters<typeof selectRoutePrimary>[0],
-): PrimarySelection {
+): PrimarySelection & { promptModel: string } {
   const primary = selectRoutePrimary(input)
   const selectedModel = handler.selectRegistrationModel?.({
     agentName: input.agentName,
@@ -617,7 +617,9 @@ function selectRegistrationPrimary(
     requirementSource: input.requirementSource,
     selectedModel: primary.model,
   })
-  return selectedModel ? { ...primary, model: selectedModel } : primary
+  return selectedModel
+    ? { ...primary, model: selectedModel, promptModel: selectedModel }
+    : { ...primary, promptModel: promptModelFromRoute(primary.model) }
 }
 
 function hasExplicitRouteSelection(cfg: OcmmConfig, name: string): boolean {
@@ -783,6 +785,12 @@ export function createConfigHandler(
     }
 
     const disabled = new Set(cfg.disabledAgents ?? [])
+    const primarySelections = new Map<string, PrimarySelection>()
+    const selectPrimary = (input: Parameters<typeof selectRoutePrimary>[0]) => {
+      const primary = selectRegistrationPrimary(args, input)
+      primarySelections.set(input.agentName, primary)
+      return primary
+    }
 
     for (const [name, raw] of Object.entries(agentMap)) {
       const disabledReview = parseReviewAgentName(name) !== null && isExpandedReviewAgentDisabled(name, {
@@ -827,7 +835,7 @@ export function createConfigHandler(
       }
       const effective = resolveRouteRequirement(cfg, a.name)
       if (!effective) continue
-      const primary = selectRegistrationPrimary(args, {
+      const primary = selectPrimary({
         target,
         agentName: a.name,
         requirement: effective.requirement,
@@ -840,7 +848,7 @@ export function createConfigHandler(
           requested: true,
         }),
       })
-      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow, primary.model)
+      const prompt = promptForBuiltinAgent(a, norm, cfg.workflow, primary.promptModel)
       const mode = a.name === "orchestrator" || a.name === "builder"
         ? "primary"
         : a.name === "planner"
@@ -884,7 +892,7 @@ export function createConfigHandler(
         requirement: profile.requirement,
         source: profile.resolutionSource,
       }
-      const primary = selectRegistrationPrimary(args, {
+      const primary = selectPrimary({
         target,
         agentName: profile.name,
         requirement: effective.requirement,
@@ -899,7 +907,7 @@ export function createConfigHandler(
         catalogBeforeUserRequirement:
           effective.source === "user-config" && !profile.suppressCatalogUpgrade,
       })
-      let prompt = promptForBuiltinAgent(synthetic, { requirement: profile.requirement }, cfg.workflow, primary.model)
+      let prompt = promptForBuiltinAgent(synthetic, { requirement: profile.requirement }, cfg.workflow, primary.promptModel)
       if (profile.registration.promptAppend) prompt = `${prompt}\n\n${profile.registration.promptAppend.trim()}`
       const extras: AgentExtras = {
         mode: profile.mode,
@@ -949,7 +957,7 @@ export function createConfigHandler(
       const baseAgent = categoryAsAgent(c, effective.requirement)
       const merged: NormalizedShorthand | undefined =
         agentOverride ?? categoryOverride
-      const primary = selectRegistrationPrimary(args, {
+      const primary = selectPrimary({
         target,
         agentName: c.name,
         requirement: effective.requirement,
@@ -966,7 +974,7 @@ export function createConfigHandler(
         mode: "subagent",
         promptPrefix: buildLocaleGuidance(cfg.locale),
       }
-      const prompt = promptForBuiltinCategory(c.name, cfg.workflow, primary.model)
+      const prompt = promptForBuiltinCategory(c.name, cfg.workflow, primary.promptModel)
       if (prompt) extras.prompt = prompt
       extras.model = primary.model
       const terminalSuffix = terminalPromptSuffixFor({
@@ -1010,7 +1018,7 @@ export function createConfigHandler(
         if (!norm?.requirement?.fallbackChain?.length) continue
         const effective = resolveRouteRequirement(cfg, name)
         if (!effective) continue
-        const primary = selectRegistrationPrimary(args, {
+        const primary = selectPrimary({
           target,
           agentName: name,
           requirement: effective.requirement,
@@ -1056,7 +1064,7 @@ export function createConfigHandler(
         }
         const effective = resolveRouteRequirement(cfg, name)
         if (!effective) continue
-        const primary = selectRegistrationPrimary(args, {
+        const primary = selectPrimary({
           target,
           agentName: name,
           requirement: effective.requirement,
@@ -1106,7 +1114,9 @@ export function createConfigHandler(
       disabled,
       cfg,
       registryManaged,
+      existingModels,
       existingPrompts,
+      primarySelections,
       avoidAiSlopBrief,
       agentBriefs,
       generatedPrompts: compatAliasPrompts,
@@ -1227,7 +1237,9 @@ function registerCompatAgentAliases(args: {
   disabled: Set<string>
   cfg: OcmmConfig
   registryManaged: boolean
+  existingModels: ReadonlyMap<string, string>
   existingPrompts: ReadonlySet<string>
+  primarySelections: ReadonlyMap<string, PrimarySelection>
   avoidAiSlopBrief: string
   agentBriefs: Map<string, string>
   generatedPrompts: Map<string, string>
@@ -1261,12 +1273,16 @@ function registerCompatAgentAliases(args: {
     } else {
       const sourceAgent = BUILTIN_AGENTS.find(({ name }) => name === targetName)
       const selectedModel = typeof aliasEntry.model === "string" ? aliasEntry.model : undefined
+      const ownPromptModel = args.primarySelections.get(alias)?.promptModel
+        ?? (args.existingModels.has(alias) && selectedModel !== undefined ? promptModelFromRoute(selectedModel) : undefined)
+      const promptModel = ownPromptModel ?? args.primarySelections.get(targetName)?.promptModel
+        ?? (selectedModel !== undefined ? promptModelFromRoute(selectedModel) : undefined)
       const rolePrompt = sourceAgent
         ? promptForBuiltinAgent(
             sourceAgent,
             normalizeAgentShorthand(alias, args.cfg.agents),
             args.cfg.workflow,
-            selectedModel,
+            promptModel,
           )
         : ""
       aliasEntry.prompt = prependPromptPrefix(rolePrompt, buildLocaleGuidance(args.cfg.locale))

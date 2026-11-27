@@ -10,8 +10,8 @@ import { loadAllPrompts } from "./prompt-loader.ts"
 
 test("planning role composition orders and deduplicates synthetic model layers", async () => {
   const root = mkdtempSync(join(tmpdir(), "ocmm-planning-composition-"))
-  const variants = ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "claude-fable-5-2", "kimi", "kimi-k3-1", "gemini-4", "swe-2"]
-  const roles = ["orchestrator", "planner", "plan-critic"]
+  const variants = ["default", "gpt", "claude", "grok", "deepseek", "gemini", "gemini-4", "glm", "codex", "planner", "kimi", "kimi-k3-1", "swe-2"]
+  const roles = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
   const marker = (area: string, name: string) => `[fixture:${area}:${name}]`
   try {
     mkdirSync(join(root, "skills"))
@@ -31,13 +31,20 @@ test("planning role composition orders and deduplicates synthetic model layers",
         ["providers/openai/gpt-6-sol-fast", "gpt", "gpt"],
         ["amazon-bedrock/openai.gpt-7-preview", "gpt", "gpt"],
         ["openai/codex-mini-latest", "codex", "gpt"],
-        ["anthropic/claude-opus-5", "claude-opus-5", ""],
+        ["anthropic/claude", "default", "claude"],
+        ["anthropic/claude-opus-5", "default", "claude"],
+        ["anthropic/claude-sonnet-4-6", "default", "claude"],
+        ["anthropic/claude-haiku-4-5", "default", "claude"],
+        ["anthropic/claude-fable-5.10", "default", "claude"],
+        ["gateway/mythos-6-gpt-6", "default", "claude"],
+        ["xai/grok-4", "default", "grok"],
+        ["github-copilot/grok-4-gpt-6", "default", "grok"],
+        ["deepseek/deepseek-v4-pro", "default", "deepseek"],
+        ["deepseek/deepseek-flash", "default", "deepseek"],
         ["google/gemini-3-pro", "gemini", ""],
         ["google/gemini-4-argon", "gemini", "gemini-4"],
         ["openai/gpt-6.2-astra", "gpt", "gpt"], ["openai/gpt-6.2-sol", "gpt", "gpt"],
-        ["google/gemini-5-pro", "gemini", "gemini-4"], ["anthropic/opus6.1", "claude-opus-5", ""],
-        ["anthropic/claude-fable-5.10", "default", "claude-fable-5-2"],
-        ["gateway/mythos-6-gpt-6", "default", "claude-fable-5-2"],
+        ["google/gemini-5-pro", "gemini", "gemini-4"], ["anthropic/opus6.1", "default", "claude"],
         ["zhipu/glm-5.1", "glm", ""],
         ["moonshot/kimi-k2.8", "default", "kimi"],
         ["moonshot/kimi-k3.1", "default", "kimi-k3-1"],
@@ -50,16 +57,16 @@ test("planning role composition orders and deduplicates synthetic model layers",
         ["gateway/auto-gpt/6.1/sol", "gpt", "gpt"],
         ["gateway/auto-swe/2/high-gpt-6", "default", "swe-2"],
         ["gateway/auto-k2p8-gpt-6", "default", "kimi"],
-        ["gateway/auto-claude_opus_5_5-20261101", "claude-opus-5", ""],
+        ["gateway/auto-claude_opus_5_5-20261101", "default", "claude"],
         ["codex/gpt-5.6", "gpt", "gpt"],
         ["google/sol6.1", "gpt", "gpt"],
         ["anthropic/gpt6.1sol", "gpt", "gpt"],
         ["gateway/sol6.1-codex", "codex", "gpt"],
-        ["gateway/opus4.7", "default", ""],
-        ["gateway/opus5.5-2m", "claude-opus-5", ""],
-        ["gateway/opus5.5foo-gpt6.1sol", "default", ""],
-        ["gateway/sonnet5.5", "default", ""],
-        ["gateway/haiku5", "default", ""],
+        ["gateway/opus4.7", "default", "claude"],
+        ["gateway/opus5.5-2m", "default", "claude"],
+        ["gateway/opus5.5foo-gpt6.1sol", "default", "claude"],
+        ["gateway/sonnet5.5", "default", "claude"],
+        ["gateway/haiku5", "default", "claude"],
         ["6.1sol/gemini-4-pro", "gemini", "gemini-4"],
         ["gateway/6.1sol/gemini-4-pro", "gpt", "gpt"],
       ]) {
@@ -68,7 +75,9 @@ test("planning role composition orders and deduplicates synthetic model layers",
           workflow,
           agents: {
             orchestrator: { model },
+            reviewer: { model },
             planner: { model, variants: { high: "high" as const } },
+            clarifier: { model },
             "plan-critic": { model, variants: { low: "low" as const } },
           },
           categories: { deep: { model } },
@@ -76,7 +85,7 @@ test("planning role composition orders and deduplicates synthetic model layers",
         const target: { agent: Record<string, unknown> } = { agent: {} }
         await createConfigHandler({ getConfig: () => configured, skillsRoot: join(root, "skills") })(target, undefined)
         assert.equal((target.agent.orchestrator as Record<string, unknown>).model, model)
-        const modelBase = selectedVariant === "claude-opus-5" ? "default" : selectedVariant
+        const modelBase = selectedVariant
         const category = target.agent.deep as Record<string, unknown>
         assert.equal(category.model, model)
         const categoryPrompt = String(category.prompt)
@@ -99,16 +108,12 @@ test("planning role composition orders and deduplicates synthetic model layers",
           assert.equal(categoryPrompt.includes(marker("deepwork", layer)), false, `${workflow}/${model}/category/${layer}: not selected`)
         }
 
-        for (const name of ["orchestrator", "planner", "planner-high", "plan-critic", "plan-critic-low"]) {
+        for (const name of ["orchestrator", "reviewer", "planner", "planner-high", "clarifier", "plan-critic", "plan-critic-low"]) {
           const role = name === "planner-high" ? "planner" : name === "plan-critic-low" ? "plan-critic" : name
           const entry = target.agent[name] as Record<string, unknown>
           const assembled = String(entry.prompt)
           const expectedLayers = [...new Set([
-            ...(role === "planner"
-              ? ["planner", modelBase]
-              : selectedVariant === "claude-opus-5" && role === "orchestrator"
-                ? ["default", "claude-opus-5"]
-                : [modelBase]),
+            ...(role === "planner" ? ["planner", modelBase] : [modelBase]),
             ...(workflow === "codex" ? ["codex"] : []),
             ...(calibration ? [calibration] : []),
           ])]

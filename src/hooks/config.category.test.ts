@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import { createConfigHandler } from "./config.ts"
 import { defaultConfig } from "../config/schema.ts"
 import { BUILTIN_CATEGORIES } from "../data/categories.ts"
-import { getCategoryPrompt, loadAllPrompts, pickModelBaseCalibrationVariant, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
+import { getCategoryPrompt, getDeepworkPrompt, loadAllPrompts, pickModelBaseCalibrationVariant, pickModelCalibrationVariants } from "../intent/prompt-loader.ts"
 import { join } from "node:path"
 import { createEffectiveRouteRegistry } from "../routing/route-registry.ts"
 
@@ -31,7 +31,11 @@ const LOCAL_COORDINATOR_TASK_RULES = {
   documenting: "allow",
 } as const
 
-const CLAUDE_OPUS_5_MARKER = "<scope-economy-calibration>"
+function claudeCalibration(): string {
+  const source = getDeepworkPrompt("claude").trim()
+  assert.ok(source, "loaded Claude calibration must not be empty")
+  return source
+}
 const KIMI_MARKER = "<reasoning-economy-calibration>"
 const SWE_2_MARKER = "<decisive-execution-calibration>"
 
@@ -225,7 +229,8 @@ test("all categories including opted-in cross-cutting use the same GPT layer and
   const gpt = "<outcome-execution-calibration>"
   for (const model of [
     "openai/gpt-5.5", "openai/gpt-5.6-sol", "openai/gpt-6-sol", "openai/gpt-6-astra", "apai/gpt-6-luna",
-    "zhipu/glm-5.2", "google/gemini-3.1-pro", "anthropic/claude-opus-5", "kimi-for-coding/kimi-for-coding", "devin/swe-2-high", "unknown/model",
+    "zhipu/glm-5.2", "google/gemini-3.1-pro", "anthropic/claude-opus-5", "xai/grok-4", "deepseek/deepseek-v4-pro",
+    "kimi-for-coding/kimi-for-coding", "devin/swe-2-high", "unknown/model",
   ]) {
     const configured = {
       ...defaultConfig(),
@@ -240,32 +245,30 @@ test("all categories including opted-in cross-cutting use the same GPT layer and
       const prompt = String(entry.prompt)
       assert.equal(entry.model, model, `${model}/${name}`)
       assert.ok(prompt.indexOf(getCategoryPrompt(name).trim()) < prompt.indexOf("<workflow-model-calibration>"), `${model}/${name}: role before calibration`)
-      assert.equal(countText(prompt, gpt), model.includes("gpt-") ? 1 : 0, `${model}/${name}`)
+      const modelID = model.slice(model.indexOf("/") + 1)
+      assert.equal(countText(prompt, gpt), pickModelCalibrationVariants(modelID).includes("gpt") ? 1 : 0, `${model}/${name}`)
     }
   }
 })
 
-test("Opus 5 category selections never attach the orchestrator calibration", async () => {
+test("Claude category selections attach one common calibration after the category role", async () => {
   loadAllPrompts(PROMPTS_ROOT, "v1")
-  const configured = {
-    ...defaultConfig(),
-    categories: Object.fromEntries(
-      BUILTIN_CATEGORIES.map(({ name }) => [name, { model: "anthropic/claude-opus-5" }]),
-    ),
-  }
-  const target: {
-    agent: Record<string, unknown>
-    provider: Record<string, unknown>
-  } = {
-    agent: {},
-    provider: { anthropic: { models: { "claude-opus-5": {} } } },
-  }
-  await createConfigHandler({ getConfig: () => configured })(target, undefined)
+  for (const model of [
+    "anthropic/claude", "anthropic/claude-opus-5", "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-haiku-4-5", "anthropic/claude-fable-5-2", "gateway/mythos-6",
+  ]) {
+    const configured = {
+      ...defaultConfig(),
+      categories: Object.fromEntries(BUILTIN_CATEGORIES.map(({ name }) => [name, { model }])),
+    }
+    const target: { agent: Record<string, unknown> } = { agent: {} }
+    await createConfigHandler({ getConfig: () => configured })(target, undefined)
 
-  for (const category of BUILTIN_CATEGORIES) {
-    const prompt = String((target.agent[category.name] as Record<string, unknown>).prompt)
-    assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
-    assert.ok(prompt.includes(getCategoryPrompt(category.name).trim()), category.name)
+    for (const category of BUILTIN_CATEGORIES) {
+      const prompt = String((target.agent[category.name] as Record<string, unknown>).prompt)
+      assert.equal(countText(prompt, claudeCalibration()), 1, `${model}/${category.name}`)
+      assert.ok(prompt.indexOf(getCategoryPrompt(category.name).trim()) < prompt.indexOf(claudeCalibration()), `${model}/${category.name}`)
+    }
   }
 })
 
@@ -333,7 +336,7 @@ test("Codex config gives every builtin category one final-model calibration", as
       assert.equal(countText(prompt, "<deepwork-mode>"), 1, category.name)
       assert.equal(countText(prompt, baseMarker), 1, category.name)
       assert.equal(countText(prompt, "# Codex Tool Compatibility"), 1, category.name)
-      assert.equal(countText(prompt, CLAUDE_OPUS_5_MARKER), 0, category.name)
+      assert.equal(countText(prompt, claudeCalibration()), pickModelCalibrationVariants(modelID).includes("claude") ? 1 : 0, category.name)
       for (const [variant, marker] of Object.entries(additiveMarkers)) {
         const expected = pickModelCalibrationVariants(modelID).includes(variant as "gpt" | "kimi" | "gemini-4" | "swe-2") ? 1 : 0
         assert.equal(countText(prompt, marker), expected, `${category.name}/${variant}`)

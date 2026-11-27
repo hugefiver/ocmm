@@ -2,7 +2,7 @@
  * Loads markdown prompts from disk at plugin startup.
  *
  * Layout under <pluginRoot>/prompts/<workflow>/:
- *     deepwork/{default,gpt,claude-opus-5,claude-fable-5-2,gemini,gemini-4,glm,codex,planner,kimi,kimi-k3-1,swe-2}.md
+ *     deepwork/{default,gpt,claude,grok,deepseek,gemini,gemini-4,glm,codex,planner,kimi,kimi-k3-1,swe-2}.md
  *     agents/{orchestrator,reviewer,planner,clarifier,plan-critic}.md
  *     category/{frontend,creative,hard-reasoning,research,quick,coding,normal-task,complex,deep,documenting,cross-cutting}.md
  *
@@ -26,8 +26,8 @@ const DEFAULT_PROMPTS_ROOT = join(HERE, "..", "..", "prompts")
 
 export type Workflow = "v1" | "codex"
 
-type DeepworkVariant = "default" | "claude-opus-5" | "gemini" | "glm" | "codex" | "planner" | ModelCalibrationVariant
-export type ModelCalibrationVariant = "gpt" | "kimi" | "kimi-k3-1" | "gemini-4" | "swe-2" | "claude-fable-5-2"
+type DeepworkVariant = "default" | "gemini" | "glm" | "codex" | "planner" | ModelCalibrationVariant
+export type ModelCalibrationVariant = "gpt" | "claude" | "grok" | "deepseek" | "kimi" | "kimi-k3-1" | "gemini-4" | "swe-2"
 type AgentPromptName = "orchestrator" | "reviewer" | "planner" | "clarifier" | "plan-critic"
 type CategoryName =
   | "frontend"
@@ -42,7 +42,7 @@ type CategoryName =
   | "documenting"
   | "cross-cutting"
 
-const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude-opus-5", "gemini", "glm", "codex", "planner", "kimi", "kimi-k3-1", "gemini-4", "swe-2", "claude-fable-5-2"]
+const DEEPWORK_VARIANTS: DeepworkVariant[] = ["default", "gpt", "claude", "grok", "deepseek", "gemini", "gemini-4", "glm", "codex", "planner", "kimi", "kimi-k3-1", "swe-2"]
 const AGENT_PROMPT_NAMES: AgentPromptName[] = ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"]
 const CATEGORY_NAMES: CategoryName[] = [
   "frontend",
@@ -127,10 +127,6 @@ export function pickDeepworkVariantForAgent(opts: {
   preferenceModel: string
 }): DeepworkVariant {
   if (isPlannerAgent(opts.agentName)) return "planner"
-  if (opts.agentName === "orchestrator") {
-    const model = recognizeModelName(opts.preferenceModel, true)
-    if (model?.opus && model.version !== null && model.version[0] >= 5) return "claude-opus-5"
-  }
   return pickModelBaseCalibrationVariant(opts.preferenceModel) ?? "default"
 }
 
@@ -150,7 +146,9 @@ export function pickModelCalibrationVariants(
   modelID: string,
 ): ModelCalibrationVariant[] {
   const model = recognizeModelName(modelID, true)
-  if (model?.fable52) return ["claude-fable-5-2"]
+  if (model?.kind === "claude") return ["claude"]
+  if (model?.kind === "grok") return ["grok"]
+  if (model?.kind === "deepseek") return ["deepseek"]
   if (model?.kind === "kimi") return [isKimiK31OrLaterPromptModel(modelID) ? "kimi-k3-1" : "kimi"]
   if (model?.kind === "gpt" || model?.codex) return ["gpt"]
   if (isGemini4PromptModel(modelID)) return ["gemini-4"]
@@ -175,7 +173,7 @@ export function getCategoryModelCalibration(
   const calibrations = categoryModelCalibrations.get(name)
   const family = classifyModelFamily({ modelID })
   const model = recognizeModelName(modelID, true)
-  const variant = model?.series === "mythos" ? "claude" : model?.series === "fable" ? "claude-opus-47-plus"
+  const variant = model?.kind === "claude" ? "claude" : model?.kind === "grok" ? "unknown"
     : model?.kind === "swe-2" ? model.swe2OrLater ? "swe-2" : "unknown"
     : isKimiK31OrLaterPromptModel(modelID) ? "kimi-k3-1"
     : isKimiPromptModel(modelID) ? family === "kimi-k27" ? family : "kimi"

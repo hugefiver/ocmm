@@ -288,6 +288,26 @@ test("deepseek family detection", () => {
   assert.equal(isDeepSeekModel("glm-5.2"), false)
 })
 
+test("Grok identifiers are independent only during prompt recognition", () => {
+  for (const modelID of [
+    "grok-4", "grok4", "GROK_4_1", "xai/grok-4-fast", "openrouter/x-ai/grok-4",
+    "github-copilot/grok-4", "prefix-grok-4", "gateway/grok/4", "x-ai.grok-4",
+    "grok-4-gpt-6",
+  ]) {
+    assert.equal(recognizeModelName(modelID, true)?.kind, "grok", modelID)
+  }
+  for (const modelID of ["grok-4", "grok4", "xai/grok-4-fast"]) {
+    assert.equal(recognizeModelName(modelID), null, modelID)
+    assert.equal(classifyModelFamily({ providerID: "xai", modelID }), "unknown", modelID)
+  }
+  for (const modelID of ["xgrok", "xgrok-4", "grokish", "grokish-4"]) {
+    assert.equal(recognizeModelName(modelID, true), null, modelID)
+    assert.equal(classifyModelFamily({ modelID }), "unknown", modelID)
+  }
+  assert.equal(recognizeModelName("gpt-6-grok-4", true)?.kind, "gpt")
+  assert.equal(classifyModelFamily({ modelID: "grok-4-gpt-6" }), "gpt")
+})
+
 test("classifyModelFamily projects the recognized identifier", () => {
   assert.equal(classifyModelFamily({ modelID: "codex-mini-latest" }), "codex")
   assert.equal(classifyModelFamily({ modelID: "gpt-5.5" }), "gpt")

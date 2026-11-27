@@ -164,3 +164,5 @@ lineage note, and it grants no license to copy any target site's trademarks, bra
 or proprietary copy.
 
 `frontend/references/design/interaction-skill.md` is a project-original local adaptation and synthesis of general interaction-state and motion-mechanics practices. It contains no vendored component catalog or third-party implementation, requires no network source at runtime, and grants no license to copy vendor components or branded assets.
+
+`frontend/references/perfection/state-and-flow.md` and the state-and-flow behavior guidance in `frontend/references/visual-qa.md` are local host-neutral adaptations informed by OMO commit `59b4ac1f67`, specifically its frontend `state-and-flow.md` and visual-QA `behaviour-evidence.md` references. The reference source carries Sustainable Use License 1.0. These maintained files are not verbatim upstream copies, fixed-pin materialization inputs, or new inventory entries.

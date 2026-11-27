@@ -36,7 +36,7 @@ export function extractModelName(fullId: string): string {
   return stripDottedVendorModelPrefix(name)
 }
 
-type ModelKind = "gpt" | "codex" | "claude" | "gemini" | "kimi" | "minimax" | "glm" | "deepseek" | "swe-2" | "o-series"
+type ModelKind = "gpt" | "codex" | "claude" | "grok" | "gemini" | "kimi" | "minimax" | "glm" | "deepseek" | "swe-2" | "o-series"
 type Version = [number, number, number]
 
 function isKimiK31OrLaterVersion(version: Version | null): boolean {
@@ -89,7 +89,7 @@ export function recognizeModelName(modelID: string, promptAliases = false): {
       continue
     }
     const prefix = word.match(/^(chatgpt|gpt|opus|sonnet|haiku|sol|terra|astra|luna)(?=\d)/)?.[0]
-      ?? (promptAliases ? word.match(/^(gemini|fable|mythos|swe)(?=\d)/)?.[0] : undefined)
+      ?? (promptAliases ? word.match(/^(grok|gemini|fable|mythos|swe)(?=\d)/)?.[0] : undefined)
     if (prefix) {
       tokens.push(prefix)
       positions.push(position)
@@ -141,9 +141,10 @@ export function recognizeModelName(modelID: string, promptAliases = false): {
   }
   function kindAt(index: number): ModelKind | undefined {
     const token = tokens[index]
-    const familyToken = token?.match(/^(chatgpt|gpt|codex|claude|gemini|kimi|minimax|glm|deepseek)(?=\d)/)?.[1] ?? token
+    const familyToken = token?.match(/^(chatgpt|gpt|codex|claude|grok|gemini|kimi|minimax|glm|deepseek)(?=\d)/)?.[1] ?? token
     switch (familyToken) {
       case "gpt": case "chatgpt": return "gpt"
+      case "grok": return promptAliases ? "grok" : undefined
       case "codex": case "claude": case "gemini": case "kimi":
       case "minimax": case "glm": case "deepseek": return familyToken
       case "fable": return "claude"
@@ -382,7 +383,7 @@ export function classifyModelFamily(opts: {
     if (model.codex) return "codex"
     if (model.kind === "claude") return isClaudeOpus47OrLaterModel(modelID) ? "claude-opus-47-plus" : "claude"
     if (model.kind === "kimi") return model.kimi27 ? "kimi-k27" : model.kimiAlias === 8 ? "unknown" : "kimi"
-    if (model.kind === "swe-2" || model.kind === "o-series") return "unknown"
+    if (model.kind === "swe-2" || model.kind === "o-series" || model.kind === "grok") return "unknown"
     return model.kind
   }
   if (isCodexModel(modelID, providerID)) return "codex"

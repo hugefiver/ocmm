@@ -174,7 +174,7 @@ function writeFixtureFile(root: string, file: string, contents: string | Buffer)
 function makePromptFixture(): string {
   const root = mkdtempSync(join(tmpdir(), "ocmm-codex-prompt-fixture-"))
   const inventory = {
-    deepwork: ["default", "gpt", "glm", "gemini", "codex", "planner", "claude-opus-5", "kimi", "kimi-k3-1", "gemini-4", "swe-2"],
+    deepwork: ["default", "gpt", "claude", "grok", "deepseek", "gemini", "gemini-4", "glm", "codex", "planner", "kimi", "kimi-k3-1", "swe-2"],
     agents: ["orchestrator", "reviewer", "planner", "clarifier", "plan-critic"],
     category: ["frontend", "creative", "hard-reasoning", "research", "quick", "coding", "normal-task", "complex", "deep", "documenting", "cross-cutting"],
   }
@@ -477,7 +477,7 @@ test("Codex agents are generated from Deepwork prompts and Codex-compatible fall
 })
 
 test("generated TOML keeps the final model while developer instructions stay model-identity neutral", async (t) => {
-  const forbiddenIdentity = /gpt|claude|opus|gemini|kimi|glm|swe[-_ ]?2|fable|argon|k2[-_.]|k3[-_.]|model[-_ ]family/i
+  const forbiddenIdentity = /gpt|claude|grok|deepseek|opus|gemini|kimi|glm|swe[-_ ]?2|fable|argon|k2[-_.]|k3[-_.]|model[-_ ]family/i
   const defaultAgents = await buildCodexAgents({
     config: { ...defaultConfig(), workflow: "codex" },
     cwd: process.cwd(),
@@ -493,10 +493,12 @@ test("generated TOML keeps the final model while developer instructions stay mod
     ["openai/gpt-6.2-sol", ["outcome-execution-calibration"], "gpt"],
     ["github-copilot/gemini-4-argon", ["precision-execution-calibration", "evidence-reliability-calibration"], "gemini-4"],
     ["github-copilot/gemini-5.1-pro", ["precision-execution-calibration", "evidence-reliability-calibration"], "gemini-4"],
-    ["github-copilot/claude-opus-6.1", ["scope-economy-calibration"], "claude-opus-5"],
-    ["github-copilot/claude-fable-5.10", ["task-completion-calibration"], "claude-fable-5-2"],
-    ["github-copilot/mythos-6", ["task-completion-calibration"], "claude-fable-5-2"],
-    ["github-copilot/claude-fable-5.2", ["task-completion-calibration"], "claude-fable-5-2"],
+    ["github-copilot/claude", ["execution-and-delivery-calibration"], "claude"],
+    ["github-copilot/claude-opus-6.1", ["execution-and-delivery-calibration"], "claude"],
+    ["github-copilot/claude-sonnet-4-6", ["execution-and-delivery-calibration"], "claude"],
+    ["github-copilot/claude-haiku-4-5", ["execution-and-delivery-calibration"], "claude"],
+    ["github-copilot/claude-fable-5.10", ["execution-and-delivery-calibration"], "claude"],
+    ["github-copilot/mythos-6", ["execution-and-delivery-calibration"], "claude"],
     ["github-copilot/kimi-k3.1", ["scope-and-delivery-calibration"], "kimi-k3-1"],
     ["github-copilot/kimi-k3", ["reasoning-economy-calibration"], "kimi"],
   ] as const) {
@@ -531,9 +533,9 @@ test("generated TOML keeps the final model while developer instructions stay mod
       const instructions = String(parsed.developer_instructions)
       assert.equal(parsed.model, model.slice(model.indexOf("/") + 1), sourceName)
       assert.doesNotMatch(instructions, forbiddenIdentity, sourceName)
-      for (const tag of ["precision-execution-calibration", "evidence-reliability-calibration", "scope-and-delivery-calibration", "reasoning-economy-calibration", "outcome-execution-calibration", "task-completion-calibration", "scope-economy-calibration"]) {
+      for (const tag of ["precision-execution-calibration", "evidence-reliability-calibration", "scope-and-delivery-calibration", "reasoning-economy-calibration", "outcome-execution-calibration", "execution-and-delivery-calibration"]) {
         const selected = (expectedTags as readonly string[]).includes(tag)
-        const expected = selected && (tag !== "scope-economy-calibration" || sourceName === "orchestrator") ? 1 : 0
+        const expected = selected ? 1 : 0
         assert.equal(countOccurrences(instructions, `<${tag}>`), expected, `${model}/${sourceName}/${tag}`)
       }
       if (variant === "kimi-k3-1") {
@@ -675,7 +677,15 @@ test("Codex non-default final models select only their matching calibration", as
   const promptsRoot = makePromptFixture()
   t.after(() => rmSync(promptsRoot, { recursive: true, force: true }))
   for (const [model, expectedLayers] of [
-    ["github-copilot/claude-sonnet-4-6", ["default"]],
+    ["github-copilot/claude", ["default", "claude"]],
+    ["github-copilot/claude-opus-5", ["default", "claude"]],
+    ["github-copilot/claude-sonnet-4-6", ["default", "claude"]],
+    ["github-copilot/claude-haiku-4-5", ["default", "claude"]],
+    ["github-copilot/claude-fable-5-2", ["default", "claude"]],
+    ["github-copilot/mythos-6", ["default", "claude"]],
+    ["github-copilot/grok-4", ["default", "grok"]],
+    ["github-copilot/deepseek-v4-pro", ["default", "deepseek"]],
+    ["github-copilot/deepseek-flash", ["default", "deepseek"]],
     ["github-copilot/gemini-3.1-pro", ["gemini"]],
     ["github-copilot/gemini-4-argon", ["gemini", "gemini-4"]],
     ["github-copilot/glm-5.2", ["glm"]],
@@ -731,7 +741,7 @@ test("Codex non-default final models select only their matching calibration", as
       assert.equal(agent.model, model.slice(model.indexOf("/") + 1), `${model}/${name}: final model`)
       const prompt = extractOriginalDeepworkPrompt(agent.developerInstructions)
       assert.equal(countOccurrences(prompt, adapter), 1, `${model}/${name}: adapter`)
-      for (const layer of ["default", "gpt", "claude-opus-5", "gemini", "glm", "kimi", "kimi-k3-1", "gemini-4", "swe-2"] as const) {
+      for (const layer of ["default", "gpt", "claude", "grok", "deepseek", "gemini", "gemini-4", "glm", "kimi", "kimi-k3-1", "swe-2"] as const) {
         const expected = (expectedLayers as readonly string[]).includes(layer) ? 1 : 0
         assert.equal(countOccurrences(prompt, getDeepworkPrompt(layer).trim()), expected, `${model}/${name}: exclusive ${layer}`)
       }
@@ -739,6 +749,48 @@ test("Codex non-default final models select only their matching calibration", as
         assert.equal(countOccurrences(prompt, getDeepworkPrompt("planner").trim()), 1)
       }
     }
+  }
+})
+
+test("Codex registration keeps compound model fields for role, category, and explore prompt selection", async (t) => {
+  const promptsRoot = makePromptFixture()
+  const root = mkdtempSync(join(tmpdir(), "codex-compound-model-"))
+  t.after(() => {
+    rmSync(promptsRoot, { recursive: true, force: true })
+    rmSync(root, { recursive: true, force: true })
+  })
+  const model = "github-copilot/grok-4/gpt-6"
+  const result = await generateCodexPlugin({
+    projectRoot: process.cwd(),
+    pluginRoot: join(root, "plugins", "deepwork"),
+    marketplacePath: join(root, ".agents", "plugins", "marketplace.json"),
+    projectAgentsRoot: false,
+    config: {
+      ...defaultConfig(),
+      workflow: "codex",
+      promptsRoot,
+      agents: {
+        orchestrator: { model, variant: "high" },
+        "code-search": { model, variant: "low" },
+      },
+      categories: { coding: { model, variant: "medium" } },
+    },
+    packageVersion: "9.9.9",
+  })
+  const grok = getDeepworkPrompt("grok").trim()
+  const gpt = getDeepworkPrompt("gpt").trim()
+  for (const [sourceName, effort] of [
+    ["orchestrator", "high"], ["coding", "high"], ["code-search", "high"], ["explore", "high"],
+  ] as const) {
+    const parsed = parseGeneratedAgentToml(
+      readFileSync(join(result.pluginRoot, "agents", `dw-${sourceName}.toml`), "utf8"),
+      sourceName,
+    )
+    assert.equal(parsed.model, "grok-4/gpt-6", sourceName)
+    assert.equal(parsed.model_reasoning_effort, effort, sourceName)
+    const instructions = String(parsed.developer_instructions)
+    assert.equal(countOccurrences(instructions, grok), 1, `${sourceName}: Grok once`)
+    assert.equal(countOccurrences(instructions, gpt), 0, `${sourceName}: no trailing GPT`)
   }
 })
 
@@ -1015,7 +1067,7 @@ test("Codex generation calibrates from the final model instead of the source fal
   const bySource = new Map(agents.map((agent) => [agent.sourceName, agent]))
   const orchestrator = bySource.get("orchestrator")
   const planner = bySource.get("planner")
-  const opusPrompt = getDeepworkPrompt("claude-opus-5").trim()
+  const claudePrompt = getDeepworkPrompt("claude").trim()
   const gptPrompt = getDeepworkPrompt("gpt").trim()
 
   assert.ok(orchestrator)
@@ -1027,7 +1079,7 @@ test("Codex generation calibrates from the final model instead of the source fal
 
   for (const agent of agents) {
     const instructions = normalizeLf(agent.developerInstructions)
-    assert.equal(countOccurrences(instructions, opusPrompt), 0, `${agent.sourceName}: source-chain calibration`)
+    assert.equal(countOccurrences(instructions, claudePrompt), 0, `${agent.sourceName}: source-chain calibration`)
     assert.equal(countOccurrences(instructions, gptPrompt), 1, `${agent.sourceName}: final-model calibration`)
   }
 
@@ -1045,8 +1097,8 @@ test("Codex generation calibrates from the final model instead of the source fal
   const explicitBySource = new Map(explicitlyConfigured.map((agent) => [agent.sourceName, agent]))
   assert.equal(explicitBySource.get("orchestrator")?.model, "claude-opus-5")
   assert.equal(explicitBySource.get("planner")?.model, "claude-opus-5")
-  assert.equal(countOccurrences(explicitBySource.get("orchestrator")!.developerInstructions, opusPrompt), 1)
-  assert.equal(countOccurrences(explicitBySource.get("planner")!.developerInstructions, opusPrompt), 0)
+  assert.equal(countOccurrences(explicitBySource.get("orchestrator")!.developerInstructions, claudePrompt), 1)
+  assert.equal(countOccurrences(explicitBySource.get("planner")!.developerInstructions, claudePrompt), 1)
 
   const root = mkdtempSync(join(tmpdir(), "ocmm-codex-opus5-carriage-"))
   const previousCodexHome = process.env.CODEX_HOME
@@ -1068,11 +1120,11 @@ test("Codex generation calibrates from the final model instead of the source fal
     const temporaryOrchestrator = readFileSync(join(generatedAgentsRoot, "dw-orchestrator.toml"), "utf8")
     const temporaryInstructions = parseGeneratedDeveloperInstructions(temporaryOrchestrator, "temporary dw-orchestrator")
 
-    assert.equal(countOccurrences(temporaryInstructions, opusPrompt), 0)
+    assert.equal(countOccurrences(temporaryInstructions, claudePrompt), 0)
     assert.equal(countOccurrences(temporaryInstructions, gptPrompt), 1)
     for (const file of readdirSync(generatedAgentsRoot).filter((name) => name.endsWith(".toml"))) {
       const instructions = parseGeneratedDeveloperInstructions(readFileSync(join(generatedAgentsRoot, file), "utf8"), file)
-      assert.equal(countOccurrences(instructions, opusPrompt), 0, file)
+      assert.equal(countOccurrences(instructions, claudePrompt), 0, file)
       assert.equal(countOccurrences(instructions, gptPrompt), 1, `${file}: final-model calibration`)
     }
 
@@ -1805,7 +1857,7 @@ test("Codex generated debugging, frontend, ast-grep, and publish skill trees del
     for (const [name, requiredFile] of [
       ["ast-grep", "tests/smoke.ps1"],
       ["debugging", "references/scripts/dap.mjs"],
-      ["frontend", "references/design/interaction-skill.md"],
+      ["frontend", "references/perfection/state-and-flow.md"],
       ["publish", "SKILL.md"],
     ] as const) {
       assertGeneratedSharedSkillTree(
